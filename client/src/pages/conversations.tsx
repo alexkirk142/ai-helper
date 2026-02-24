@@ -148,6 +148,21 @@ export default function Conversations() {
     },
   });
 
+  const muteMutation = useMutation({
+    mutationFn: async ({ conversationId, muted }: { conversationId: string; muted: boolean }) => {
+      const res = await apiRequest("POST", `/api/conversations/${conversationId}/mute`, { muted });
+      return res.json();
+    },
+    onSuccess: (_data, { muted }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations", selectedId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+      toast({ title: muted ? "ИИ отключён для этого чата" : "ИИ снова активен для этого чата" });
+    },
+    onError: () => {
+      toast({ title: "Не удалось изменить настройку мута", variant: "destructive" });
+    },
+  });
+
   const sendManualMutation = useMutation({
     mutationFn: async ({ content, file, role = "owner" }: { content: string; file?: File; role?: string }) => {
       if (file) {
@@ -769,6 +784,7 @@ export default function Conversations() {
               onReject={(id) => rejectMutation.mutate(id)}
               onEscalate={(id) => escalateMutation.mutate(id)}
               onSendManual={(content, file) => sendManualMutation.mutate({ content, file })}
+              onMuteToggle={(convId, muted) => muteMutation.mutate({ conversationId: convId, muted })}
               onPhoneClick={handlePhoneClick}
               isLoading={detailLoading}
             />

@@ -26,6 +26,8 @@ import {
   Download,
   BarChart2,
   Paperclip,
+  BellOff,
+  Bell,
 } from "lucide-react";
 import { CsatDialog } from "@/components/csat-dialog";
 import { cn } from "@/lib/utils";
@@ -41,6 +43,7 @@ interface ChatInterfaceProps {
   onReject: (suggestionId: string) => void;
   onEscalate: (suggestionId: string) => void;
   onSendManual: (content: string, file?: File) => void;
+  onMuteToggle?: (conversationId: string, muted: boolean) => void;
   onPhoneClick?: (phoneNumber: string) => void;
   isLoading?: boolean;
 }
@@ -349,6 +352,7 @@ export function ChatInterface({
   onReject,
   onEscalate,
   onSendManual,
+  onMuteToggle,
   onPhoneClick,
   isLoading,
 }: ChatInterfaceProps) {
@@ -498,6 +502,26 @@ export function ChatInterface({
               Оценить
             </Button>
           )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={conversation.isMuted ? "secondary" : "ghost"}
+                size="icon"
+                className={cn("h-8 w-8", conversation.isMuted && "text-muted-foreground")}
+                onClick={() => onMuteToggle?.(conversation.id, !conversation.isMuted)}
+                data-testid="button-mute-conversation"
+              >
+                {conversation.isMuted ? (
+                  <BellOff className="h-4 w-4" />
+                ) : (
+                  <Bell className="h-4 w-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {conversation.isMuted ? "Включить ИИ-ответы" : "Замутить (ИИ не будет отвечать)"}
+            </TooltipContent>
+          </Tooltip>
           <Badge
             variant="secondary"
             className={cn(

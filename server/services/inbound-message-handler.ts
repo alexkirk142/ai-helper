@@ -385,6 +385,13 @@ export async function processIncomingMessageFull(
     const result = await handleIncomingMessage(tenantId, parsed);
     const text = (parsed.text || "").trim();
 
+    // Skip AI suggestion entirely if conversation is muted
+    const conversation = await storage.getConversation(result.conversationId);
+    if (conversation?.isMuted) {
+      console.log(`[InboundHandler] Conversation ${result.conversationId} is muted — skipping AI suggestion`);
+      return;
+    }
+
     const autoPartsEnabled = await featureFlagService.isEnabled("AUTO_PARTS_ENABLED", tenantId);
 
     if (!autoPartsEnabled) {

@@ -217,6 +217,7 @@ export const conversations = pgTable("conversations", {
   channelId: varchar("channel_id").references(() => channels.id),
   status: text("status").notNull().default("active"), // active, waiting, escalated, resolved
   mode: text("mode").notNull().default("learning"), // learning, semi-auto, auto
+  isMuted: boolean("is_muted").default(false).notNull(),
   lastMessageAt: timestamp("last_message_at").default(sql`CURRENT_TIMESTAMP`),
   unreadCount: integer("unread_count").default(0),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
