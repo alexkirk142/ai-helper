@@ -614,6 +614,8 @@ class TelegramClientManager {
     "SESSION_EXPIRED",
   ];
 
+  // After this many AUTH_KEY_DUPLICATED attempts, treat as permanently duplicate and give up
+  private static readonly MAX_DUPLICATE_ATTEMPTS = 3;
   private static readonly MAX_RECONNECT_ATTEMPTS = 10;
 
   private scheduleReconnect(connectionKey: string, connection: ActiveConnection, errorMessage?: string): void {
@@ -629,6 +631,22 @@ class TelegramClientManager {
           storage.updateTelegramAccount(connection.accountId, { isActive: false }).catch(() => {});
         }
         return;
+      }
+
+      // AUTH_KEY_DUPLICATED: retry a few times, then give up (session is truly duplicated elsewhere)
+      if (errorMessage.includes("AUTH_KEY_DUPLICATED")) {
+        connection.reconnectAttempts = (connection.reconnectAttempts ?? 0) + 1;
+        if (connection.reconnectAttempts > TelegramClientManager.MAX_DUPLICATE_ATTEMPTS) {
+          console.error(
+            `[TelegramClientManager] AUTH_KEY_DUPLICATED persists after ` +
+            `${TelegramClientManager.MAX_DUPLICATE_ATTEMPTS} retries for ${connectionKey}. ` +
+            `Session is active elsewhere — account disabled, please re-authorize in Settings.`
+          );
+          if (!connection.accountId.startsWith("legacy_")) {
+            storage.updateTelegramAccount(connection.accountId, { isActive: false }).catch(() => {});
+          }
+          return;
+        }
       }
     }
 

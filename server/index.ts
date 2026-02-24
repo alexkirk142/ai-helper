@@ -31,6 +31,35 @@ let vehicleLookupWorker: Worker | null = null;
 let priceLookupWorker: Worker | null = null;
 let messageSendWorker: Worker | null = null;
 
+// Prevent gramjs internal timeouts and other unhandled rejections from crashing the process
+process.on("unhandledRejection", (reason: unknown) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  // Suppress known benign gramjs errors
+  if (
+    msg.includes("TIMEOUT") ||
+    msg.includes("AUTH_KEY_DUPLICATED") ||
+    msg.includes("Connection was closed")
+  ) {
+    console.warn("[Process] Suppressed unhandled rejection:", msg);
+    return;
+  }
+  console.error("[Process] Unhandled rejection:", reason);
+});
+
+process.on("uncaughtException", (err: Error) => {
+  const msg = err?.message ?? String(err);
+  if (
+    msg.includes("TIMEOUT") ||
+    msg.includes("AUTH_KEY_DUPLICATED") ||
+    msg.includes("Connection was closed")
+  ) {
+    console.warn("[Process] Suppressed uncaught exception:", msg);
+    return;
+  }
+  console.error("[Process] Uncaught exception:", err);
+  process.exit(1);
+});
+
 // Validate configuration on startup
 const config = validateConfig();
 
