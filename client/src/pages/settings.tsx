@@ -1820,7 +1820,7 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
               </Badge>
             )}
           </CardTitle>
-          <CardDescription>Личный аккаунт MAX через GREEN-API</CardDescription>
+          <CardDescription>Личный аккаунт MAX</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
           {allAccounts.length === 0 && (
