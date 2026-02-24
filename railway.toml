@@ -3,6 +3,6 @@ builder = "NIXPACKS"
 nixpacksConfigPath = "nixpacks.toml"
 
 [deploy]
-startCommand = "npm run db:migrate && npm run start"
+startCommand = "npx drizzle-kit push --force && npm run start"
 healthcheckPath = "/health"
 healthcheckTimeout = 300

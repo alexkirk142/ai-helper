@@ -13,4 +13,4 @@ cmds = [
 cmds = ["npm run build"]
 
 [start]
-cmd = "npm run db:migrate && npm run start"
+cmd = "npx drizzle-kit push --force && npm run start"
