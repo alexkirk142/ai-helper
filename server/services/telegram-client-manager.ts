@@ -16,6 +16,7 @@ interface ActiveConnection {
   connected: boolean;
   lastActivity: Date;
   handlersAttached: boolean;
+  reconnectAttempts: number;
 }
 
 class TelegramClientManager {
@@ -156,7 +157,7 @@ class TelegramClientManager {
       } catch (error: any) {
         console.error(`[TelegramClientManager] Heartbeat FAILED: ${key} - ${error.message}`);
         connection.connected = false;
-        this.scheduleReconnect(key, connection);
+        this.scheduleReconnect(key, connection, error.message);
       }
     }
   }
@@ -241,6 +242,7 @@ class TelegramClientManager {
         connected: true,
         lastActivity: new Date(),
         handlersAttached: false,
+        reconnectAttempts: 0,
       };
 
       this.connections.set(connectionKey, connection);
@@ -262,8 +264,9 @@ class TelegramClientManager {
         tenantId, accountId, channelId,
         client: null as any, sessionString,
         connected: false, lastActivity: new Date(), handlersAttached: false,
+        reconnectAttempts: 0,
       };
-      this.scheduleReconnect(`${tenantId}:${accountId}`, conn);
+      this.scheduleReconnect(`${tenantId}:${accountId}`, conn, error.message);
       return false;
     }
   }
@@ -328,13 +331,14 @@ class TelegramClientManager {
         connected: true,
         lastActivity: new Date(),
         handlersAttached: false,
+        reconnectAttempts: 0,
       };
 
       this.connections.set(connectionKey, connection);
       this.ensureHandlers(connection);
 
       try {
-        const dialogs = await client.getDialogs({ limit: 100 });
+        const dialogs = await client.getDialogs({ limit: 5 });
         console.log(`[TelegramClientManager] Preloaded ${dialogs.length} dialogs for entity cache`);
       } catch (dialogError: any) {
         console.log(`[TelegramClientManager] Could not preload dialogs: ${dialogError.message}`);
@@ -348,8 +352,9 @@ class TelegramClientManager {
         tenantId, accountId: legacyAccountId, channelId,
         client: null as any, sessionString,
         connected: false, lastActivity: new Date(), handlersAttached: false,
+        reconnectAttempts: 0,
       };
-      this.scheduleReconnect(connectionKey, conn);
+      this.scheduleReconnect(connectionKey, conn, error.message);
       return false;
     }
   }
@@ -591,11 +596,58 @@ class TelegramClientManager {
     }
   }
 
-  private scheduleReconnect(connectionKey: string, connection: ActiveConnection): void {
+  // Fatal errors that should NOT be retried — the session is permanently invalid
+  private static readonly FATAL_ERRORS = [
+    "AUTH_KEY_DUPLICATED",
+    "AUTH_KEY_INVALID",
+    "SESSION_REVOKED",
+    "USER_DEACTIVATED",
+    "SESSION_EXPIRED",
+  ];
+
+  private static readonly MAX_RECONNECT_ATTEMPTS = 5;
+
+  private scheduleReconnect(connectionKey: string, connection: ActiveConnection, errorMessage?: string): void {
+    // Stop retrying for fatal session errors
+    if (errorMessage) {
+      const isFatal = TelegramClientManager.FATAL_ERRORS.some((e) => errorMessage.includes(e));
+      if (isFatal) {
+        console.error(
+          `[TelegramClientManager] FATAL error for ${connectionKey}: ${errorMessage}. ` +
+          `Reconnect stopped — session must be re-authorized by the user.`
+        );
+        // Mark account as disconnected in DB so user sees the problem in UI
+        if (!connection.accountId.startsWith("legacy_")) {
+          storage.updateTelegramAccount(connection.accountId, { isActive: false }).catch(() => {});
+        }
+        return;
+      }
+    }
+
+    // Stop after max attempts to avoid infinite loops
+    connection.reconnectAttempts = (connection.reconnectAttempts ?? 0) + 1;
+    if (connection.reconnectAttempts > TelegramClientManager.MAX_RECONNECT_ATTEMPTS) {
+      console.error(
+        `[TelegramClientManager] Max reconnect attempts (${TelegramClientManager.MAX_RECONNECT_ATTEMPTS}) ` +
+        `reached for ${connectionKey}. Giving up.`
+      );
+      if (!connection.accountId.startsWith("legacy_")) {
+        storage.updateTelegramAccount(connection.accountId, { isActive: false }).catch(() => {});
+      }
+      return;
+    }
+
     const existingTimer = this.reconnectTimers.get(connectionKey);
     if (existingTimer) {
       clearTimeout(existingTimer);
     }
+
+    // Exponential backoff: 30s, 60s, 120s, 240s, 480s
+    const delay = Math.min(30000 * Math.pow(2, connection.reconnectAttempts - 1), 480000);
+    console.log(
+      `[TelegramClientManager] Scheduling reconnect #${connection.reconnectAttempts} ` +
+      `for ${connectionKey} in ${delay / 1000}s`
+    );
 
     const timer = setTimeout(async () => {
       console.log(`[TelegramClientManager] Attempting reconnect: ${connectionKey}`);
@@ -605,7 +657,7 @@ class TelegramClientManager {
       } else {
         await this.connectAccount(connection.tenantId, connection.accountId, connection.channelId, connection.sessionString);
       }
-    }, 30000);
+    }, delay);
 
     this.reconnectTimers.set(connectionKey, timer);
   }
