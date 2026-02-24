@@ -24,6 +24,15 @@ export class MaxGreenApiAdapter {
     return res.json();
   }
 
+  async getQR(idInstance: string, token: string): Promise<{ type: string; message: string }> {
+    const url = `${BASE_URL(idInstance)}/qr/${token}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`GREEN-API getQR failed: ${res.status} ${res.statusText}`);
+    }
+    return res.json() as Promise<{ type: string; message: string }>;
+  }
+
   async setWebhook(idInstance: string, token: string, webhookUrl: string): Promise<void> {
     const url = `${BASE_URL(idInstance)}/setSettings/${token}`;
     const res = await fetch(url, {

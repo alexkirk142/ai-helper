@@ -2021,40 +2021,38 @@ router.post(
 
       const { maxGreenApiAdapter } = await import("../services/max-green-api-adapter");
 
-      // 3. Verify state
-      let state: string;
+      // 3. Check current state (non-blocking — save regardless)
+      let state = "unknown";
       try {
         state = await maxGreenApiAdapter.getState(idInstance, apiTokenInstance);
       } catch (err: any) {
         return res.status(400).json({ error: `Не удалось проверить инстанс GREEN-API: ${err.message}` });
       }
 
-      if (state !== "authorized") {
-        return res.status(400).json({
-          error: `Инстанс не авторизован на GREEN-API (статус: ${state}). Пожалуйста, войдите на green-api.com.`,
-        });
-      }
-
-      // 4. Get account display name
+      // 4. Get account display name (only if authorized)
       let displayName: string | undefined;
-      try {
-        const info = await maxGreenApiAdapter.getAccountInfo(idInstance, apiTokenInstance);
-        displayName = info.nameAccount || info.wid;
-      } catch {
-        // non-fatal
+      if (state === "authorized") {
+        try {
+          const info = await maxGreenApiAdapter.getAccountInfo(idInstance, apiTokenInstance);
+          displayName = info.nameAccount || info.wid;
+        } catch {
+          // non-fatal
+        }
       }
 
-      // 5. Generate accountId and register webhook with it
+      // 5. Generate accountId and register webhook only if authorized
       const { randomUUID } = await import("crypto");
       const accountId = randomUUID();
-      const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
-      const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
       let webhookRegistered = false;
-      try {
-        await maxGreenApiAdapter.setWebhook(idInstance, apiTokenInstance, webhookUrl);
-        webhookRegistered = true;
-      } catch (err: any) {
-        console.error("[Admin] GREEN-API setWebhook failed:", err.message);
+      if (state === "authorized") {
+        const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+        const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
+        try {
+          await maxGreenApiAdapter.setWebhook(idInstance, apiTokenInstance, webhookUrl);
+          webhookRegistered = true;
+        } catch (err: any) {
+          console.error("[Admin] GREEN-API setWebhook failed:", err.message);
+        }
       }
 
       // 6. Insert new row
@@ -2065,7 +2063,7 @@ router.post(
         apiTokenInstance,
         label: label ?? null,
         displayName: displayName ?? null,
-        status: "authorized",
+        status: state,
         webhookRegistered,
       }).returning();
 
@@ -2081,6 +2079,97 @@ router.post(
     } catch (error) {
       console.error("[Admin] Error saving MAX Personal account:", error);
       res.status(500).json({ error: "Failed to save MAX Personal account" });
+    }
+  }
+);
+
+// GET /users/:userId/max-personal/:accountId/qr — get QR code for authorization
+router.get(
+  "/users/:userId/max-personal/:accountId/qr",
+  requireAuth,
+  requirePlatformAdmin(),
+  async (req, res) => {
+    try {
+      const { userId, accountId } = req.params;
+
+      const userRow = await db.select({ tenantId: users.tenantId }).from(users).where(eq(users.id, userId)).limit(1);
+      if (!userRow[0]?.tenantId) {
+        return res.status(404).json({ error: "User or tenant not found" });
+      }
+      const { tenantId } = userRow[0];
+
+      const account = await db.query.maxPersonalAccounts.findFirst({
+        where: and(eq(maxPersonalAccounts.tenantId, tenantId), eq(maxPersonalAccounts.accountId, accountId)),
+      });
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+
+      const { maxGreenApiAdapter } = await import("../services/max-green-api-adapter");
+      const qrResult = await maxGreenApiAdapter.getQR(account.idInstance, account.apiTokenInstance);
+
+      return res.json(qrResult);
+    } catch (error: any) {
+      console.error("[Admin] Error fetching GREEN-API QR:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch QR code" });
+    }
+  }
+);
+
+// GET /users/:userId/max-personal/:accountId/status — poll authorization status
+router.get(
+  "/users/:userId/max-personal/:accountId/status",
+  requireAuth,
+  requirePlatformAdmin(),
+  async (req, res) => {
+    try {
+      const { userId, accountId } = req.params;
+
+      const userRow = await db.select({ tenantId: users.tenantId }).from(users).where(eq(users.id, userId)).limit(1);
+      if (!userRow[0]?.tenantId) {
+        return res.status(404).json({ error: "User or tenant not found" });
+      }
+      const { tenantId } = userRow[0];
+
+      const account = await db.query.maxPersonalAccounts.findFirst({
+        where: and(eq(maxPersonalAccounts.tenantId, tenantId), eq(maxPersonalAccounts.accountId, accountId)),
+      });
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+
+      const { maxGreenApiAdapter } = await import("../services/max-green-api-adapter");
+      const state = await maxGreenApiAdapter.getState(account.idInstance, account.apiTokenInstance);
+
+      // If now authorized — register webhook and update DB
+      if (state === "authorized" && account.status !== "authorized") {
+        let displayName: string | undefined;
+        try {
+          const info = await maxGreenApiAdapter.getAccountInfo(account.idInstance, account.apiTokenInstance);
+          displayName = info.nameAccount || info.wid;
+        } catch {
+          // non-fatal
+        }
+
+        const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+        const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
+        let webhookRegistered = false;
+        try {
+          await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
+          webhookRegistered = true;
+        } catch (err: any) {
+          console.error("[Admin] GREEN-API setWebhook failed:", err.message);
+        }
+
+        await db.update(maxPersonalAccounts)
+          .set({ status: "authorized", webhookRegistered, displayName: displayName ?? account.displayName, updatedAt: new Date() })
+          .where(and(eq(maxPersonalAccounts.tenantId, tenantId), eq(maxPersonalAccounts.accountId, accountId)));
+      }
+
+      return res.json({ status: state });
+    } catch (error: any) {
+      console.error("[Admin] Error polling GREEN-API status:", error);
+      res.status(500).json({ error: error.message || "Failed to poll status" });
     }
   }
 );
