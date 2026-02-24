@@ -129,7 +129,10 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
+      const isConversationsRoute =
+        path === "/api/conversations" ||
+        /^\/api\/conversations\/[^/]+$/.test(path);
+      if (capturedJsonResponse && !isConversationsRoute) {
         logLine += ` :: ${JSON.stringify(sanitizeForLog(capturedJsonResponse))}`;
       }
 
