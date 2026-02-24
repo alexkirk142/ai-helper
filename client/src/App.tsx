@@ -216,9 +216,9 @@ function AuthenticatedApp() {
     };
   }, [isPlatformStaff]);
 
-  // Redirect platform staff to owner panel
+  // Redirect platform staff to owner panel (but allow /admin/* pages to work)
   useEffect(() => {
-    if (isPlatformStaff && !location.startsWith("/owner")) {
+    if (isPlatformStaff && !location.startsWith("/owner") && !location.startsWith("/admin")) {
       setLocation("/owner");
     }
   }, [isPlatformStaff, location, setLocation]);
