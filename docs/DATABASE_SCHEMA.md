@@ -1322,7 +1322,7 @@ vehicle_lookup_cache
 
 | # | File | Description |
 |---|------|-------------|
-| 0 | `0000_pre_migration_check_duplicates.sql` | Bootstraps core schema tables for fresh databases (Railway/new installs) so subsequent migrations can run. |
+| 0 | `0000_pre_migration_check_duplicates.sql` | Pre-flight query to detect duplicate emails before creating unique index. No schema changes. |
 | 1a | `0001a_normalize_emails.sql` | Normalizes existing emails to `LOWER(TRIM(email))`. Idempotent data migration. |
 | 1b | `0001b_create_email_unique_index.sql` *(manual)* | Creates `users_email_unique_lower_idx` using `CONCURRENTLY` (cannot run in transaction). Copy from `migrations/manual/`. |
 | 2 | `0002_subscription_grants_indexes.sql` | Creates `subscription_grants_active_lookup_idx` for fast grant lookups. |

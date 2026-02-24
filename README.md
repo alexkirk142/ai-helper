@@ -21,5 +21,3 @@ Copy `.env.example` to `.env` and configure all required values.
 Use PM2 for production:
 
 pm2 start ecosystem.config.cjs
-
-For Railway deployments, ensure `DATABASE_URL` and `REDIS_URL` are configured in service variables.
