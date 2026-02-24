@@ -198,17 +198,30 @@ interface OnboardingState {
 function AuthenticatedApp() {
   const { user, logout, isLoggingOut } = useAuth();
   const [location, setLocation] = useLocation();
-  
+
+  // Platform staff (owner/admin without tenant) → redirect to owner panel
+  const isPlatformStaff = (user?.isPlatformAdmin || user?.isPlatformOwner) && !user?.tenantId;
+
   const { data: onboardingState, isLoading: onboardingLoading } = useQuery<OnboardingState>({
     queryKey: ["/api/onboarding/state"],
+    enabled: !isPlatformStaff, // don't query tenant endpoints for staff
   });
 
   useEffect(() => {
+    // Platform staff has no tenant — don't try to connect WebSocket (would loop rejections)
+    if (isPlatformStaff) return;
     wsClient.connect();
     return () => {
       wsClient.disconnect();
     };
-  }, []);
+  }, [isPlatformStaff]);
+
+  // Redirect platform staff to owner panel
+  useEffect(() => {
+    if (isPlatformStaff && !location.startsWith("/owner")) {
+      setLocation("/owner");
+    }
+  }, [isPlatformStaff, location, setLocation]);
   
   useEffect(() => {
     if (!onboardingLoading && onboardingState) {

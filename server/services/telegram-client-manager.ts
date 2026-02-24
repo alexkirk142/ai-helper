@@ -246,9 +246,10 @@ class TelegramClientManager {
       this.connections.set(connectionKey, connection);
       this.ensureHandlers(connection);
 
+      // Preload only 5 most recent dialogs on connect — old dialogs are loaded lazily on new message
       try {
-        const dialogs = await client.getDialogs({ limit: 100 });
-        console.log(`[TelegramClientManager] Preloaded ${dialogs.length} dialogs for entity cache`);
+        const dialogs = await client.getDialogs({ limit: 5 });
+        console.log(`[TelegramClientManager] Preloaded ${dialogs.length} recent dialogs for entity cache`);
       } catch (dialogError: any) {
         console.log(`[TelegramClientManager] Could not preload dialogs: ${dialogError.message}`);
       }
@@ -452,6 +453,10 @@ class TelegramClientManager {
         };
       }
 
+      // Check if this is a brand-new chat (not yet in DB) — for lazy history sync
+      const existingCustomer = await storage.getCustomerByExternalId(tenantId, "telegram_personal", chatId);
+      const isNewChat = !existingCustomer;
+
       await processIncomingMessageFull(tenantId, {
         channel: "telegram_personal",
         externalConversationId: chatId,
@@ -470,6 +475,21 @@ class TelegramClientManager {
         ...(attachments.length > 0 && { attachments }),
         ...(forwardedFrom && { forwardedFrom }),
       });
+
+      // Lazy-sync history for chats that weren't in the initial 5 dialogs
+      if (isNewChat && channelId) {
+        try {
+          const customer = await storage.getCustomerByExternalId(tenantId, "telegram_personal", chatId);
+          if (customer) {
+            const conversations = await storage.getConversationsByTenant(tenantId);
+            const conv = conversations.find(c => c.customerId === customer.id && c.channelId === channelId);
+            if (conv) {
+              // Run async, don't block message delivery
+              this.syncSingleChatHistory(tenantId, accountId, channelId, chatId, conv.id, senderName).catch(() => {});
+            }
+          }
+        } catch { /* non-fatal */ }
+      }
     } catch (error: any) {
       console.error("[TelegramClientManager] Error handling message:", error.message);
     }
@@ -807,7 +827,7 @@ class TelegramClientManager {
       return { success: false, dialogsImported: 0, messagesImported: 0, error: "Not connected" };
     }
 
-    const dialogLimit = options?.limit ?? 50;
+    const dialogLimit = options?.limit ?? 5;
     const messageLimit = options?.messageLimit ?? 20;
 
     console.log(`[TelegramClientManager] Starting dialog sync for ${tenantId}:${channelId}, limit=${dialogLimit}, msgLimit=${messageLimit}`);
@@ -922,6 +942,62 @@ class TelegramClientManager {
     } catch (error: any) {
       console.error(`[TelegramClientManager] Sync error:`, error.message);
       return { success: false, dialogsImported: 0, messagesImported: 0, error: error.message };
+    }
+  }
+
+  /**
+   * Lazily syncs history for a single chat when a new message arrives from an unknown user.
+   * Fetches last `messageLimit` messages (excluding the just-received one) and saves to DB.
+   */
+  async syncSingleChatHistory(
+    tenantId: string,
+    accountId: string,
+    channelId: string | null,
+    chatId: string,
+    conversationId: string,
+    customerName: string,
+    messageLimit = 20,
+  ): Promise<void> {
+    const connectionKey = `${tenantId}:${accountId}`;
+    const connection = this.connections.get(connectionKey);
+    if (!connection?.connected) return;
+
+    try {
+      const tgMessages = await connection.client.getMessages(chatId, { limit: messageLimit });
+      const existingMessages = await storage.getMessagesByConversation(conversationId);
+      const existingMsgIds = new Set(
+        existingMessages
+          .filter(m => m.metadata && typeof m.metadata === "object" && "telegramMsgId" in (m.metadata as object))
+          .map(m => (m.metadata as { telegramMsgId: string }).telegramMsgId),
+      );
+
+      let imported = 0;
+      for (const msg of tgMessages.reverse()) {
+        if (!msg.text?.trim()) continue;
+        const telegramMsgId = msg.id.toString();
+        if (existingMsgIds.has(telegramMsgId)) continue;
+
+        await storage.createMessage({
+          conversationId,
+          role: msg.out ? "owner" : "customer",
+          content: msg.text,
+          metadata: {
+            channel: "telegram_personal",
+            synced: true,
+            syncedAt: new Date().toISOString(),
+            telegramMsgId,
+            senderId: msg.senderId?.toString() || "",
+            senderName: msg.out ? "Operator" : customerName,
+          },
+          createdAt: new Date((msg.date || 0) * 1000),
+        });
+        imported++;
+      }
+      if (imported > 0) {
+        console.log(`[TelegramClientManager] Lazy-synced ${imported} messages for new chat ${chatId}`);
+      }
+    } catch (err: any) {
+      console.warn(`[TelegramClientManager] Lazy sync failed for chat ${chatId}: ${err.message}`);
     }
   }
 

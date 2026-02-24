@@ -592,7 +592,7 @@ export async function registerRoutes(
     const { telegramClientManager } = await import("./services/telegram-client-manager");
     await telegramClientManager.connectAccount(tenantId, accountId, channelId, sessionString);
 
-    telegramClientManager.syncDialogs(tenantId, channelId, { limit: 50, messageLimit: 20 })
+    telegramClientManager.syncDialogs(tenantId, channelId, { limit: 5, messageLimit: 20 })
       .then(syncResult => {
         console.log(`[TelegramPersonal] Sync complete: ${syncResult.dialogsImported} dialogs, ${syncResult.messagesImported} messages`);
       })
@@ -1103,7 +1103,7 @@ export async function registerRoutes(
           }
           const { telegramClientManager } = await import("./services/telegram-client-manager");
           await telegramClientManager.connect(tenantId, channel.id, result.sessionString);
-          telegramClientManager.syncDialogs(tenantId, channel.id, { limit: 50, messageLimit: 20 }).catch(() => {});
+          telegramClientManager.syncDialogs(tenantId, channel.id, { limit: 5, messageLimit: 20 }).catch(() => {});
         }
         channelConnectionCache.set("telegram_personal", {
           connected: true,
@@ -1153,7 +1153,7 @@ export async function registerRoutes(
           }
           const { telegramClientManager } = await import("./services/telegram-client-manager");
           await telegramClientManager.connect(tenantId, channel.id, result.sessionString);
-          telegramClientManager.syncDialogs(tenantId, channel.id, { limit: 50, messageLimit: 20 }).catch(() => {});
+          telegramClientManager.syncDialogs(tenantId, channel.id, { limit: 5, messageLimit: 20 }).catch(() => {});
         }
         channelConnectionCache.set("telegram_personal", {
           connected: true,
