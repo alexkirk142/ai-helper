@@ -1760,7 +1760,7 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
         setQrImage(`data:image/png;base64,${data.message}`);
       } else if (data.type === "alreadyLogged") {
         setQrDialogOpen(false);
-        toast({ title: "WhatsApp уже подключён" });
+        toast({ title: "MAX уже подключён" });
         refetchAccounts();
       }
     } catch { /* ignore */ } finally {
@@ -1790,7 +1790,7 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
           if (data.status === "authorized") {
             if (qrPollRef.current) clearInterval(qrPollRef.current);
             setQrDialogOpen(false);
-            toast({ title: "WhatsApp подключён!", description: "Аккаунт успешно авторизован" });
+            toast({ title: "MAX подключён!", description: "Аккаунт успешно авторизован" });
             refetchAccounts();
           } else {
             await fetchQR(qrAccountId);
@@ -1854,7 +1854,7 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
                   <p className="font-medium text-sm">
                     {acc.label ?? `Аккаунт ${authorizedAccounts.length + idx + 1}`}
                   </p>
-                  <p className="text-xs text-muted-foreground">Требуется авторизация через WhatsApp</p>
+                  <p className="text-xs text-muted-foreground">Требуется авторизация через MAX</p>
                 </div>
               </div>
               <Button size="sm" onClick={() => openQrDialog(acc.accountId)}>
@@ -1868,9 +1868,9 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
       <Dialog open={qrDialogOpen} onOpenChange={(open) => { if (!open) closeQrDialog(); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Авторизация WhatsApp</DialogTitle>
+            <DialogTitle>Авторизация MAX</DialogTitle>
             <div className="text-sm text-muted-foreground pt-1">
-              Откройте WhatsApp на телефоне → <strong>Связанные устройства</strong> → <strong>Привязать устройство</strong> и отсканируйте QR-код
+              Откройте MAX на телефоне → <strong>Настройки</strong> → <strong>Связанные устройства</strong> → <strong>Привязать устройство</strong> и отсканируйте QR-код
             </div>
           </DialogHeader>
           <div className="flex flex-col items-center gap-3 py-2">
@@ -1881,7 +1881,7 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
               </div>
             )}
             {qrImage && (
-              <img src={qrImage} alt="QR для WhatsApp" className="w-56 h-56 rounded-md border" />
+              <img src={qrImage} alt="QR для MAX" className="w-56 h-56 rounded-md border" />
             )}
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
