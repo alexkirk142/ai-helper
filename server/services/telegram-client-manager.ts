@@ -596,27 +596,31 @@ class TelegramClientManager {
     }
   }
 
-  // Fatal errors that should NOT be retried — the session is permanently invalid
+  // Truly fatal errors — session is permanently revoked, never retry
   private static readonly FATAL_ERRORS = [
-    "AUTH_KEY_DUPLICATED",
-    "AUTH_KEY_INVALID",
     "SESSION_REVOKED",
     "USER_DEACTIVATED",
+    "USER_DEACTIVATED_BAN",
+  ];
+
+  // Temporary errors after restart — retry with longer delay, Telegram releases the old key after ~60s
+  private static readonly TRANSIENT_ERRORS = [
+    "AUTH_KEY_DUPLICATED",
+    "AUTH_KEY_INVALID",
     "SESSION_EXPIRED",
   ];
 
-  private static readonly MAX_RECONNECT_ATTEMPTS = 5;
+  private static readonly MAX_RECONNECT_ATTEMPTS = 10;
 
   private scheduleReconnect(connectionKey: string, connection: ActiveConnection, errorMessage?: string): void {
-    // Stop retrying for fatal session errors
+    // Permanently fatal — stop immediately and disable account
     if (errorMessage) {
       const isFatal = TelegramClientManager.FATAL_ERRORS.some((e) => errorMessage.includes(e));
       if (isFatal) {
         console.error(
           `[TelegramClientManager] FATAL error for ${connectionKey}: ${errorMessage}. ` +
-          `Reconnect stopped — session must be re-authorized by the user.`
+          `Session permanently revoked — user must re-authorize.`
         );
-        // Mark account as disconnected in DB so user sees the problem in UI
         if (!connection.accountId.startsWith("legacy_")) {
           storage.updateTelegramAccount(connection.accountId, { isActive: false }).catch(() => {});
         }
@@ -642,11 +646,19 @@ class TelegramClientManager {
       clearTimeout(existingTimer);
     }
 
-    // Exponential backoff: 30s, 60s, 120s, 240s, 480s
-    const delay = Math.min(30000 * Math.pow(2, connection.reconnectAttempts - 1), 480000);
+    // AUTH_KEY_DUPLICATED after restart is temporary — Telegram releases old key after ~60s.
+    // Use a fixed 90s delay for transient errors so the old connection expires on Telegram's side.
+    const isTransient = errorMessage
+      ? TelegramClientManager.TRANSIENT_ERRORS.some((e) => errorMessage.includes(e))
+      : false;
+    const delay = isTransient
+      ? 90000
+      : Math.min(30000 * Math.pow(2, connection.reconnectAttempts - 1), 300000);
+
     console.log(
       `[TelegramClientManager] Scheduling reconnect #${connection.reconnectAttempts} ` +
-      `for ${connectionKey} in ${delay / 1000}s`
+      `for ${connectionKey} in ${delay / 1000}s` +
+      (isTransient ? " (waiting for Telegram to release old key)" : "")
     );
 
     const timer = setTimeout(async () => {
