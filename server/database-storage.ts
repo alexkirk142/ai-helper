@@ -1,4 +1,4 @@
-import { eq, desc, and, or, ilike, inArray, sql, gte, gt } from "drizzle-orm";
+import { eq, desc, asc, and, or, ilike, inArray, sql, gte, gt } from "drizzle-orm";
 import { db } from "./db";
 import {
   tenants, channels, users, userInvites, emailTokens, customers, customerNotes, customerMemory, conversations, messages,
@@ -719,7 +719,7 @@ export class DatabaseStorage implements IStorage {
         eq(aiSuggestions.conversationId, conversationId),
         eq(aiSuggestions.status, "pending")
       )
-    ).orderBy(desc(aiSuggestions.createdAt)).limit(1);
+    ).orderBy(asc(aiSuggestions.createdAt)).limit(1);
     return suggestion;
   }
 
