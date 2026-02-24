@@ -1,0 +1,153 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1739872166000,
+      "tag": "0000_pre_migration_check_duplicates",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1739872226000,
+      "tag": "0001a_normalize_emails",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1739872286000,
+      "tag": "0002_subscription_grants_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1739958814000,
+      "tag": "0003_vehicle_lookup_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1739958874000,
+      "tag": "0004_tenants_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1739958934000,
+      "tag": "0005_price_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1739983977000,
+      "tag": "0006_internal_prices",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1739983977000,
+      "tag": "0006_telegram_multiaccount",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1739984037000,
+      "tag": "0007_price_commercial",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1739984097000,
+      "tag": "0008_price_snapshot_search_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1740133740000,
+      "tag": "0009_add_templates_and_payment_methods",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1740136366000,
+      "tag": "0010_add_tenant_agent_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1740138252000,
+      "tag": "0011_update_price_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1740139162000,
+      "tag": "0012_add_mileage_tiers",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1740200000000,
+      "tag": "0013_feature_flags_composite_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1740300000000,
+      "tag": "0014_max_personal_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1740400000000,
+      "tag": "0015_max_personal_multiaccount",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1740500000000,
+      "tag": "0016_transmission_identity_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1740600000000,
+      "tag": "0017_price_snapshots_stage",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1740600060000,
+      "tag": "0018_transmission_identity_cache_ttl",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1740600120000,
+      "tag": "0019_ai_suggestions_escalation",
+      "breakpoints": true
+    }
+  ]
+}

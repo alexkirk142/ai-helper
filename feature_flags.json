@@ -1,0 +1,45 @@
+{
+  "global:AI_SUGGESTIONS_ENABLED": {
+    "enabled": true
+  },
+  "global:DECISION_ENGINE_ENABLED": {
+    "enabled": false
+  },
+  "global:AI_AUTOSEND_ENABLED": {
+    "enabled": false
+  },
+  "global:HUMAN_DELAY_ENABLED": {
+    "enabled": false
+  },
+  "global:RAG_ENABLED": {
+    "enabled": true
+  },
+  "global:FEW_SHOT_LEARNING": {
+    "enabled": true
+  },
+  "global:TELEGRAM_CHANNEL_ENABLED": {
+    "enabled": false
+  },
+  "global:WHATSAPP_CHANNEL_ENABLED": {
+    "enabled": false
+  },
+  "global:MAX_CHANNEL_ENABLED": {
+    "enabled": false
+  },
+  "global:TELEGRAM_PERSONAL_CHANNEL_ENABLED": {
+    "enabled": true
+  },
+  "global:WHATSAPP_PERSONAL_CHANNEL_ENABLED": {
+    "enabled": true
+  },
+  "global:MAX_PERSONAL_CHANNEL_ENABLED": {
+    "enabled": true
+  },
+  "global:AUTO_PARTS_ENABLED": {
+    "enabled": true
+  },
+  "global:AI_PRICE_ESTIMATE_ENABLED": {
+    "enabled": false,
+    "description": "Allow GPT to estimate prices when no real listings found. Disabled by default to prevent hallucinations."
+  }
+}

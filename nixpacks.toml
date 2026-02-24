@@ -1,0 +1,16 @@
+# Last forced rebuild: 2026-02-23 — ensures dist/index.cjs is recompiled from source
+[phases.setup]
+nixPkgs = ["nodejs_20", "python311", "python311Packages.pip"]
+
+[phases.install]
+cmds = [
+  "npm ci",
+  "pip install --break-system-packages fastapi uvicorn playwright pydantic aiohttp httpx requests pillow qrcode",
+  "python3 -m playwright install chromium --with-deps"
+]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm run db:migrate && npm run start"

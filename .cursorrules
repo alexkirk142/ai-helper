@@ -1,0 +1,565 @@
+---
+description: 
+alwaysApply: true
+---
+
+# AI Sales Operator — Cursor Rules
+# Multi-tenant B2B SaaS for automating customer service via Telegram/WhatsApp/MAX.
+# Domain: contract gearboxes (КПП). AI agent detects VIN/FRAME, looks up OEM codes, fetches prices.
+
+## General Rules
+
+- Always read a file completely before modifying it
+- Before creating a new file, check if a similar one already exists (use search)
+- After changes, verify all imports resolve correctly
+- Use types from `shared/schema.ts` — NEVER create local type duplicates
+- Check `feature_flags.json` before implementing conditional features — 12 global flags + `AUTO_PARTS_ENABLED` (used in code but not in file) control AI, channels, RAG, vehicle lookup
+- Read `PROJECT_MAP.md` at the start of any non-trivial task for full context
+- Every DB query MUST include `tenantId` — this is a multi-tenant system
+- All user-facing strings are in Russian — no i18n framework, keep consistency
+
+## Tech Stack (exact versions from package.json)
+
+### Frontend
+- React 18.3.1 with Vite 7.3.0
+- TypeScript 5.6.3 (strict mode, `noEmit`)
+- Tailwind CSS 3.4.17 + shadcn/ui (new-york style, neutral base, CSS variables)
+- TanStack React Query 5.60.5 (data fetching, `staleTime: Infinity`, no auto-refetch)
+- wouter 3.3.5 (client-side routing — NOT react-router)
+- react-hook-form 7.55.0 + @hookform/resolvers 3.10.0 (forms)
+- recharts 2.15.2 (charts), framer-motion 11.13.1 (animations)
+- lucide-react 0.453.0 (icons), cmdk 1.1.1 (command palette)
+- Radix UI primitives (40+ components in `client/src/components/ui/`)
+
+### Backend
+- Node.js with Express 4.21.2
+- TypeScript 5.6.3 (ESM, `"type": "module"` in package.json)
+- Drizzle ORM 0.39.3 + drizzle-kit 0.31.8 (PostgreSQL)
+- Zod 3.25.76 (validation everywhere — env config, API payloads, schemas)
+- BullMQ 5.66.4 (job queues: vehicle_lookup_queue, price_lookup_queue, message_send_queue)
+- ioredis 5.9.0 (Redis client for BullMQ + caching)
+- OpenAI 6.15.0 (GPT-4o-mini for Decision Engine, text-embedding-3-large for RAG)
+- telegram 2.26.22 (gramjs — MTProto for Telegram Personal)
+- @whiskeysockets/baileys 7.0.0-rc.9 (WhatsApp Personal)
+- cheerio 1.2.0 (Avito/Drom HTML parsing)
+- bcrypt 6.0.0 (password hashing), passport 0.7.0 (auth)
+- pino 10.1.0 (logging), p-limit 7.2.0 + p-retry 7.1.1 (concurrency/retry)
+- ws 8.18.0 (WebSocket server)
+
+### Python Services
+- Python >=3.11
+- FastAPI >=0.128.0 + uvicorn >=0.40.0
+- Playwright >=1.57.0 (browser automation for podzamenu.ru and web.max.ru)
+- pydantic >=2.12.5 (data validation)
+- httpx >=0.28.1, aiohttp >=3.13.3 (HTTP clients)
+- Deps defined in `pyproject.toml`
+
+### Infrastructure
+- PostgreSQL (48 tables, via Drizzle ORM)
+- Redis (BullMQ queues + caching)
+- PM2 (`ecosystem.config.cjs` — 3 apps: main app, price-lookup worker, podzamenu-service)
+- Nixpacks (Node 20) — primary deployment; no Dockerfile exists
+- esbuild (server → dist/index.cjs), Vite (client → dist/public/)
+
+## Project Architecture
+
+```
+ai-sales/
+├── client/                    # React frontend (Vite SPA)
+│   ├── index.html             # Entry HTML, Google Fonts preloaded
+│   └── src/
+│       ├── App.tsx            # Root: wouter routing, auth guard, sidebar shell
+│       ├── main.tsx           # React mount into #root
+│       ├── index.css          # Tailwind base + dark/light CSS variables
+│       ├── components/
+│       │   ├── ui/            # 40+ shadcn/ui primitives (DO NOT edit manually — use shadcn CLI)
+│       │   ├── app-sidebar.tsx        # Navigation with unread/escalation badges
+│       │   ├── chat-interface.tsx      # Chat: messages, AI suggestions, manual input
+│       │   ├── conversation-list.tsx   # Conversation list with status indicators
+│       │   ├── customer-card.tsx       # Customer info + tags + channel icons
+│       │   ├── metrics-card.tsx        # Dashboard metric card with trend
+│       │   ├── csat-dialog.tsx         # 1-5 star CSAT rating
+│       │   ├── subscription-paywall.tsx # Paywall overlay + channel lock
+│       │   └── theme-toggle.tsx        # Light/Dark/System toggle
+│       ├── pages/             # 21 page components (one per route, all React.lazy())
+│       │   ├── dashboard.tsx          # Overview metrics + recent escalations
+│       │   ├── conversations.tsx      # Conversation list + chat (main working view)
+│       │   ├── settings.tsx           # All config: Decision Engine, channels, training (~4151 lines — needs splitting)
+│       │   ├── analytics.tsx          # CSAT, conversion, intent, lost-deal charts
+│       │   ├── billing.tsx            # CryptoBot checkout, 50 USDT/month
+│       │   ├── auth.tsx               # Login/Signup/Verify/Forgot/Reset forms
+│       │   ├── onboarding.tsx         # 6-step wizard
+│       │   ├── admin-*.tsx            # Platform admin pages (billing, users, secrets, proxies)
+│       │   ├── owner-*.tsx            # Platform owner pages (dashboard, updates, login)
+│       │   └── not-found.tsx          # 404
+│       ├── hooks/
+│       │   ├── use-auth.ts            # Auth state (polls GET /api/auth/user)
+│       │   ├── use-billing.ts         # Billing state + checkout + cancel
+│       │   ├── use-mobile.tsx         # Mobile breakpoint (768px)
+│       │   └── use-toast.ts           # Toast notifications
+│       └── lib/
+│           ├── queryClient.ts         # TanStack Query client + apiRequest() fetch wrapper
+│           ├── websocket.ts           # WebSocket client (/ws), invalidates Query caches
+│           ├── theme-provider.tsx     # Theme context (storage key: ai-sales-operator-theme)
+│           ├── auth-utils.ts          # Unauthorized redirect
+│           └── utils.ts              # cn() utility for Tailwind class merging
+│
+├── server/                    # Express.js backend
+│   ├── index.ts               # Entry: middleware, routes, WS, session restore, Python spawn
+│   ├── routes.ts              # Central route registration + channel/webhook routes (1,697 lines)
+│   ├── db.ts                  # PostgreSQL pool + Drizzle instance
+│   ├── config.ts              # Zod-based env validation (validateConfig, getConfig)
+│   ├── storage.ts             # IStorage interface (80+ methods) + DatabaseStorage export
+│   ├── database-storage.ts    # Full PostgreSQL IStorage implementation
+│   ├── session.ts             # Express session (connect-pg-simple, 7-day TTL)
+│   ├── static.ts              # SPA fallback for production
+│   ├── vite.ts                # Vite dev server HMR middleware
+│   ├── routes/                # Domain sub-routers
+│   │   ├── auth.ts                    # /auth/* — signup, login, logout, invite, email verify, password reset
+│   │   ├── auth-api.ts                # GET /api/auth/user — session user info
+│   │   ├── admin.ts                   # /api/admin/* — platform admin (billing, tenants, users, secrets, proxies)
+│   │   ├── phase0.ts                  # /api/admin/feature-flags, /api/feature-flags, /api/admin/audit-events
+│   │   ├── health.ts                  # /health, /ready, /metrics
+│   │   ├── customer.routes.ts         # /api/customers/*
+│   │   ├── conversation.routes.ts     # /api/conversations/*, /api/suggestions/*
+│   │   ├── product.routes.ts          # /api/products/*
+│   │   ├── knowledge-base.routes.ts   # /api/knowledge-docs/*
+│   │   ├── analytics.routes.ts        # /api/analytics/*, /api/dashboard/*, /api/escalations/*, /api/lost-deals/*
+│   │   ├── onboarding.routes.ts       # /api/onboarding/*
+│   │   ├── billing.routes.ts          # /api/billing/*
+│   │   ├── vehicle-lookup.routes.ts   # /api/conversations/:id/vehicle-lookup-case, /api/price-settings/, /api/price-history
+│   │   ├── tenant-config.routes.ts    # /api/templates/*, /api/payment-methods/*, /api/agent-settings/*
+│   │   ├── telegram-webhook.ts        # Telegram Bot API webhook
+│   │   ├── whatsapp-webhook.ts        # WhatsApp Business webhook
+│   │   ├── max-webhook.ts             # MAX Bot webhook
+│   │   └── max-personal-webhook.ts    # MAX Personal (GREEN-API) webhook
+│   ├── services/              # Business logic layer
+│   │   ├── inbound-message-handler.ts  # ⭐ CENTRAL PIPELINE — all Personal channels converge here
+│   │   ├── decision-engine.ts          # ⭐ AI generation — DO NOT MODIFY without strong reason
+│   │   ├── channel-adapter.ts          # ChannelAdapter interface + registry + stub adapters
+│   │   ├── telegram-client-manager.ts  # Multi-account Telegram (key: tenantId:accountId)
+│   │   ├── telegram-personal-adapter.ts # MTProto auth + send/receive
+│   │   ├── whatsapp-personal-adapter.ts # Baileys auth + send/receive
+│   │   ├── max-green-api-adapter.ts     # MAX Personal via GREEN-API HTTP (multi-account, table: max_personal_accounts)
+│   │   ├── telegram-adapter.ts          # Telegram Bot API adapter
+│   │   ├── whatsapp-adapter.ts          # WhatsApp Business API adapter
+│   │   ├── max-adapter.ts              # MAX Bot API adapter
+│   │   ├── vehicle-lookup-queue.ts     # BullMQ queue for VIN/FRAME lookups
+│   │   ├── podzamenu-lookup-client.ts  # HTTP client to Python Podzamenu (port 8200)
+│   │   ├── gearbox-templates.ts        # 5 Russian templates for gearbox lookup replies
+│   │   ├── price-lookup-queue.ts       # BullMQ queue for price lookups
+│   │   ├── price-sources/              # Price cascade sources
+│   │   │   ├── types.ts               # PriceSource, PriceResult, GearboxType, detectGearboxType()
+│   │   │   ├── avito-source.ts        # Avito HTML parsing (cheerio, 15s timeout)
+│   │   │   ├── drom-source.ts         # Drom HTML parsing (cheerio, 15s timeout)
+│   │   │   ├── web-source.ts          # SerpAPI (20s timeout, requires SERP_API_KEY)
+│   │   │   └── mock-source.ts         # Fixed fallback (never saved to internal_prices)
+│   │   ├── rag-retrieval.ts           # RAG: embed query → cosine similarity → top results
+│   │   ├── rag-indexer.ts             # RAG: products/docs → chunks with SHA-256 hashes
+│   │   ├── embedding-service.ts       # OpenAI text-embedding-3-large (3072 dimensions)
+│   │   ├── few-shot-builder.ts        # Few-shot prompt builder from training samples
+│   │   ├── feature-flags.ts           # In-memory + JSON file feature flag service
+│   │   ├── message-queue.ts           # BullMQ message_send_queue (delayed sending)
+│   │   ├── websocket-server.ts        # WS on /ws — broadcasts new_message, new_suggestion, etc.
+│   │   ├── billing-service.ts         # Stripe billing
+│   │   ├── cryptobot-billing.ts       # CryptoBot billing (primary — 50 USDT/month)
+│   │   ├── auth-service.ts            # Signup, login (lockout after 5 fails), password reset
+│   │   ├── owner-bootstrap.ts         # Platform owner creation from env vars at startup
+│   │   ├── audit-log.ts              # Batched write to `audit_events` table (500ms flush, ALS context)
+│   │   ├── secret-store.ts           # AES-256-GCM encryption for secrets
+│   │   ├── fraud-detection-service.ts # Channel fingerprinting + trial eligibility
+│   │   ├── human-delay-engine.ts     # Human-like typing delay calculation
+│   │   ├── csat-service.ts           # CSAT 1-5 ratings + analytics
+│   │   ├── conversion-service.ts     # Conversion tracking
+│   │   ├── lost-deals-service.ts     # Auto-detect lost deals
+│   │   ├── intent-analytics-service.ts # Per-intent analytics
+│   │   ├── customer-summary-service.ts # GPT-4o-mini customer summaries
+│   │   ├── learning-score-service.ts   # Learning queue scoring
+│   │   ├── training-sample-service.ts  # Training samples from human feedback
+│   │   └── [other services — see PROJECT_MAP.md]
+│   ├── workers/               # BullMQ workers (run as separate processes or inline)
+│   │   ├── vehicle-lookup.worker.ts   # VIN/FRAME → Python service → cache → suggestion → price trigger
+│   │   ├── price-lookup.worker.ts     # Price cascade: internal → Avito → Drom → Web → mock
+│   │   └── message-send.worker.ts     # Delayed message sending via channel adapters
+│   ├── middleware/
+│   │   ├── rbac.ts            # 5 roles (owner→admin→operator→viewer→guest), 16 permissions
+│   │   ├── rate-limiter.ts    # In-memory rate limiting (global + per-tenant)
+│   │   ├── validation.ts      # Zod validation middleware (validateBody, validateQuery, validateParams)
+│   │   ├── error-handler.ts   # Central error handler (Zod→400, operational→status, stack in dev)
+│   │   ├── webhook-security.ts # HMAC-SHA256 webhook verification
+│   │   ├── subscription.ts    # requireActiveSubscription guard
+│   │   ├── fraud-protection.ts # Block restricted tenants
+│   │   ├── platform-admin.ts  # isPlatformAdmin guard
+│   │   ├── platform-owner.ts  # isPlatformOwner guard
+│   │   └── request-context.ts # Request ID (X-Request-Id or UUID)
+│   ├── utils/
+│   │   └── sanitizer.ts       # PII masking (API keys, JWT, email, phone, cards)
+│   ├── batch/
+│   │   ├── index.ts           # Re-exports
+│   │   └── utils.ts           # Batch processing with p-limit + p-retry
+│   ├── scripts/
+│   │   └── migrate.ts         # Standalone migration runner
+│   └── __tests__/ + tests/    # 49 test files (Vitest)
+│
+├── shared/                    # Shared between client and server
+│   ├── schema.ts              # ⭐ 48 Drizzle tables, all enums/constants, Zod insert schemas, exported types (~1564 lines)
+│   └── models/
+│       ├── auth.ts            # Session table + authUsers (OIDC profiles)
+│       └── chat.ts            # Legacy chat schema (unused, serial IDs, no tenantId)
+│
+├── migrations/                # Drizzle SQL migrations (16 files, 0000–0015 + 1 manual)
+│
+├── podzamenu_lookup_service.py # Python: VIN/FRAME lookup via Playwright (port 8200)
+├── test_regression_iter4.py   # Python: Regression test for 48 VINs
+│
+├── package.json               # Node deps + scripts (dev, build, start, db:push, worker:*)
+├── tsconfig.json              # Strict TS, ESNext, paths: @/* → client/src/*, @shared/* → shared/*
+├── vite.config.ts             # React plugin, aliases (@, @shared, @assets), root: client/
+├── drizzle.config.ts          # PostgreSQL, schema: shared/schema.ts, out: ./migrations
+├── tailwind.config.ts         # Dark mode (class), shadcn theme, status colors, animations
+├── postcss.config.js          # Tailwind + Autoprefixer
+├── components.json            # shadcn/ui: new-york style, neutral base, CSS variables
+├── ecosystem.config.cjs       # PM2: aisales + worker-price-lookup + podzamenu-service (3 apps)
+├── nixpacks.toml              # Node 20 + Python 3.11, npm run build, npm run db:migrate && npm run start
+├── pyproject.toml             # Python >=3.11 deps
+├── feature_flags.json         # 12 global feature flags with defaults (AUTO_PARTS_ENABLED is code-only)
+├── .env.example               # All env vars documented
+└── start.sh                   # drizzle-kit migrate && node dist/index.cjs
+```
+
+## Code Patterns
+
+### Route Endpoints
+Routes are registered in `server/routes.ts` via `registerRoutes(httpServer, app)`. Domain logic is in sub-routers under `server/routes/`. Channel and webhook routes remain in `server/routes.ts`.
+Pattern: `router.METHOD("/resource", ...middleware, async (req, res) => { try/catch })`.
+Sub-routers mounted via `app.use("/auth", authRouter)`, `app.use("/api/admin", adminRouter)`, `app.use("/api/customers", customerRouter)`, etc.
+
+```typescript
+// Typical route pattern
+app.get("/api/resource", requireAuth, requirePermission("VIEW_CONVERSATIONS"), async (req: Request, res: Response) => {
+  try {
+    const user = await storage.getUser(req.userId);
+    if (!user?.tenantId) return res.status(403).json({ error: "User not associated with a tenant" });
+    const data = await storage.getSomething(user.tenantId);
+    res.json(data);
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).json({ error: "Failed to fetch" });
+  }
+});
+```
+
+### Services
+Services are singletons exported from their files.
+Pattern: Class with methods, instantiated at module level, exported as `const serviceName = new ServiceClass()`.
+Some are plain exported functions (e.g., `inbound-message-handler.ts`).
+All use `tenantId` as first parameter or derive it from context.
+
+### Storage Layer
+`server/storage.ts` defines `IStorage` interface (~100 methods).
+`server/database-storage.ts` implements it with Drizzle queries.
+Access via `import { storage } from "./storage"`.
+NEVER call `db` directly from routes — always go through `storage`.
+
+### CSRF Protection
+All state-mutating requests (POST/PUT/PATCH/DELETE) require `X-Csrf-Token` header.
+Client: `apiRequest()` in `client/src/lib/queryClient.ts` fetches the token from `GET /api/csrf-token` on first mutating request and caches it. On 403 `INVALID_CSRF_TOKEN`, token is invalidated and re-fetched.
+Exempt paths: `/webhooks/*`, `/api/max-personal/incoming`, safe HTTP methods (GET/HEAD/OPTIONS).
+
+### React Components
+Functional components with hooks. No class components.
+Data fetching: `useQuery` with URL as queryKey (e.g., `["/api/conversations"]`).
+Mutations: `useMutation` with `apiRequest(method, url, data)` from `lib/queryClient.ts`.
+Cache invalidation after mutations via `queryClient.invalidateQueries`.
+Routing: wouter `useLocation()`, `<Route>`, `<Switch>`.
+
+```typescript
+// Typical data fetching pattern
+const { data, isLoading } = useQuery<Type[]>({
+  queryKey: ["/api/resource"],
+});
+
+// Typical mutation pattern
+const mutation = useMutation({
+  mutationFn: async (data: InputType) => {
+    const res = await apiRequest("POST", "/api/resource", data);
+    return res.json();
+  },
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/resource"] });
+  },
+});
+```
+
+### API Calls from Client
+Use `apiRequest(method, url, data?)` from `@/lib/queryClient` — a thin `fetch` wrapper with `credentials: "include"` and JSON headers.
+For queries, TanStack Query uses `queryKey` as the fetch URL directly via `getQueryFn`.
+
+### Types
+All DB types are in `shared/schema.ts` — `Type` (select) and `InsertType` (insert) for every table.
+Zod insert schemas: `insertProductSchema`, `insertMessageSchema`, etc.
+Constants: `VALID_INTENTS`, `CHANNEL_TYPES`, `TENANT_STATUSES`, `ADMIN_ACTION_TYPES`, etc.
+Path aliases: `@shared/schema` (server+client), `@/*` (client only).
+
+### Error Handling
+Backend: try/catch in every route handler, `console.error` + JSON error response.
+Central error handler in `server/middleware/error-handler.ts` catches Zod errors → 400.
+Client: TanStack Query `onError`, toast notifications via `useToast()`.
+
+### Validation
+Zod everywhere:
+- `server/config.ts` — env validation (`envSchema`)
+- `server/middleware/validation.ts` — `validateBody(schema)`, `validateQuery(schema)`, `validateParams(schema)` middleware
+- `shared/schema.ts` — `createInsertSchema()` for DB insert validation
+- Route handlers use inline `z.object({...}).parse(req.body)` or middleware
+
+### WebSocket
+Server: `server/services/websocket-server.ts` on `/ws`.
+Authentication: Session cookie verified on HTTP upgrade; unauthenticated connections rejected (401) in production. `tenantId` bound from session — clients cannot override it.
+Client: `client/src/lib/websocket.ts` — `wsClient` singleton with auto-reconnect.
+Events: `new_message`, `conversation_update`, `new_conversation`, `new_suggestion`.
+Client invalidates TanStack Query caches on WS events.
+
+### Testing
+Framework: Vitest 4.0.16.
+Tests in `server/__tests__/` and `server/tests/` (49 files total).
+Pattern: describe/it blocks, mock storage with `MemStorage` from `server/__tests__/helpers/mem-storage.ts`.
+
+## Database Work
+
+### ORM: Drizzle 0.39.3
+- Schema: `shared/schema.ts` (single source of truth — 48 tables)
+- DB instance: `server/db.ts` (`drizzle(pool, { schema })`)
+- Config: `drizzle.config.ts` (PostgreSQL, schema path, migrations output)
+- Storage layer: `server/database-storage.ts` (NEVER bypass with raw `db` in routes)
+
+### Migrations
+- Directory: `./migrations/` (16 SQL files, numbered 0000–0015, plus 1 manual: `0001b_create_email_unique_index.sql`)
+- Create: `npx drizzle-kit generate` — generates SQL migration files from schema diff
+- Apply (production/staging): `npm run db:migrate` → `npx drizzle-kit migrate` — applies reviewed SQL files from `./migrations/`
+- Apply (dev schema sync only): `npm run db:push` → `npx drizzle-kit push` — syncs schema directly, bypasses migration files; dev-only
+- NEVER use `drizzle-kit push --force` — it silently drops columns/types without review or rollback
+- NEVER modify schema without creating a migration
+- Two files share prefix `0006` (internal_prices + telegram_multiaccount) — be careful with ordering
+- Migrations 0013–0015: feature_flags composite unique indexes, max_personal_accounts table (single then multi-account)
+
+### Schema Modification Steps
+1. Edit `shared/schema.ts` — add/modify table definition
+2. Export new types: `export type NewTable = typeof newTable.$inferSelect;` + insert type
+3. Create Zod insert schema: `export const insertNewTableSchema = createInsertSchema(newTable).omit({ id: true, createdAt: true });`
+4. Add IStorage methods to `server/storage.ts`
+5. Implement in `server/database-storage.ts`
+6. Generate migration: `npx drizzle-kit generate` — review the generated SQL in `./migrations/` before applying
+7. Apply in dev: `npm run db:push` (direct sync) or `npm run db:migrate` (migration files)
+8. Apply in production: `npm run db:migrate` ONLY — never use `push` or `push --force` in production
+
+### Key Schema Patterns
+- All tables use `varchar("id").primaryKey().default(sql\`gen_random_uuid()\`)` for IDs
+- `tenantId` on every tenant-scoped table with `.references(() => tenants.id)`
+- Timestamps: `timestamp("created_at").default(sql\`CURRENT_TIMESTAMP\`).notNull()`
+- JSONB for flexible data: `jsonb("config").default({})`
+- Indexes defined in table's third argument as array
+- Price settings stored in `tenants.templates.priceSettings` JSONB — no dedicated table
+- MAX Personal accounts in `max_personal_accounts` table (multi-account per tenant)
+- Feature flag overrides in `feature_flags` table with partial unique index `(tenantId IS NULL)` for global defaults
+
+## Telegram Integration
+
+### Library: gramjs (`telegram` ^2.26.22) — MTProto, NOT Bot API
+- Adapter: `server/services/telegram-personal-adapter.ts`
+- Multi-account manager: `server/services/telegram-client-manager.ts` (key: `tenantId:accountId`)
+- Config: `TELEGRAM_API_ID` (numeric), `TELEGRAM_API_API_HASH` (32-char hex) from my.telegram.org
+
+### Authentication
+- Phone: send-code → verify-code → verify-password (2FA)
+- QR: start-qr → check-qr → verify-qr-2fa (2FA)
+- Sessions stored encrypted in `telegram_sessions` table
+- `phoneCodeHash` in Redis with 10 min TTL
+- 2FA password: ONLY in memory, NEVER in DB/Redis
+- Limit: 5 accounts per tenant
+
+### Message Flow
+- Incoming: `TelegramClient` → `NewMessage` event → `processIncomingMessageFull`
+- Outgoing: `storage` → channel adapter → `TelegramClient.sendMessage`
+- Dialog sync on connect
+
+### Error Handling
+- FloodWait: respect `seconds` field, retry after delay
+- AuthError: session invalid → disconnect, update DB status
+- ConnectionError: auto-reconnect with heartbeat
+
+## MAX Personal Integration (GREEN-API)
+
+### Library: GREEN-API HTTP REST API (NOT Playwright)
+- Adapter: `server/services/max-green-api-adapter.ts`
+- Accounts: `max_personal_accounts` table (multi-account per tenant)
+- Webhook: `POST /api/max-personal/incoming` (CSRF-exempt)
+- Management: `GET/POST/DELETE /api/max-personal/accounts`
+
+### Account Flow
+- Create account → GREEN-API instance ID + token → stored in `max_personal_accounts`
+- Incoming: GREEN-API webhook → `max-personal-webhook.ts` → `processIncomingMessageFull`
+- Outgoing: GREEN-API REST API `sendMessage` endpoint
+
+## AI Integration (OpenAI)
+
+### Models
+- Decision Engine: `gpt-4o-mini` (response generation, intent classification, self-check)
+- Onboarding templates: `gpt-4o` (policy/FAQ generation)
+- Embeddings: `text-embedding-3-large` (3072 dimensions) for RAG
+
+### Configuration
+- API key: `AI_INTEGRATIONS_OPENAI_API_KEY` env var
+- Base URL: `AI_INTEGRATIONS_OPENAI_BASE_URL` (default: https://api.openai.com/v1)
+- Fallback: `sk-placeholder` allows startup without key (will fail on actual calls)
+
+### Decision Engine Flow (`server/services/decision-engine.ts`)
+1. RAG context retrieval (embeddings + cosine similarity)
+2. Few-shot examples from approved training samples
+3. GPT-4o-mini: generate response + intent + confidence
+4. Penalties (stale data, missing fields, price mentions)
+5. Decision: AUTO_SEND (conf ≥ tAuto) / NEED_APPROVAL / ESCALATE (conf < tEscalate)
+6. Self-check: separate GPT call for quality gate
+7. Autosend eligibility check
+
+### Rate Limiting
+- Tenant-level: `tenantAiLimiter` middleware
+- Global: `aiRateLimiter` (default: 20 req/min)
+- Retry: `p-retry` with exponential backoff for OpenAI 429s
+
+## Deployment
+
+### Docker
+- **No Dockerfile exists** — all container deployment is via Nixpacks
+- Port: 5000 (configured in app)
+
+### PM2 (`ecosystem.config.cjs`)
+- `aisales`: main app (`dist/index.cjs`), 1 instance, 1G memory limit
+- `worker-price-lookup`: separate BullMQ worker process, 512M memory limit
+- `podzamenu-service`: Python Playwright service for VIN lookup (port 8200)
+- Logs to `../logs/` directory
+- Reads `.env` file manually and passes to process env
+
+### Nixpacks (`nixpacks.toml`)
+- Node.js 20 + Python 3.11 (both runtimes installed)
+- Installs Playwright browsers + pip packages with `--break-system-packages`
+- Build: `npm run build` (esbuild server + Vite client)
+- Start: `npm run db:migrate && npm run start` (drizzle-kit migrate then node dist/index.cjs)
+
+### Build Process
+- `npm run build` → `script/build.ts` → esbuild (server → `dist/index.cjs`) + Vite (client → `dist/public/`)
+- `npm run dev` → `tsx server/index.ts` with Vite dev middleware for HMR
+
+### Required Environment Variables
+```
+AI_INTEGRATIONS_OPENAI_API_KEY   # OpenAI API key
+SESSION_SECRET                   # Express session secret (min 32 chars)
+INTEGRATION_SECRETS_MASTER_KEY   # AES-256-GCM master key (32 bytes, base64)
+DATABASE_URL                     # PostgreSQL connection URL
+```
+
+### Optional Environment Variables
+```
+TELEGRAM_API_ID / TELEGRAM_API_API_HASH  # MTProto (from my.telegram.org)
+CRYPTOBOT_API_TOKEN                      # CryptoBot billing
+PODZAMENU_LOOKUP_SERVICE_URL             # Python service (default: http://localhost:8200)
+AVITO_ENABLED / DROM_ENABLED             # Price sources
+SERP_API_KEY                             # Web search price source
+OWNER_EMAIL / OWNER_PASSWORD             # Platform owner bootstrap
+```
+
+## Critical Data Flows
+
+### Incoming Message Pipeline (ALL Personal channels)
+```
+Channel adapter → processIncomingMessageFull(tenantId, parsed)
+  1. handleIncomingMessage(): find/create customer+conversation, dedup, save, WS broadcast
+  2. detectVehicleIdFromText(): normalize → VIN/FRAME regex → create case → enqueue lookup
+  3. triggerAiSuggestion(): check no pending → Decision Engine → save suggestion → WS broadcast
+```
+**NEVER create alternative message pipelines. All Personal channels MUST flow through `processIncomingMessageFull`.**
+
+### VIN/FRAME → Price Lookup
+```
+vehicle_lookup_queue worker → Python Podzamenu → cache → suggestion → price trigger
+price_lookup_queue worker → cache → internal_prices → Avito → Drom → Web → mock → commercial logic
+```
+
+## Feature Flags (feature_flags.json)
+
+| Flag | Default | Controls |
+|------|---------|----------|
+| AI_SUGGESTIONS_ENABLED | true | Gates triggerAiSuggestion |
+| DECISION_ENGINE_ENABLED | false | Advanced decision engine |
+| AI_AUTOSEND_ENABLED | false | Auto-send without approval |
+| HUMAN_DELAY_ENABLED | false | Human-like delay |
+| RAG_ENABLED | true | RAG context retrieval |
+| FEW_SHOT_LEARNING | true | Few-shot examples in prompts |
+| TELEGRAM_PERSONAL_CHANNEL_ENABLED | true | MTProto channel |
+| WHATSAPP_PERSONAL_CHANNEL_ENABLED | true | Baileys channel |
+| MAX_PERSONAL_CHANNEL_ENABLED | true | GREEN-API MAX Personal channel |
+| AUTO_PARTS_ENABLED | (not in file) | VIN/FRAME detection + vehicle lookup pipeline |
+| TELEGRAM_CHANNEL_ENABLED | false | Bot API (inactive) |
+| WHATSAPP_CHANNEL_ENABLED | false | Business API (inactive) |
+| MAX_CHANNEL_ENABLED | false | Bot API (inactive) |
+
+Check flags via `featureFlagService.isEnabled("FLAG_NAME")` or `featureFlagService.isEnabled("FLAG_NAME", tenantId)`.
+
+## RBAC System
+
+5 roles: `owner` → `admin` → `operator` → `viewer` → `guest`
+16 permissions in `server/middleware/rbac.ts`.
+Route guards: `requireAuth`, `requirePermission("PERMISSION_NAME")`, `requireAdmin`, `requireOperator`.
+Platform-level: `requirePlatformAdmin`, `requirePlatformOwner`.
+
+## Prohibitions
+
+1. **DO NOT** change `shared/schema.ts` without creating a migration
+2. **DO NOT** hardcode API keys, tokens, or secrets — use env vars
+3. **DO NOT** create duplicate types — always import from `@shared/schema`
+4. **DO NOT** ignore `feature_flags.json` — check flags before conditional features
+5. **DO NOT** add npm/pip dependencies without checking if equivalent exists
+6. **DO NOT** modify `server/services/decision-engine.ts` without explicit request
+7. **DO NOT** modify `processIncomingMessageFull` interface or create alternative pipelines
+8. **DO NOT** change `enqueuePriceLookup` interface
+9. **DO NOT** store 2FA passwords in DB or Redis (memory only)
+10. **DO NOT** make DB queries without `tenantId` (multi-tenancy violation)
+11. **DO NOT** manually edit `client/src/components/ui/` files (shadcn/ui managed)
+12. **DO NOT** use `react-router` — this project uses `wouter`
+13. **DO NOT** use `axios` — this project uses native `fetch` via `apiRequest()`
+14. **DO NOT** bypass `storage` layer with direct `db` queries in routes
+15. **DO NOT** save mock price source results to `internal_prices`
+16. **DO NOT** add synchronous AI generation or message sending in HTTP handlers — use BullMQ queues
+17. **DO NOT** overwrite encrypted messenger sessions on every request
+18. **DO NOT** send state-mutating requests from client without including `X-Csrf-Token` header — use `apiRequest()` wrapper
+19. **DO NOT** create a MAX Personal adapter that uses Playwright — it now uses GREEN-API HTTP
+20. **DO NOT** add a new Dockerfile — Nixpacks is the canonical container deployment
+
+## Before Any Task
+
+1. Read `PROJECT_MAP.md` for full architectural context
+2. Read all files you plan to modify (completely, not just snippets)
+3. Check `shared/schema.ts` for existing types, constants, and table definitions
+4. Check `feature_flags.json` for relevant feature gates
+5. Check `server/storage.ts` for existing IStorage methods before adding new ones
+6. Verify the change doesn't break the inbound message pipeline
+7. Ensure multi-tenancy is preserved (tenantId everywhere)
+8. Run `tsc --noEmit` mentally — verify type safety
+
+## Auto-Documentation Rule
+After completing any task that involves:
+- Creating or modifying API endpoints
+- Creating or modifying database tables/columns
+- Adding new files or directories
+- Adding new integrations or services
+- Adding or changing feature flags
+- Adding new environment variables
+
+You MUST automatically update the relevant documentation files:
+- PROJECT_MAP.md — if file structure, architecture, or integrations changed
+- docs/API_REFERENCE.md — if any endpoint was added, modified, or removed
+- docs/DATABASE_SCHEMA.md — if any table, column, index, or migration was added
+- docs/CONVENTIONS.md — if a new pattern was introduced
+- .env.example — if new environment variables were added
+
+Do this WITHOUT being asked. Include documentation updates in the same response as the code changes.
