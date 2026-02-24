@@ -1700,10 +1700,9 @@ export async function registerRoutes(
   });
 
   // ============ TEST / DEBUG ROUTES ============
-  // Available when NODE_ENV !== 'production' OR ENABLE_TEST_ENDPOINTS=true
+  // Protected by requireAuth — safe to keep in production
 
-  if (process.env.NODE_ENV !== "production" || process.env.ENABLE_TEST_ENDPOINTS === "true") {
-    app.post("/api/test/simulate-message", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/test/simulate-message", requireAuth, async (req: Request, res: Response) => {
       try {
         const user = await storage.getUser(req.userId!);
         if (!user?.tenantId) {
@@ -1790,8 +1789,7 @@ export async function registerRoutes(
         console.error("[TestEndpoint] simulate-message error:", error);
         res.status(500).json({ error: error.message || "Failed to simulate message" });
       }
-    });
-  }
+  });
 
   // ============ WEBHOOK ROUTES ============
 
