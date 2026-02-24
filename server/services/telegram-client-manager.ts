@@ -148,16 +148,20 @@ class TelegramClientManager {
     const activeCount = this.connections.size;
     if (activeCount === 0) return;
 
-    console.log(`[TelegramClientManager] Heartbeat: ${activeCount} active connections`);
-
     for (const [key, connection] of Array.from(this.connections.entries())) {
       try {
         await connection.client.getMe();
-        console.log(`[TelegramClientManager] Heartbeat OK: ${key}`);
+        connection.reconnectAttempts = 0; // reset on successful heartbeat
       } catch (error: any) {
-        console.error(`[TelegramClientManager] Heartbeat FAILED: ${key} - ${error.message}`);
+        const msg: string = error?.message ?? String(error);
+        console.warn(`[TelegramClientManager] Heartbeat FAILED: ${key} - ${msg}`);
         connection.connected = false;
-        this.scheduleReconnect(key, connection, error.message);
+
+        // Remove from map so heartbeat won't fire on the same broken client again
+        this.connections.delete(key);
+        try { await connection.client.disconnect(); } catch {}
+
+        this.scheduleReconnect(key, connection, msg);
       }
     }
   }
