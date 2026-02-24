@@ -1721,62 +1721,179 @@ type WhatsAppAuthStatus = "disconnected" | "connecting" | "qr_ready" | "pairing_
 type WhatsAppAuthMethod = "qr" | "phone";
 
 function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "channelStatuses">) {
-  const maxPersonalStatus = channelStatuses?.find(c => c.channel === "max_personal");
-  const isConnected = maxPersonalStatus?.connected ?? false;
-  const accounts: Array<{ displayName?: string | null; label?: string | null }> =
-    (maxPersonalStatus as any)?.accounts ?? [];
+  const { toast } = useToast();
+  const [qrDialogOpen, setQrDialogOpen] = useState(false);
+  const [qrAccountId, setQrAccountId] = useState<string | null>(null);
+  const [qrImage, setQrImage] = useState<string | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const { data: accountsData, refetch: refetchAccounts } = useQuery<{
+    accounts: Array<{
+      accountId: string;
+      idInstance: string;
+      displayName?: string | null;
+      label?: string | null;
+      status: string;
+      webhookRegistered?: boolean | null;
+    }>;
+  }>({
+    queryKey: ["/api/channels/max-personal/accounts"],
+    queryFn: async () => {
+      const res = await fetch("/api/channels/max-personal/accounts", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch accounts");
+      return res.json();
+    },
+  });
+
+  const allAccounts = accountsData?.accounts ?? [];
+  const authorizedAccounts = allAccounts.filter(a => a.status === "authorized");
+  const pendingAccounts = allAccounts.filter(a => a.status !== "authorized");
+  const isConnected = authorizedAccounts.length > 0;
+
+  const fetchQR = async (accountId: string) => {
+    setQrLoading(true);
+    try {
+      const res = await fetch(`/api/channels/max-personal/${accountId}/qr`, { credentials: "include" });
+      const data = await res.json();
+      if (data.type === "qrCode") {
+        setQrImage(`data:image/png;base64,${data.message}`);
+      } else if (data.type === "alreadyLogged") {
+        setQrDialogOpen(false);
+        toast({ title: "WhatsApp уже подключён" });
+        refetchAccounts();
+      }
+    } catch { /* ignore */ } finally {
+      setQrLoading(false);
+    }
+  };
+
+  const openQrDialog = (accountId: string) => {
+    setQrAccountId(accountId);
+    setQrImage(null);
+    setQrDialogOpen(true);
+  };
+
+  const closeQrDialog = () => {
+    if (qrPollRef.current) clearInterval(qrPollRef.current);
+    setQrDialogOpen(false);
+    refetchAccounts();
+  };
+
+  useEffect(() => {
+    if (qrDialogOpen && qrAccountId) {
+      fetchQR(qrAccountId);
+      qrPollRef.current = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/channels/max-personal/${qrAccountId}/status`, { credentials: "include" });
+          const data = await res.json();
+          if (data.status === "authorized") {
+            if (qrPollRef.current) clearInterval(qrPollRef.current);
+            setQrDialogOpen(false);
+            toast({ title: "WhatsApp подключён!", description: "Аккаунт успешно авторизован" });
+            refetchAccounts();
+          } else {
+            await fetchQR(qrAccountId);
+          }
+        } catch { /* ignore */ }
+      }, 20000);
+    }
+    return () => { if (qrPollRef.current) clearInterval(qrPollRef.current); };
+  }, [qrDialogOpen, qrAccountId]);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <MessageSquare className="h-5 w-5" />
-          Max Personal
-          {isConnected ? (
-            <Badge variant="outline" className="bg-green-500/10 text-green-600">
-              <CheckCircle2 className="mr-1 h-3 w-3" />
-              Подключен
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="bg-muted text-muted-foreground">
-              <XCircle className="mr-1 h-3 w-3" />
-              Не подключен
-            </Badge>
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MessageSquare className="h-5 w-5" />
+            Max Personal
+            {isConnected ? (
+              <Badge variant="outline" className="bg-green-500/10 text-green-600">
+                <CheckCircle2 className="mr-1 h-3 w-3" />
+                Подключен
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="bg-muted text-muted-foreground">
+                <XCircle className="mr-1 h-3 w-3" />
+                Не подключен
+              </Badge>
+            )}
+          </CardTitle>
+          <CardDescription>Личный аккаунт MAX через GREEN-API</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {allAccounts.length === 0 && (
+            <div className="rounded-md border p-4 flex items-start gap-3">
+              <XCircle className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-muted-foreground">Не подключён</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Обратитесь к администратору платформы для добавления аккаунта
+                </p>
+              </div>
+            </div>
           )}
-        </CardTitle>
-        <CardDescription>
-          Личный аккаунт MAX через GREEN-API
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {isConnected ? (
-          <div className="space-y-2">
-            {accounts.map((acc, idx) => (
-              <div key={idx} className="rounded-md border p-3 bg-green-500/5 flex items-center gap-3">
-                <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-                <div>
+          {authorizedAccounts.map((acc, idx) => (
+            <div key={acc.accountId} className="rounded-md border p-3 bg-green-500/5 flex items-center gap-3">
+              <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm">
+                  {acc.displayName ?? `Аккаунт ${idx + 1}`}
+                  {acc.label ? <span className="text-muted-foreground font-normal"> ({acc.label})</span> : null}
+                </p>
+                <p className="text-xs text-muted-foreground">Статус: авторизован</p>
+              </div>
+            </div>
+          ))}
+          {pendingAccounts.map((acc, idx) => (
+            <div key={acc.accountId} className="rounded-md border p-3 bg-amber-500/5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                <div className="min-w-0">
                   <p className="font-medium text-sm">
-                    {acc.displayName ?? `Аккаунт ${idx + 1}`}
-                    {acc.label ? <span className="text-muted-foreground font-normal"> ({acc.label})</span> : null}
+                    {acc.label ?? `Аккаунт ${authorizedAccounts.length + idx + 1}`}
                   </p>
-                  <p className="text-xs text-muted-foreground">Статус: авторизован</p>
+                  <p className="text-xs text-muted-foreground">Требуется авторизация через WhatsApp</p>
                 </div>
               </div>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-md border p-4 flex items-start gap-3">
-            <XCircle className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
-            <div>
-              <p className="font-medium text-muted-foreground">Не подключён</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Обратитесь к администратору платформы для подключения MAX-аккаунта
-              </p>
+              <Button size="sm" onClick={() => openQrDialog(acc.accountId)}>
+                Подключить
+              </Button>
             </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Dialog open={qrDialogOpen} onOpenChange={(open) => { if (!open) closeQrDialog(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Авторизация WhatsApp</DialogTitle>
+            <div className="text-sm text-muted-foreground pt-1">
+              Откройте WhatsApp на телефоне → <strong>Связанные устройства</strong> → <strong>Привязать устройство</strong> и отсканируйте QR-код
+            </div>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-3 py-2">
+            {qrLoading && !qrImage && (
+              <div className="flex items-center gap-2 text-muted-foreground py-8">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-sm">Загрузка QR-кода...</span>
+              </div>
+            )}
+            {qrImage && (
+              <img src={qrImage} alt="QR для WhatsApp" className="w-56 h-56 rounded-md border" />
+            )}
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Ожидание сканирования... QR обновляется каждые 20 сек
+            </p>
           </div>
-        )}
-      </CardContent>
-    </Card>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={closeQrDialog}>Закрыть</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

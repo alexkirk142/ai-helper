@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
@@ -226,62 +226,6 @@ export default function AdminUsers() {
   const [maxPersonalApiToken, setMaxPersonalApiToken] = useState("");
   const [maxPersonalLabel, setMaxPersonalLabel] = useState("");
 
-  // QR auth dialog state
-  const [qrDialogOpen, setQrDialogOpen] = useState(false);
-  const [qrAccountId, setQrAccountId] = useState<string | null>(null);
-  const [qrImage, setQrImage] = useState<string | null>(null);
-  const [qrStatus, setQrStatus] = useState<string>("notAuthorized");
-  const [qrLoading, setQrLoading] = useState(false);
-  const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const fetchQR = useCallback(async (userId: string, accountId: string) => {
-    setQrLoading(true);
-    try {
-      const res = await apiRequest("GET", `/api/admin/users/${userId}/max-personal/${accountId}/qr`);
-      const data = await res.json();
-      if (data.type === "qrCode") {
-        setQrImage(`data:image/png;base64,${data.message}`);
-      } else if (data.type === "alreadyLogged") {
-        setQrStatus("authorized");
-        setQrDialogOpen(false);
-        refetchMaxPersonal();
-      }
-    } catch {
-      // ignore fetch errors during polling
-    } finally {
-      setQrLoading(false);
-    }
-  }, []);
-
-  const pollQrStatus = useCallback(async (userId: string, accountId: string) => {
-    try {
-      const res = await apiRequest("GET", `/api/admin/users/${userId}/max-personal/${accountId}/status`);
-      const data = await res.json();
-      setQrStatus(data.status);
-      if (data.status === "authorized") {
-        if (qrPollRef.current) clearInterval(qrPollRef.current);
-        setQrDialogOpen(false);
-        toast({ title: "WhatsApp подключён", description: "Аккаунт успешно авторизован" });
-        refetchMaxPersonal();
-      }
-    } catch {
-      // ignore poll errors
-    }
-  }, []);
-
-  useEffect(() => {
-    if (qrDialogOpen && qrAccountId && selectedUser?.id) {
-      fetchQR(selectedUser.id, qrAccountId);
-      qrPollRef.current = setInterval(async () => {
-        await pollQrStatus(selectedUser.id, qrAccountId);
-        // Refresh QR every 20s (QR expires)
-        await fetchQR(selectedUser.id, qrAccountId);
-      }, 20000);
-    }
-    return () => {
-      if (qrPollRef.current) clearInterval(qrPollRef.current);
-    };
-  }, [qrDialogOpen, qrAccountId, selectedUser?.id]);
 
   const { data: maxPersonalData, isLoading: maxPersonalLoading, refetch: refetchMaxPersonal } = useQuery<MaxPersonalListData>({
     queryKey: ["/api/admin/users", selectedUser?.id, "max-personal"],
@@ -307,21 +251,13 @@ export default function AdminUsers() {
       if (!res.ok) throw new Error(data.error || "Failed to save");
       return data;
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       setMaxPersonalIdInstance("");
       setMaxPersonalApiToken("");
       setMaxPersonalLabel("");
       setMaxPersonalShowForm(false);
-      if (data.status !== "authorized") {
-        // Open QR dialog for authorization
-        setQrAccountId(data.accountId);
-        setQrImage(null);
-        setQrStatus(data.status ?? "notAuthorized");
-        setQrDialogOpen(true);
-      } else {
-        toast({ title: "Сохранено", description: "MAX Personal аккаунт подключён" });
-        refetchMaxPersonal();
-      }
+      toast({ title: "Сохранено", description: "Данные сохранены. Пользователь может авторизоваться через QR в своей панели." });
+      refetchMaxPersonal();
     },
     onError: (error: Error) => {
       toast({ title: "Ошибка", description: error.message, variant: "destructive" });
@@ -773,35 +709,19 @@ export default function AdminUsers() {
                                               </p>
                                             </div>
                                           </div>
-                                          <div className="flex items-center gap-1 shrink-0">
-                                            {acc.status !== "authorized" && (
-                                              <Button
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => {
-                                                  setQrAccountId(acc.accountId);
-                                                  setQrImage(null);
-                                                  setQrStatus(acc.status);
-                                                  setQrDialogOpen(true);
-                                                }}
-                                              >
-                                                QR
-                                              </Button>
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => deleteMaxPersonalMutation.mutate(acc.accountId)}
+                                            disabled={deleteMaxPersonalMutation.isPending}
+                                            data-testid={`button-max-personal-disconnect-${acc.accountId}`}
+                                          >
+                                            {deleteMaxPersonalMutation.isPending ? (
+                                              <Loader2 className="h-4 w-4 animate-spin" />
+                                            ) : (
+                                              "Удалить"
                                             )}
-                                            <Button
-                                              variant="outline"
-                                              size="sm"
-                                              onClick={() => deleteMaxPersonalMutation.mutate(acc.accountId)}
-                                              disabled={deleteMaxPersonalMutation.isPending}
-                                              data-testid={`button-max-personal-disconnect-${acc.accountId}`}
-                                            >
-                                              {deleteMaxPersonalMutation.isPending ? (
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                              ) : (
-                                                "Удалить"
-                                              )}
-                                            </Button>
-                                          </div>
+                                          </Button>
                                         </div>
                                         {acc.webhookRegistered === false && acc.status === "authorized" && (
                                           <div className="flex items-center gap-2 text-amber-600 text-xs">
@@ -1026,51 +946,6 @@ export default function AdminUsers() {
         </DialogContent>
       </Dialog>
 
-      {/* GREEN-API QR Authorization Dialog */}
-      <Dialog open={qrDialogOpen} onOpenChange={(open) => {
-        if (!open) {
-          if (qrPollRef.current) clearInterval(qrPollRef.current);
-          setQrDialogOpen(false);
-          refetchMaxPersonal();
-        }
-      }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Авторизация WhatsApp</DialogTitle>
-            <DialogDescription>
-              Откройте WhatsApp на телефоне → Связанные устройства → Привязать устройство и отсканируйте QR-код
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col items-center gap-4 py-2">
-            {qrLoading && !qrImage && (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Loader2 className="h-5 w-5 animate-spin" />
-                <span className="text-sm">Загрузка QR-кода...</span>
-              </div>
-            )}
-            {qrImage && (
-              <img
-                src={qrImage}
-                alt="QR код для авторизации WhatsApp"
-                className="w-56 h-56 rounded-md border"
-              />
-            )}
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Ожидание сканирования... QR обновляется каждые 20 сек
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => {
-              if (qrPollRef.current) clearInterval(qrPollRef.current);
-              setQrDialogOpen(false);
-              refetchMaxPersonal();
-            }}>
-              Закрыть
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

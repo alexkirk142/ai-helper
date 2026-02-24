@@ -219,6 +219,109 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/channels/max-personal/accounts — list all accounts for current tenant (including pending auth)
+  app.get("/api/channels/max-personal/accounts", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = req.userId ? await storage.getUser(req.userId) : undefined;
+      const tenantId = user?.tenantId;
+      if (!tenantId) return res.status(404).json({ error: "Tenant not found" });
+
+      const { db } = await import("./db");
+      const { maxPersonalAccounts } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const rows = await db.select({
+        accountId: maxPersonalAccounts.accountId,
+        idInstance: maxPersonalAccounts.idInstance,
+        displayName: maxPersonalAccounts.displayName,
+        label: maxPersonalAccounts.label,
+        status: maxPersonalAccounts.status,
+        webhookRegistered: maxPersonalAccounts.webhookRegistered,
+      }).from(maxPersonalAccounts).where(eq(maxPersonalAccounts.tenantId, tenantId));
+
+      return res.json({ accounts: rows });
+    } catch (error) {
+      console.error("Error fetching MAX Personal accounts:", error);
+      res.status(500).json({ error: "Failed to fetch accounts" });
+    }
+  });
+
+  // GET /api/channels/max-personal/:accountId/qr — get QR code for authorization
+  app.get("/api/channels/max-personal/:accountId/qr", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = req.userId ? await storage.getUser(req.userId) : undefined;
+      const tenantId = user?.tenantId;
+      if (!tenantId) return res.status(404).json({ error: "Tenant not found" });
+
+      const { db } = await import("./db");
+      const { maxPersonalAccounts } = await import("@shared/schema");
+      const { and, eq } = await import("drizzle-orm");
+      const account = await db.query.maxPersonalAccounts.findFirst({
+        where: and(
+          eq(maxPersonalAccounts.tenantId, tenantId),
+          eq(maxPersonalAccounts.accountId, req.params.accountId)
+        ),
+      });
+      if (!account) return res.status(404).json({ error: "Account not found" });
+
+      const { maxGreenApiAdapter } = await import("./services/max-green-api-adapter");
+      const qrResult = await maxGreenApiAdapter.getQR(account.idInstance, account.apiTokenInstance);
+      return res.json(qrResult);
+    } catch (error: any) {
+      console.error("Error fetching GREEN-API QR:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch QR" });
+    }
+  });
+
+  // GET /api/channels/max-personal/:accountId/status — poll auth status and activate if authorized
+  app.get("/api/channels/max-personal/:accountId/status", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = req.userId ? await storage.getUser(req.userId) : undefined;
+      const tenantId = user?.tenantId;
+      if (!tenantId) return res.status(404).json({ error: "Tenant not found" });
+
+      const { db } = await import("./db");
+      const { maxPersonalAccounts } = await import("@shared/schema");
+      const { and, eq } = await import("drizzle-orm");
+      const account = await db.query.maxPersonalAccounts.findFirst({
+        where: and(
+          eq(maxPersonalAccounts.tenantId, tenantId),
+          eq(maxPersonalAccounts.accountId, req.params.accountId)
+        ),
+      });
+      if (!account) return res.status(404).json({ error: "Account not found" });
+
+      const { maxGreenApiAdapter } = await import("./services/max-green-api-adapter");
+      const state = await maxGreenApiAdapter.getState(account.idInstance, account.apiTokenInstance);
+
+      if (state === "authorized" && account.status !== "authorized") {
+        let displayName: string | undefined;
+        try {
+          const info = await maxGreenApiAdapter.getAccountInfo(account.idInstance, account.apiTokenInstance);
+          displayName = info.nameAccount || info.wid;
+        } catch { /* non-fatal */ }
+
+        const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+        const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${account.accountId}`;
+        let webhookRegistered = false;
+        try {
+          await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
+          webhookRegistered = true;
+        } catch (err: any) {
+          console.error("[Routes] GREEN-API setWebhook failed:", err.message);
+        }
+
+        await db.update(maxPersonalAccounts)
+          .set({ status: "authorized", webhookRegistered, displayName: displayName ?? account.displayName, updatedAt: new Date() })
+          .where(and(eq(maxPersonalAccounts.tenantId, tenantId), eq(maxPersonalAccounts.accountId, account.accountId)));
+      }
+
+      return res.json({ status: state });
+    } catch (error: any) {
+      console.error("Error polling GREEN-API status:", error);
+      res.status(500).json({ error: error.message || "Failed to poll status" });
+    }
+  });
+
   app.get("/api/channels/feature-flags", requireAuth, requirePermission("MANAGE_CHANNELS"), async (req: Request, res: Response) => {
     try {
       const flags = {
