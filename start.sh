@@ -1,5 +1,5 @@
 #!/bin/sh
-echo "Running database migrations..."
-npx drizzle-kit migrate
+echo "Syncing database schema..."
+npx drizzle-kit push --force
 echo "Starting application..."
 NODE_ENV=production node dist/index.cjs
