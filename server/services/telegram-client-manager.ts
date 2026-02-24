@@ -22,6 +22,7 @@ interface ActiveConnection {
 class TelegramClientManager {
   private connections = new Map<string, ActiveConnection>();
   private reconnectTimers = new Map<string, NodeJS.Timeout>();
+  private reconnectCounts = new Map<string, number>(); // persists across reconnect cycles
   private healthCheckTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private isInitialized = false;
@@ -261,6 +262,7 @@ class TelegramClientManager {
       }
 
       console.log(`[TelegramClientManager] Connected: ${connectionKey}, total: ${this.connections.size}`);
+      this.reconnectCounts.delete(connectionKey); // reset on success
       return true;
     } catch (error: any) {
       console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
@@ -349,6 +351,7 @@ class TelegramClientManager {
       }
 
       console.log(`[TelegramClientManager] Connected: ${connectionKey}, total connections: ${this.connections.size}`);
+      this.reconnectCounts.delete(connectionKey); // reset on success
       return true;
     } catch (error: any) {
       console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
@@ -627,36 +630,39 @@ class TelegramClientManager {
           `[TelegramClientManager] FATAL error for ${connectionKey}: ${errorMessage}. ` +
           `Session permanently revoked — user must re-authorize.`
         );
+        this.reconnectCounts.delete(connectionKey);
         if (!connection.accountId.startsWith("legacy_")) {
           storage.updateTelegramAccount(connection.accountId, { isActive: false }).catch(() => {});
         }
         return;
       }
+    }
 
-      // AUTH_KEY_DUPLICATED: retry a few times, then give up (session is truly duplicated elsewhere)
-      if (errorMessage.includes("AUTH_KEY_DUPLICATED")) {
-        connection.reconnectAttempts = (connection.reconnectAttempts ?? 0) + 1;
-        if (connection.reconnectAttempts > TelegramClientManager.MAX_DUPLICATE_ATTEMPTS) {
-          console.error(
-            `[TelegramClientManager] AUTH_KEY_DUPLICATED persists after ` +
-            `${TelegramClientManager.MAX_DUPLICATE_ATTEMPTS} retries for ${connectionKey}. ` +
-            `Session is active elsewhere — account disabled, please re-authorize in Settings.`
-          );
-          if (!connection.accountId.startsWith("legacy_")) {
-            storage.updateTelegramAccount(connection.accountId, { isActive: false }).catch(() => {});
-          }
-          return;
-        }
+    // Increment persistent counter (survives across connectAccount calls)
+    const attempts = (this.reconnectCounts.get(connectionKey) ?? 0) + 1;
+    this.reconnectCounts.set(connectionKey, attempts);
+
+    // AUTH_KEY_DUPLICATED: give up after fewer attempts (session is truly duplicated elsewhere)
+    if (errorMessage?.includes("AUTH_KEY_DUPLICATED") && attempts > TelegramClientManager.MAX_DUPLICATE_ATTEMPTS) {
+      console.error(
+        `[TelegramClientManager] AUTH_KEY_DUPLICATED persists after ` +
+        `${attempts} retries for ${connectionKey}. ` +
+        `Session is active elsewhere — account disabled, please re-authorize in Settings.`
+      );
+      this.reconnectCounts.delete(connectionKey);
+      if (!connection.accountId.startsWith("legacy_")) {
+        storage.updateTelegramAccount(connection.accountId, { isActive: false }).catch(() => {});
       }
+      return;
     }
 
     // Stop after max attempts to avoid infinite loops
-    connection.reconnectAttempts = (connection.reconnectAttempts ?? 0) + 1;
-    if (connection.reconnectAttempts > TelegramClientManager.MAX_RECONNECT_ATTEMPTS) {
+    if (attempts > TelegramClientManager.MAX_RECONNECT_ATTEMPTS) {
       console.error(
         `[TelegramClientManager] Max reconnect attempts (${TelegramClientManager.MAX_RECONNECT_ATTEMPTS}) ` +
         `reached for ${connectionKey}. Giving up.`
       );
+      this.reconnectCounts.delete(connectionKey);
       if (!connection.accountId.startsWith("legacy_")) {
         storage.updateTelegramAccount(connection.accountId, { isActive: false }).catch(() => {});
       }
@@ -675,10 +681,10 @@ class TelegramClientManager {
       : false;
     const delay = isTransient
       ? 90000
-      : Math.min(30000 * Math.pow(2, connection.reconnectAttempts - 1), 300000);
+      : Math.min(30000 * Math.pow(2, attempts - 1), 300000);
 
     console.log(
-      `[TelegramClientManager] Scheduling reconnect #${connection.reconnectAttempts} ` +
+      `[TelegramClientManager] Scheduling reconnect #${attempts} ` +
       `for ${connectionKey} in ${delay / 1000}s` +
       (isTransient ? " (waiting for Telegram to release old key)" : "")
     );
