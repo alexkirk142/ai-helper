@@ -1,4 +1,4 @@
-const YANDEX_SEARCH_URL = "https://searchapi.yandex.net/v2/web/search";
+const YANDEX_SEARCH_URL = "https://searchapi.api.cloud.yandex.net/v2/web/search";
 
 export const DOMAIN_PRIORITY_SCORES: Record<string, number> = {
   "baza.drom.ru": 10,
