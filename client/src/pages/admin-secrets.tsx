@@ -213,6 +213,10 @@ export default function AdminSecrets() {
     queryKey: ["/api/admin/secrets"],
     queryFn: async () => {
       const res = await fetch("/api/admin/secrets?limit=50", { credentials: "include" });
+      if (res.status === 401) {
+        window.location.href = "/auth";
+        throw new Error("Сессия истекла");
+      }
       if (!res.ok) throw new Error("Failed to fetch secrets");
       return res.json();
     },

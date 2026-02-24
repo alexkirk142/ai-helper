@@ -21,12 +21,14 @@ export function getSession() {
   const pgStore = connectPg(session);
   const sessionStore = new pgStore({
     conString: process.env.DATABASE_URL,
-    createTableIfMissing: false,
-    ttl: sessionTtl,
+    createTableIfMissing: true,
+    ttl: sessionTtl / 1000, // connect-pg-simple expects seconds
     tableName: "sessions",
   });
   const isProduction = cfg.NODE_ENV === "production";
-  const trustProxy = process.env.TRUST_PROXY === "true";
+  // Railway and most cloud providers sit behind a reverse proxy that terminates TLS.
+  // We always trust the first proxy hop so secure cookies work correctly.
+  const trustProxy = process.env.TRUST_PROXY !== "false";
   return session({
     secret,
     store: sessionStore,
@@ -34,7 +36,7 @@ export function getSession() {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: trustProxy ? "auto" : isProduction,
+      secure: isProduction ? (trustProxy ? "auto" : true) : false,
       sameSite: "lax",
       maxAge: sessionTtl,
     },

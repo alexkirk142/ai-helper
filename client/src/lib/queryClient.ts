@@ -36,6 +36,11 @@ async function getCsrfToken(): Promise<string> {
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
+    // Session expired — redirect to login automatically
+    if (res.status === 401) {
+      window.location.href = "/auth";
+      throw new Error("Сессия истекла. Перенаправление на страницу входа...");
+    }
     const text = (await res.text()) || res.statusText;
     throw new Error(`${res.status}: ${text}`);
   }
