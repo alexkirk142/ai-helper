@@ -300,21 +300,22 @@ function buildYandexQueries(
   const queries: string[] = [];
 
   // Query 1: always — most reliable
-  queries.push(`${label} ${oem} купить б/у`);
+  queries.push(`${label} ${oem} купить`);
 
   // Query 2: with make+model context
   if (make && model) {
     queries.push(`${label} ${make} ${model} ${oem} контрактная`);
   } else if (make) {
-    queries.push(`контрактная ${label} ${make} ${oem}`);
+    queries.push(`${label} ${make} ${oem} контрактная`);
   }
 
-  // Query 3: with modelName if it differs from OEM and has no 4+ digits
+  // Queries 3 & 4: with modelName if it differs from OEM and has no 4+ digits
   if (modelName && modelName !== oem && !/\d{4,}/.test(modelName)) {
-    queries.push(`${label} ${modelName} ${oem} цена`);
+    queries.push(`${label} ${modelName} ${make} купить`);
+    queries.push(`${label} ${modelName} цена`);
   }
 
-  return queries.slice(0, 3);
+  return queries.slice(0, 4);
 }
 
 function parseListingsFromHtml(

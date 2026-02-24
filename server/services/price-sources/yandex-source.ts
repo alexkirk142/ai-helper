@@ -89,28 +89,24 @@ export async function searchYandex(
     }
 
     const rawText = await res.text();
-    console.log("[YandexSource] Raw response (first 2000 chars):", rawText.slice(0, 2000));
-
     const data = JSON.parse(rawText) as any;
-    console.log("[YandexSource] Response keys:", Object.keys(data));
-    console.log("[YandexSource] Full data:", JSON.stringify(data).slice(0, 3000));
 
-    const items: any[] =
-      data?.result?.response?.results?.[0]?.items ?? [];
+    const xmlString = Buffer.from(data.rawData, "base64").toString("utf-8");
 
-    return items
-      .map((item: any) => {
-        const url: string = item.url ?? "";
-        const domain = extractDomain(url);
-        return {
-          url,
-          title: item.title ?? "",
-          snippet: item.snippet ?? "",
-          domain,
-          priorityScore: getDomainScore(domain),
-        };
-      })
-      .filter((r) => !isExcludedDomain(r.url))
+    const urlMatches = [...xmlString.matchAll(/<url>([^<]+)<\/url>/g)].map(m => m[1]);
+    const titleMatches = [...xmlString.matchAll(/<title>([^<]+)<\/title>/g)].map(m => m[1]);
+    const snippetMatches = [...xmlString.matchAll(/<(?:passage|headline)>([^<]+)<\/(?:passage|headline)>/g)].map(m => m[1]);
+    const domainMatches = [...xmlString.matchAll(/<domain>([^<]+)<\/domain>/g)].map(m => m[1]);
+
+    return urlMatches
+      .map((url, i) => ({
+        url,
+        title: titleMatches[i] ?? "",
+        snippet: snippetMatches[i] ?? "",
+        domain: domainMatches[i] ?? extractDomain(url),
+        priorityScore: getDomainScore(domainMatches[i] ?? extractDomain(url)),
+      }))
+      .filter(r => !isExcludedDomain(r.url))
       .sort((a, b) => b.priorityScore - a.priorityScore);
 
   } catch (err: any) {
