@@ -73,6 +73,8 @@ export async function searchYandex(
 
     clearTimeout(timer);
 
+    console.log("[YandexSource] Response status:", res.status);
+
     if (res.status === 429) {
       console.warn("[YandexSource] Rate limit hit (429), returning []");
       return [];
@@ -86,7 +88,13 @@ export async function searchYandex(
       return [];
     }
 
-    const data = await res.json() as any;
+    const rawText = await res.text();
+    console.log("[YandexSource] Raw response (first 2000 chars):", rawText.slice(0, 2000));
+
+    const data = JSON.parse(rawText) as any;
+    console.log("[YandexSource] Response keys:", Object.keys(data));
+    console.log("[YandexSource] Full data:", JSON.stringify(data).slice(0, 3000));
+
     const items: any[] =
       data?.result?.response?.results?.[0]?.items ?? [];
 
