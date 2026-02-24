@@ -1726,7 +1726,9 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
   const [qrAccountId, setQrAccountId] = useState<string | null>(null);
   const [qrImage, setQrImage] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState<string | null>(null);
   const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastQrFetchRef = useRef<number>(0);
 
   const { data: accountsData, refetch: refetchAccounts } = useQuery<{
     accounts: Array<{
@@ -1752,13 +1754,20 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
   const isConnected = authorizedAccounts.length > 0;
 
   const fetchQR = async (accountId: string) => {
+    // Throttle QR fetches — GREEN-API has rate limits
+    const now = Date.now();
+    if (now - lastQrFetchRef.current < 25000) return;
+    lastQrFetchRef.current = now;
+
     setQrLoading(true);
     try {
       const res = await fetch(`/api/channels/max-personal/${accountId}/qr`, { credentials: "include" });
+      if (res.status === 429) return; // rate-limited, skip silently
       const data = await res.json();
       if (data.type === "qrCode") {
         setQrImage(`data:image/png;base64,${data.message}`);
       } else if (data.type === "alreadyLogged") {
+        if (qrPollRef.current) clearInterval(qrPollRef.current);
         setQrDialogOpen(false);
         toast({ title: "MAX уже подключён" });
         refetchAccounts();
@@ -1768,9 +1777,25 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
     }
   };
 
-  const openQrDialog = (accountId: string) => {
+  // Check if already authorized before opening QR dialog
+  const openQrDialog = async (accountId: string) => {
+    setCheckingStatus(accountId);
+    try {
+      const res = await fetch(`/api/channels/max-personal/${accountId}/status`, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === "authorized") {
+          toast({ title: "MAX подключён!", description: "Аккаунт уже авторизован" });
+          refetchAccounts();
+          return;
+        }
+      }
+    } catch { /* ignore */ } finally {
+      setCheckingStatus(null);
+    }
     setQrAccountId(accountId);
     setQrImage(null);
+    lastQrFetchRef.current = 0;
     setQrDialogOpen(true);
   };
 
@@ -1783,9 +1808,12 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
   useEffect(() => {
     if (qrDialogOpen && qrAccountId) {
       fetchQR(qrAccountId);
+      // Poll status every 30s; refresh QR only after status check
       qrPollRef.current = setInterval(async () => {
         try {
           const res = await fetch(`/api/channels/max-personal/${qrAccountId}/status`, { credentials: "include" });
+          if (res.status === 429) return; // rate-limited, wait next cycle
+          if (!res.ok) return;
           const data = await res.json();
           if (data.status === "authorized") {
             if (qrPollRef.current) clearInterval(qrPollRef.current);
@@ -1793,10 +1821,11 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
             toast({ title: "MAX подключён!", description: "Аккаунт успешно авторизован" });
             refetchAccounts();
           } else {
+            // Refresh QR after status check (throttled inside fetchQR)
             await fetchQR(qrAccountId);
           }
         } catch { /* ignore */ }
-      }, 20000);
+      }, 30000);
     }
     return () => { if (qrPollRef.current) clearInterval(qrPollRef.current); };
   }, [qrDialogOpen, qrAccountId]);
@@ -1857,8 +1886,15 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
                   <p className="text-xs text-muted-foreground">Требуется авторизация через MAX</p>
                 </div>
               </div>
-              <Button size="sm" onClick={() => openQrDialog(acc.accountId)}>
-                Подключить
+              <Button
+                size="sm"
+                onClick={() => openQrDialog(acc.accountId)}
+                disabled={checkingStatus === acc.accountId}
+              >
+                {checkingStatus === acc.accountId
+                  ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Проверка...</>
+                  : "Подключить"
+                }
               </Button>
             </div>
           ))}
@@ -1885,7 +1921,7 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
             )}
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
-              Ожидание сканирования... QR обновляется каждые 20 сек
+              Ожидание сканирования... статус проверяется каждые 30 сек
             </p>
           </div>
           <DialogFooter>
