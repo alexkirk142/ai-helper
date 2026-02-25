@@ -135,11 +135,12 @@ class RealtimeService {
       message,
     });
 
+    // Broadcast to ALL connected clients of the tenant — not just those viewing this conversation.
+    // The client needs new_message to invalidate the conversation list preview and unread counts
+    // regardless of which conversation the operator currently has open.
     Array.from(this.clients).forEach(client => {
       if (client.ws.readyState === WebSocket.OPEN && client.tenantId === tenantId) {
-        if (!client.conversationId || client.conversationId === conversationId) {
-          client.ws.send(payload);
-        }
+        client.ws.send(payload);
       }
     });
   }

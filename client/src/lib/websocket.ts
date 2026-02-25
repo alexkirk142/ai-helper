@@ -86,8 +86,10 @@ class WebSocketClient {
     if (type === "conversation_update") {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/conversations/channel-counts"] });
-      if (data.conversationId) {
-        queryClient.invalidateQueries({ queryKey: ["/api/conversations", data.conversationId] });
+      // payload shape: { type, conversation: { id, ... } } — use conversation.id, not conversationId
+      const convId = data.conversation?.id ?? data.conversationId;
+      if (convId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/conversations", convId] });
       }
     }
 
