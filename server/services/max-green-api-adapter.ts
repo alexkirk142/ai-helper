@@ -1,5 +1,5 @@
 const BASE_URL = (idInstance: string) =>
-  `https://api.green-api.com/waInstance${idInstance}`;
+  `https://api.green-api.com/v3/waInstance${idInstance}`;
 
 export class MaxGreenApiAdapter {
   async getState(idInstance: string, token: string): Promise<string> {

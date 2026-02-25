@@ -442,6 +442,25 @@ router.post(
             console.error(`[OutboundHandler] Telegram send error:`, sendError.message);
           }
         }
+
+        if (effectiveChannelType === "max_personal" && conversation.customer) {
+          try {
+            const { maxPersonalAdapter } = await import("../services/max-personal-adapter");
+            const chatId = conversation.customer.externalId;
+            const sendResult = await maxPersonalAdapter.sendMessageForTenant(
+              conversation.tenantId,
+              chatId,
+              content.trim(),
+            );
+            if (sendResult.success) {
+              console.log(`[OutboundHandler] MAX Personal message sent: ${sendResult.externalMessageId}`);
+            } else {
+              console.error(`[OutboundHandler] MAX Personal send failed: ${sendResult.error}`);
+            }
+          } catch (sendError: any) {
+            console.error(`[OutboundHandler] MAX Personal send error:`, sendError.message);
+          }
+        }
       }
 
       res.status(201).json(message);
@@ -614,6 +633,20 @@ async function sendToChannel(conversationId: string, text: string, tenantId: str
       console.log(`[Outbound] Sending WhatsApp message to ${recipientJid}`);
       channelSendResult = await waAdapter.sendMessage(recipientJid, text);
       console.log(`[Outbound] Result:`, sanitizeForLog(channelSendResult));
+    } else if (effectiveChannelType === "max_personal" && conversationDetail.customer) {
+      try {
+        const { maxPersonalAdapter } = await import("../services/max-personal-adapter");
+        const chatId = conversationDetail.customer.externalId;
+        console.log(`[Outbound] Sending MAX Personal message to ${chatId}`);
+        channelSendResult = await maxPersonalAdapter.sendMessageForTenant(tenantId, chatId, text);
+        if (channelSendResult.success) {
+          console.log(`[Outbound] MAX Personal message sent: ${channelSendResult.externalMessageId}`);
+        } else {
+          console.error(`[Outbound] MAX Personal send failed: ${channelSendResult.error}`);
+        }
+      } catch (maxError: any) {
+        console.error(`[Outbound] MAX Personal send error:`, maxError.message);
+      }
     }
   } catch (channelError) {
     console.error("[Outbound] Channel send error:", channelError);
