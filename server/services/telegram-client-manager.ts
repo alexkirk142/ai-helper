@@ -263,6 +263,21 @@ class TelegramClientManager {
 
       console.log(`[TelegramClientManager] Connected: ${connectionKey}, total: ${this.connections.size}`);
       this.reconnectCounts.delete(connectionKey); // reset on success
+
+      // Persist the current session string — gramjs may have rotated the auth key during connect
+      // (e.g. after AUTH_KEY_DUPLICATED recovery). Without this, the next restart re-reads the
+      // stale key from DB and immediately hits AUTH_KEY_DUPLICATED or AUTH_KEY_INVALID again.
+      try {
+        const savedSession = session.save() as unknown as string;
+        if (savedSession && savedSession !== sessionString) {
+          console.log(`[TelegramClientManager] Auth key rotated for ${connectionKey} — persisting updated session to DB`);
+          await storage.updateTelegramAccount(accountId, { sessionString: savedSession });
+          connection.sessionString = savedSession;
+        }
+      } catch (saveErr: any) {
+        console.warn(`[TelegramClientManager] Could not persist updated session for ${connectionKey}: ${saveErr.message}`);
+      }
+
       return true;
     } catch (error: any) {
       console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
@@ -671,12 +686,35 @@ class TelegramClientManager {
       if (existingTimer) clearTimeout(existingTimer);
 
       const timer = setTimeout(async () => {
-        console.log(`[TelegramClientManager] Slow retry for ${connectionKey} after AUTH_KEY_DUPLICATED cooldown`);
+        console.log(`[TelegramClientManager] Slow retry for ${connectionKey} after AUTH_KEY_DUPLICATED cooldown — fully reinitializing client`);
         this.reconnectTimers.delete(connectionKey);
+
+        // Destroy any lingering in-memory client state so the next attempt starts completely fresh.
+        // The old Railway container should be long gone by now (30-60s TTL vs our 5min wait).
+        const stale = this.connections.get(connectionKey);
+        if (stale) {
+          try { await stale.client.disconnect(); } catch {}
+          this.connections.delete(connectionKey);
+        }
+
         if (connection.accountId.startsWith("legacy_")) {
           await this.connect(connection.tenantId, connection.channelId!, connection.sessionString);
         } else {
-          await this.connectAccount(connection.tenantId, connection.accountId, connection.channelId, connection.sessionString);
+          // Reload session from DB — it may have been rotated during a prior successful connect
+          // in another process or a previous restart cycle.
+          let freshSession = connection.sessionString;
+          try {
+            const account = await storage.getTelegramAccountById(connection.accountId);
+            if (account?.sessionString) {
+              freshSession = account.sessionString;
+              if (freshSession !== connection.sessionString) {
+                console.log(`[TelegramClientManager] Using refreshed session from DB for ${connectionKey}`);
+              }
+            }
+          } catch (dbErr: any) {
+            console.warn(`[TelegramClientManager] Could not reload session from DB for ${connectionKey}: ${dbErr.message}`);
+          }
+          await this.connectAccount(connection.tenantId, connection.accountId, connection.channelId, freshSession);
         }
       }, TelegramClientManager.SLOW_RETRY_DELAY_MS);
 
