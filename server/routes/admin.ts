@@ -2238,6 +2238,7 @@ router.post(
 
       const appUrl = getAppUrl();
       const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
+      const { maxGreenApiAdapter } = await import("../services/max-green-api-adapter");
       await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
 
       await db.update(maxPersonalAccounts)
