@@ -280,6 +280,22 @@ export default function AdminUsers() {
     },
   });
 
+  const registerWebhookMutation = useMutation({
+    mutationFn: async (accountId: string) => {
+      const res = await apiRequest("POST", `/api/admin/users/${selectedUser?.id}/max-personal/${accountId}/register-webhook`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to register webhook");
+      return data;
+    },
+    onSuccess: () => {
+      toast({ title: "Вебхук зарегистрирован", description: "GREEN-API теперь будет слать входящие сообщения на наш сервер" });
+      refetchMaxPersonal();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Ошибка регистрации вебхука", description: error.message, variant: "destructive" });
+    },
+  });
+
   if (authLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -726,7 +742,20 @@ export default function AdminUsers() {
                                         {acc.webhookRegistered === false && acc.status === "authorized" && (
                                           <div className="flex items-center gap-2 text-amber-600 text-xs">
                                             <AlertCircle className="h-3 w-3 shrink-0" />
-                                            Вебхук не зарегистрирован — входящие сообщения не поступят
+                                            <span>Вебхук не зарегистрирован — входящие сообщения не поступят</span>
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              className="h-6 px-2 text-xs ml-auto"
+                                              disabled={registerWebhookMutation.isPending}
+                                              onClick={() => registerWebhookMutation.mutate(acc.accountId)}
+                                            >
+                                              {registerWebhookMutation.isPending ? (
+                                                <Loader2 className="h-3 w-3 animate-spin" />
+                                              ) : (
+                                                "Зарегистрировать вебхук"
+                                              )}
+                                            </Button>
                                           </div>
                                         )}
                                         {acc.status !== "authorized" && (

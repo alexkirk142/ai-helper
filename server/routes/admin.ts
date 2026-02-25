@@ -2210,6 +2210,47 @@ router.patch(
   }
 );
 
+// POST /users/:userId/max-personal/:accountId/register-webhook — force re-register webhook
+router.post(
+  "/users/:userId/max-personal/:accountId/register-webhook",
+  requireAuth,
+  requirePlatformAdmin(),
+  async (req, res) => {
+    try {
+      const { userId, accountId } = req.params;
+
+      const userRow = await db.select({ tenantId: users.tenantId }).from(users).where(eq(users.id, userId)).limit(1);
+      if (!userRow[0]?.tenantId) {
+        return res.status(404).json({ error: "User or tenant not found" });
+      }
+      const { tenantId } = userRow[0];
+
+      const [account] = await db.select().from(maxPersonalAccounts)
+        .where(and(eq(maxPersonalAccounts.tenantId, tenantId), eq(maxPersonalAccounts.accountId, accountId)))
+        .limit(1);
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+      if (account.status !== "authorized") {
+        return res.status(400).json({ error: "Account is not authorized" });
+      }
+
+      const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+      const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
+      await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
+
+      await db.update(maxPersonalAccounts)
+        .set({ webhookRegistered: true, updatedAt: new Date() })
+        .where(and(eq(maxPersonalAccounts.tenantId, tenantId), eq(maxPersonalAccounts.accountId, accountId)));
+
+      return res.json({ success: true, webhookUrl });
+    } catch (error: any) {
+      console.error("[Admin] GREEN-API register-webhook failed:", error.message);
+      res.status(500).json({ error: error.message || "Failed to register webhook" });
+    }
+  }
+);
+
 // DELETE /users/:userId/max-personal/:accountId — delete specific account
 router.delete(
   "/users/:userId/max-personal/:accountId",

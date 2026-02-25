@@ -617,12 +617,15 @@ class TelegramClientManager {
     "SESSION_EXPIRED",
   ];
 
-  // After this many AUTH_KEY_DUPLICATED attempts, treat as permanently duplicate and give up
-  private static readonly MAX_DUPLICATE_ATTEMPTS = 3;
+  // After this many fast 90s retries for AUTH_KEY_DUPLICATED, switch to slow 5-min retries.
+  // Never give up on AUTH_KEY_DUPLICATED — it is always transient (old container still running on deploy).
+  private static readonly MAX_DUPLICATE_FAST_ATTEMPTS = 4;
   private static readonly MAX_RECONNECT_ATTEMPTS = 10;
+  // Slow-retry delay after fast attempts are exhausted (e.g. long-running old container during deploy)
+  private static readonly SLOW_RETRY_DELAY_MS = 5 * 60 * 1000;
 
   private scheduleReconnect(connectionKey: string, connection: ActiveConnection, errorMessage?: string): void {
-    // Permanently fatal — stop immediately and disable account
+    // Permanently fatal — stop immediately and update status
     if (errorMessage) {
       const isFatal = TelegramClientManager.FATAL_ERRORS.some((e) => errorMessage.includes(e));
       if (isFatal) {
@@ -632,7 +635,11 @@ class TelegramClientManager {
         );
         this.reconnectCounts.delete(connectionKey);
         if (!connection.accountId.startsWith("legacy_")) {
-          storage.updateTelegramAccount(connection.accountId, { isActive: false }).catch(() => {});
+          storage.updateTelegramAccount(connection.accountId, {
+            status: "error",
+            lastError: errorMessage,
+            isEnabled: false,
+          }).catch(() => {});
         }
         return;
       }
@@ -642,29 +649,53 @@ class TelegramClientManager {
     const attempts = (this.reconnectCounts.get(connectionKey) ?? 0) + 1;
     this.reconnectCounts.set(connectionKey, attempts);
 
-    // AUTH_KEY_DUPLICATED: give up after fewer attempts (session is truly duplicated elsewhere)
-    if (errorMessage?.includes("AUTH_KEY_DUPLICATED") && attempts > TelegramClientManager.MAX_DUPLICATE_ATTEMPTS) {
-      console.error(
-        `[TelegramClientManager] AUTH_KEY_DUPLICATED persists after ` +
-        `${attempts} retries for ${connectionKey}. ` +
-        `Session is active elsewhere — account disabled, please re-authorize in Settings.`
+    const isAuthKeyDuplicated = errorMessage?.includes("AUTH_KEY_DUPLICATED") ?? false;
+
+    // AUTH_KEY_DUPLICATED is ALWAYS a transient error caused by deploy overlap (old container still running).
+    // After MAX_DUPLICATE_FAST_ATTEMPTS fast retries, switch to slow 5-min retries — never give up entirely.
+    if (isAuthKeyDuplicated && attempts > TelegramClientManager.MAX_DUPLICATE_FAST_ATTEMPTS) {
+      console.warn(
+        `[TelegramClientManager] AUTH_KEY_DUPLICATED still present after ${attempts} attempts for ${connectionKey}. ` +
+        `Old container likely still running. Switching to slow retry every ${TelegramClientManager.SLOW_RETRY_DELAY_MS / 60000}min.`
       );
-      this.reconnectCounts.delete(connectionKey);
+      // Reset counter so the cycle can repeat if needed, but mark disconnected in DB for UI visibility
+      this.reconnectCounts.set(connectionKey, 0);
       if (!connection.accountId.startsWith("legacy_")) {
-        storage.updateTelegramAccount(connection.accountId, { isActive: false }).catch(() => {});
+        storage.updateTelegramAccount(connection.accountId, {
+          status: "disconnected",
+          lastError: "AUTH_KEY_DUPLICATED — old deployment still running, will retry automatically",
+        }).catch(() => {});
       }
+
+      const existingTimer = this.reconnectTimers.get(connectionKey);
+      if (existingTimer) clearTimeout(existingTimer);
+
+      const timer = setTimeout(async () => {
+        console.log(`[TelegramClientManager] Slow retry for ${connectionKey} after AUTH_KEY_DUPLICATED cooldown`);
+        this.reconnectTimers.delete(connectionKey);
+        if (connection.accountId.startsWith("legacy_")) {
+          await this.connect(connection.tenantId, connection.channelId!, connection.sessionString);
+        } else {
+          await this.connectAccount(connection.tenantId, connection.accountId, connection.channelId, connection.sessionString);
+        }
+      }, TelegramClientManager.SLOW_RETRY_DELAY_MS);
+
+      this.reconnectTimers.set(connectionKey, timer);
       return;
     }
 
-    // Stop after max attempts to avoid infinite loops
-    if (attempts > TelegramClientManager.MAX_RECONNECT_ATTEMPTS) {
+    // Stop non-AUTH_KEY_DUPLICATED errors after max attempts to avoid infinite loops
+    if (!isAuthKeyDuplicated && attempts > TelegramClientManager.MAX_RECONNECT_ATTEMPTS) {
       console.error(
         `[TelegramClientManager] Max reconnect attempts (${TelegramClientManager.MAX_RECONNECT_ATTEMPTS}) ` +
         `reached for ${connectionKey}. Giving up.`
       );
       this.reconnectCounts.delete(connectionKey);
       if (!connection.accountId.startsWith("legacy_")) {
-        storage.updateTelegramAccount(connection.accountId, { isActive: false }).catch(() => {});
+        storage.updateTelegramAccount(connection.accountId, {
+          status: "error",
+          lastError: errorMessage ?? "Max reconnect attempts reached",
+        }).catch(() => {});
       }
       return;
     }

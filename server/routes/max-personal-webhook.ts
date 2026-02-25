@@ -129,13 +129,19 @@ router.post("/:tenantId/:accountId", async (req, res) => {
       attachments: attachments.length > 0 ? attachments : undefined,
     };
 
-    await processIncomingMessageFull(tenantId, parsed);
+    // Acknowledge immediately so GREEN-API doesn't retry due to timeout.
+    res.json({ ok: true });
 
-    console.log(`[MaxPersonalWebhook] Processed ${msgType} from ${sender.chatId} for tenant ${tenantId} account ${accountId}`);
-    return res.json({ ok: true });
+    processIncomingMessageFull(tenantId, parsed).then(() => {
+      console.log(`[MaxPersonalWebhook] Processed ${msgType} from ${sender.chatId} for tenant ${tenantId} account ${accountId}`);
+    }).catch((err: Error) => {
+      console.error(`[MaxPersonalWebhook] Processing error for ${tenantId}/${accountId}:`, err.message);
+    });
   } catch (error: any) {
     console.error("[MaxPersonalWebhook] Error:", error.message);
-    return res.status(500).json({ error: "Internal error" });
+    if (!res.headersSent) {
+      return res.status(500).json({ error: "Internal error" });
+    }
   }
 });
 
