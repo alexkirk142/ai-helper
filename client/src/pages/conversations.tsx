@@ -85,7 +85,9 @@ export default function Conversations() {
     if (channelFilter === "all") return conversations;
     const types = CHANNEL_FAMILY_TYPES[channelFilter];
     return conversations.filter((c) => {
-      const channelType = c.channel?.type ?? "";
+      // Prefer channel.type from the channels table; fall back to customer.channel
+      // for conversations without a channelId (e.g. max_personal via start-conversation).
+      const channelType = c.channel?.type ?? c.customer?.channel ?? "";
       return types.includes(channelType);
     });
   }, [conversations, channelFilter]);

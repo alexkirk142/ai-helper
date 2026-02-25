@@ -11,6 +11,7 @@ import {
   messageTemplates, paymentMethods,
   tenantAgentSettings,
   transmissionIdentityCache,
+  maxPersonalAccounts,
 } from "@shared/schema";
 import {
   type Tenant, type InsertTenant,
@@ -476,13 +477,24 @@ export class DatabaseStorage implements IStorage {
 
     const connectedTypes = new Set(tenantChannels.map(c => c.type));
 
+    // MAX Personal accounts live in max_personal_accounts, not in channels table —
+    // check it separately so the "MAX" tab appears for max_personal-only tenants.
+    const mpAccounts = await db
+      .select({ id: maxPersonalAccounts.id })
+      .from(maxPersonalAccounts)
+      .where(eq(maxPersonalAccounts.tenantId, tenantId))
+      .limit(1);
+
     const hasTelegram = connectedTypes.has("telegram") || connectedTypes.has("telegram_personal");
-    const hasMax = connectedTypes.has("max") || connectedTypes.has("max_personal");
+    const hasMax = connectedTypes.has("max") || connectedTypes.has("max_personal") || mpAccounts.length > 0;
     const hasWhatsApp = connectedTypes.has("whatsapp") || connectedTypes.has("whatsapp_personal");
 
+    // Join with customers so we can resolve the channel family for conversations
+    // that have no channelId (e.g. max_personal conversations created via start-conversation).
     const rows = await db
-      .select({ channelType: channels.type, unread: conversations.unreadCount })
+      .select({ channelType: channels.type, customerChannel: customers.channel, unread: conversations.unreadCount })
       .from(conversations)
+      .innerJoin(customers, eq(conversations.customerId, customers.id))
       .leftJoin(channels, eq(conversations.channelId, channels.id))
       .where(eq(conversations.tenantId, tenantId));
 
@@ -494,7 +506,7 @@ export class DatabaseStorage implements IStorage {
     for (const row of rows) {
       const unread = row.unread ?? 0;
       all += unread;
-      const t = row.channelType ?? "";
+      const t = row.channelType ?? row.customerChannel ?? "";
       if (t === "telegram" || t === "telegram_personal") telegram += unread;
       else if (t === "max" || t === "max_personal") max += unread;
       else if (t === "whatsapp" || t === "whatsapp_personal") whatsapp += unread;
