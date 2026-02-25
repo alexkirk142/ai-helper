@@ -70,6 +70,7 @@ function buildAttachment(msgData: GreenApiMessageData): ParsedAttachment | null 
 // Route includes accountId to prevent cross-tenant spoofing.
 router.post("/:tenantId/:accountId", async (req, res) => {
   const { tenantId, accountId } = req.params;
+  console.log(`[MaxPersonalWebhook] Incoming POST /${tenantId}/${accountId} typeWebhook=${(req.body as any)?.typeWebhook ?? "?"} ip=${req.ip}`);
 
   try {
     // Verify by both tenantId and accountId — prevents cross-tenant spoofing
