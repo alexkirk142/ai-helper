@@ -360,7 +360,17 @@ async function gracefulShutdown(signal: string): Promise<void> {
     });
   });
 
-  // Step 3a: Close BullMQ workers (stop accepting new jobs, drain active ones)
+  // Step 3a: Disconnect Telegram Personal sessions gracefully so Telegram
+  // releases auth keys immediately — prevents TIMEOUT on the next restart
+  try {
+    const { telegramClientManager } = await import("./services/telegram-client-manager");
+    await telegramClientManager.shutdown();
+    log("Telegram Personal sessions disconnected", "shutdown");
+  } catch (tgErr: any) {
+    log(`Telegram shutdown error (non-fatal): ${tgErr.message}`, "shutdown");
+  }
+
+  // Step 3b: Close BullMQ workers (stop accepting new jobs, drain active ones)
   await Promise.allSettled([
     vehicleLookupWorker?.close(),
     priceLookupWorker?.close(),
@@ -368,7 +378,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   ]);
   log("BullMQ workers closed", "shutdown");
 
-  // Step 3b: Close BullMQ queue connections
+  // Step 3c: Close BullMQ queue connections
   await Promise.allSettled([
     closeQueue(),
     closeVehicleLookupQueue(),
