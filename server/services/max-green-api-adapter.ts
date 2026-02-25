@@ -1,5 +1,13 @@
+// GREEN-API hosts instances on cluster-specific subdomains.
+// The cluster prefix is the first 4 digits of idInstance (e.g. "3100" from "3100525112").
+// Full URL pattern from the GREEN-API console: https://{cluster}.api.green-api.com
+function getApiHost(idInstance: string): string {
+  const cluster = idInstance.substring(0, 4);
+  return `https://${cluster}.api.green-api.com`;
+}
+
 const BASE_URL = (idInstance: string) =>
-  `https://api.green-api.com/v3/waInstance${idInstance}`;
+  `${getApiHost(idInstance)}/v3/waInstance${idInstance}`;
 
 export class MaxGreenApiAdapter {
   async getState(idInstance: string, token: string): Promise<string> {
