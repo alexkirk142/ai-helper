@@ -116,10 +116,14 @@ router.post("/:tenantId/:accountId", async (req, res) => {
       }
     }
 
+    // Always use sender.chatId (always "79XXXXXXXXX@c.us") as the customer key.
+    // sender.sender can arrive without the "@c.us" suffix in some GREEN-API versions,
+    // which would create a duplicate customer vs the one created by start-conversation
+    // (which always stores externalId in "79XXXXXXXXX@c.us" format).
     const parsed: ParsedIncomingMessage = {
       externalMessageId: payload.idMessage || `mp_${Date.now()}`,
       externalConversationId: sender.chatId,
-      externalUserId: sender.sender || sender.chatId,
+      externalUserId: sender.chatId,
       text,
       timestamp: payload.timestamp ? new Date(payload.timestamp * 1000) : new Date(),
       channel: "max_personal",
