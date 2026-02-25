@@ -85,12 +85,12 @@ export interface IStorage {
   linkOidcToUser(userId: string, oidcId: string): Promise<void>;
 
   // Customers
-  getCustomer(id: string): Promise<Customer | undefined>;
+  getCustomer(id: string, tenantId: string): Promise<Customer | undefined>;
   getCustomersByTenant(tenantId: string): Promise<Customer[]>;
   searchCustomers(tenantId: string, query: string): Promise<Customer[]>;
   getCustomerByExternalId(tenantId: string, channel: string, externalId: string): Promise<Customer | undefined>;
-  createCustomer(customer: InsertCustomer): Promise<Customer>;
-  updateCustomer(id: string, data: UpdateCustomer): Promise<Customer | undefined>;
+  createCustomer(customer: InsertCustomer, tenantId: string): Promise<Customer>;
+  updateCustomer(id: string, tenantId: string, data: UpdateCustomer): Promise<Customer | undefined>;
 
   // Customer Notes
   getCustomerNote(id: string): Promise<CustomerNote | undefined>;
@@ -105,23 +105,23 @@ export interface IStorage {
   updateCustomerPreferences(tenantId: string, customerId: string, preferences: Record<string, unknown>): Promise<CustomerMemory>;
 
   // Conversations
-  getConversation(id: string): Promise<Conversation | undefined>;
-  getConversationWithCustomer(id: string): Promise<ConversationWithCustomer | undefined>;
-  getConversationDetail(id: string): Promise<ConversationDetail | undefined>;
+  getConversation(id: string, tenantId: string): Promise<Conversation | undefined>;
+  getConversationWithCustomer(id: string, tenantId: string): Promise<ConversationWithCustomer | undefined>;
+  getConversationDetail(id: string, tenantId: string): Promise<ConversationDetail | undefined>;
   getConversationsByTenant(tenantId: string): Promise<ConversationWithCustomer[]>;
   getActiveConversations(tenantId: string): Promise<ConversationWithCustomer[]>;
   getConversationChannelCounts(tenantId: string): Promise<{ all: number; telegram?: number; max?: number; whatsapp?: number }>;
-  createConversation(conversation: InsertConversation & { lastMessageAt?: Date; createdAt?: Date }): Promise<Conversation>;
-  updateConversation(id: string, data: Partial<InsertConversation>): Promise<Conversation | undefined>;
-  deleteConversation(id: string): Promise<boolean>;
+  createConversation(conversation: InsertConversation & { lastMessageAt?: Date; createdAt?: Date }, tenantId: string): Promise<Conversation>;
+  updateConversation(id: string, tenantId: string, data: Partial<InsertConversation>): Promise<Conversation | undefined>;
+  deleteConversation(id: string, tenantId: string): Promise<boolean>;
 
   // Messages
-  getMessage(id: string): Promise<Message | undefined>;
-  getMessagesByConversation(conversationId: string): Promise<Message[]>;
-  getMessagesByConversationPaginated(conversationId: string, cursor?: string, limit?: number): Promise<{ messages: Message[]; nextCursor: string | null }>;
-  createMessage(message: InsertMessage & { createdAt?: Date }): Promise<Message>;
-  updateMessage(id: string, data: Partial<InsertMessage>): Promise<Message | undefined>;
-  getMessagesBySuggestionId(suggestionId: string): Promise<Message[]>;
+  getMessage(id: string, tenantId: string): Promise<Message | undefined>;
+  getMessagesByConversation(conversationId: string, tenantId: string): Promise<Message[]>;
+  getMessagesByConversationPaginated(conversationId: string, tenantId: string, cursor?: string, limit?: number): Promise<{ messages: Message[]; nextCursor: string | null }>;
+  createMessage(message: InsertMessage & { createdAt?: Date }, tenantId: string): Promise<Message>;
+  updateMessage(id: string, tenantId: string, data: Partial<InsertMessage>): Promise<Message | undefined>;
+  getMessagesBySuggestionId(suggestionId: string, tenantId: string): Promise<Message[]>;
 
   // Products
   getProduct(id: string): Promise<Product | undefined>;
@@ -140,12 +140,12 @@ export interface IStorage {
   searchKnowledgeDocs(tenantId: string, query: string): Promise<KnowledgeDoc[]>;
 
   // AI Suggestions
-  getAiSuggestion(id: string): Promise<AiSuggestion | undefined>;
-  getPendingSuggestionByConversation(conversationId: string): Promise<AiSuggestion | undefined>;
-  getSuggestionsByConversation(conversationId: string): Promise<AiSuggestion[]>;
+  getAiSuggestion(id: string, tenantId: string): Promise<AiSuggestion | undefined>;
+  getPendingSuggestionByConversation(conversationId: string, tenantId: string): Promise<AiSuggestion | undefined>;
+  getSuggestionsByConversation(conversationId: string, tenantId: string): Promise<AiSuggestion[]>;
   getSuggestionsByTenant(tenantId: string): Promise<AiSuggestion[]>;
-  createAiSuggestion(suggestion: InsertAiSuggestion): Promise<AiSuggestion>;
-  updateAiSuggestion(id: string, data: Partial<InsertAiSuggestion>): Promise<AiSuggestion | undefined>;
+  createAiSuggestion(suggestion: InsertAiSuggestion, tenantId: string): Promise<AiSuggestion>;
+  updateAiSuggestion(id: string, tenantId: string, data: Partial<InsertAiSuggestion>): Promise<AiSuggestion | undefined>;
 
   // Human Actions
   createHumanAction(action: InsertHumanAction): Promise<HumanAction>;
@@ -167,11 +167,11 @@ export interface IStorage {
   upsertLearningQueueItem(item: InsertLearningQueueItem): Promise<LearningQueueItem>;
 
   // Escalation Events
-  getEscalationEvent(id: string): Promise<EscalationEvent | undefined>;
+  getEscalationEvent(id: string, tenantId: string): Promise<EscalationEvent | undefined>;
   getEscalationsByTenant(tenantId: string): Promise<EscalationEvent[]>;
   getRecentEscalations(tenantId: string, limit: number): Promise<EscalationEvent[]>;
-  createEscalationEvent(event: InsertEscalationEvent): Promise<EscalationEvent>;
-  updateEscalationEvent(id: string, data: Partial<InsertEscalationEvent>): Promise<EscalationEvent | undefined>;
+  createEscalationEvent(event: InsertEscalationEvent, tenantId: string): Promise<EscalationEvent>;
+  updateEscalationEvent(id: string, tenantId: string, data: Partial<InsertEscalationEvent>): Promise<EscalationEvent | undefined>;
 
   // Response Templates
   getTemplatesByTenant(tenantId: string): Promise<ResponseTemplate[]>;
@@ -245,12 +245,13 @@ export interface IStorage {
   linkCaseToCache(caseId: string, cacheId: string): Promise<void>;
 
   // Vehicle Lookup Cases
-  createVehicleLookupCase(data: InsertVehicleLookupCase): Promise<VehicleLookupCase>;
-  getVehicleLookupCaseById(caseId: string): Promise<VehicleLookupCase | undefined>;
+  createVehicleLookupCase(data: InsertVehicleLookupCase, tenantId: string): Promise<VehicleLookupCase>;
+  getVehicleLookupCaseById(caseId: string, tenantId: string): Promise<VehicleLookupCase | undefined>;
   getLatestVehicleLookupCaseByConversation(tenantId: string, conversationId: string): Promise<VehicleLookupCase | undefined>;
   findActiveVehicleLookupCase(tenantId: string, conversationId: string, normalizedValue: string): Promise<VehicleLookupCase | undefined>;
   updateVehicleLookupCaseStatus(
     caseId: string,
+    tenantId: string,
     patch: { status?: VehicleLookupCaseStatus; verificationStatus?: VehicleLookupVerificationStatus; error?: string | null; cacheId?: string | null }
   ): Promise<VehicleLookupCase | undefined>;
 
@@ -303,7 +304,7 @@ export interface IStorage {
   incrementTransmissionIdentityHit(normalizedOem: string): Promise<void>;
 
   // Price snapshot helpers for decision engine context injection
-  getLatestVehicleLookupCase(conversationId: string): Promise<VehicleLookupCase | undefined>;
+  getLatestVehicleLookupCase(conversationId: string, tenantId: string): Promise<VehicleLookupCase | undefined>;
   getLatestPriceSnapshotForConversation(tenantId: string, conversationId: string): Promise<PriceSnapshot | undefined>;
 }
 

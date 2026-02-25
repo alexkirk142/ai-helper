@@ -91,7 +91,7 @@ async function createResultSuggestionIfNeeded(params: {
       ? "other"
       : "gearbox_tag_request";
 
-  const recentSuggestions = await storage.getSuggestionsByConversation(conversationId);
+  const recentSuggestions = await storage.getSuggestionsByConversation(conversationId, tenantId);
   const cutoff = new Date(Date.now() - DUPLICATE_SUGGESTION_WINDOW_MS);
   const hasDuplicate = recentSuggestions
     .slice(0, 5)
@@ -114,7 +114,7 @@ async function createResultSuggestionIfNeeded(params: {
     status: "pending",
     decision: "NEED_APPROVAL",
     autosendEligible: false,
-  });
+  }, tenantId);
 
   try {
     const { realtimeService } = await import("../services/websocket-server");
@@ -126,8 +126,8 @@ async function createResultSuggestionIfNeeded(params: {
   console.log(`[VehicleLookupWorker] Created result suggestion ${suggestion.id} for conversation ${conversationId}`);
 }
 
-async function getLastCustomerMessageText(conversationId: string): Promise<string | null> {
-  const msgs = await storage.getMessagesByConversation(conversationId);
+async function getLastCustomerMessageText(conversationId: string, tenantId: string): Promise<string | null> {
+  const msgs = await storage.getMessagesByConversation(conversationId, tenantId);
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role === "customer" && msgs[i].content) {
       return msgs[i].content;
@@ -145,7 +145,7 @@ async function tryFallbackPriceLookup(params: {
 }): Promise<void> {
   const { tenantId, conversationId, messageId, gearbox, vehicleMeta } = params;
 
-  const lastMessage = await getLastCustomerMessageText(conversationId);
+  const lastMessage = await getLastCustomerMessageText(conversationId, tenantId);
   if (!lastMessage) {
     console.log("[VehicleLookupWorker] No customer message found for fallback gearbox type detection");
     return;
@@ -167,7 +167,7 @@ async function tryFallbackPriceLookup(params: {
     model: model ?? "",
   });
 
-  const recentSuggestions = await storage.getSuggestionsByConversation(conversationId);
+  const recentSuggestions = await storage.getSuggestionsByConversation(conversationId, tenantId);
   const cutoff = new Date(Date.now() - DUPLICATE_SUGGESTION_WINDOW_MS);
   const hasDuplicate = recentSuggestions
     .slice(0, 5)
@@ -187,7 +187,7 @@ async function tryFallbackPriceLookup(params: {
       status: "pending",
       decision: "NEED_APPROVAL",
       autosendEligible: false,
-    });
+    }, tenantId);
 
     try {
       const { realtimeService } = await import("../services/websocket-server");
@@ -218,12 +218,12 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
 
   console.log(`[VehicleLookupWorker] Processing job: ${job.id}, caseId: ${caseId}`);
 
-  const caseRow = await storage.getVehicleLookupCaseById(caseId);
+  const caseRow = await storage.getVehicleLookupCaseById(caseId, tenantId);
   if (!caseRow) {
     throw new Error(`Case not found: ${caseId}`);
   }
 
-  await storage.updateVehicleLookupCaseStatus(caseId, { status: "RUNNING" });
+  await storage.updateVehicleLookupCaseStatus(caseId, tenantId, { status: "RUNNING" });
 
   // Hoisted outside try so it is accessible in the PODZAMENU_NOT_FOUND catch branch
   // (Strategy 3: use PartsAPI result even when Podzamenu returns NOT_FOUND).
@@ -255,7 +255,7 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
     const hasModel = !!gearbox.model;
 
     if (!hasOem && !hasModel) {
-      await storage.updateVehicleLookupCaseStatus(caseId, {
+      await storage.updateVehicleLookupCaseStatus(caseId, tenantId, {
         status: "FAILED",
         error: "PARSE_FAILED",
       });
@@ -415,7 +415,7 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
       await storage.linkCaseToCache(caseId, cacheRow.id);
     }
 
-    await storage.updateVehicleLookupCaseStatus(caseId, {
+    await storage.updateVehicleLookupCaseStatus(caseId, tenantId, {
       status: "COMPLETED",
       verificationStatus: "NEED_TAG_OPTIONAL",
     });
@@ -493,7 +493,7 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
     const isModelOnly = gearbox.oemStatus === "MODEL_ONLY" && !!gearbox.model;
 
     if (isModelOnly) {
-      const lastMessage = await getLastCustomerMessageText(conversationId);
+      const lastMessage = await getLastCustomerMessageText(conversationId, tenantId);
       const gearboxType = lastMessage ? detectGearboxType(lastMessage) : "unknown" as const;
 
       const { enqueuePriceLookup } = await import("../services/price-lookup-queue");
@@ -550,7 +550,7 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
           oemCandidates: [],
           oemStatus: "NOT_AVAILABLE",
         };
-        await storage.updateVehicleLookupCaseStatus(caseId, {
+        await storage.updateVehicleLookupCaseStatus(caseId, tenantId, {
           status: "COMPLETED",
           verificationStatus: "NEED_TAG_OPTIONAL",
         });
@@ -570,7 +570,7 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
 
       // Both APIs failed — genuine invalid / not-found VIN
       console.log(`[VehicleLookupWorker] Case not found (Podzamenu NOT_FOUND, PartsAPI empty): ${caseId}`);
-      await storage.updateVehicleLookupCaseStatus(caseId, {
+      await storage.updateVehicleLookupCaseStatus(caseId, tenantId, {
         status: "FAILED",
         error: "NOT_FOUND",
       });
@@ -579,7 +579,7 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
 
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[VehicleLookupWorker] Case failed: ${caseId}`, message);
-    await storage.updateVehicleLookupCaseStatus(caseId, {
+    await storage.updateVehicleLookupCaseStatus(caseId, tenantId, {
       status: "FAILED",
       error: message,
     });

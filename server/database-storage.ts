@@ -229,8 +229,8 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, userId));
   }
 
-  async getCustomer(id: string): Promise<Customer | undefined> {
-    const [customer] = await db.select().from(customers).where(eq(customers.id, id));
+  async getCustomer(id: string, tenantId: string): Promise<Customer | undefined> {
+    const [customer] = await db.select().from(customers).where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)));
     return customer;
   }
 
@@ -238,7 +238,7 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(customers).where(eq(customers.tenantId, tenantId));
   }
 
-  async createCustomer(data: InsertCustomer): Promise<Customer> {
+  async createCustomer(data: InsertCustomer, _tenantId: string): Promise<Customer> {
     const [customer] = await db.insert(customers).values(data).returning();
     return customer;
   }
@@ -268,10 +268,10 @@ export class DatabaseStorage implements IStorage {
     return customer;
   }
 
-  async updateCustomer(id: string, data: UpdateCustomer): Promise<Customer | undefined> {
+  async updateCustomer(id: string, tenantId: string, data: UpdateCustomer): Promise<Customer | undefined> {
     const [customer] = await db.update(customers)
       .set({ ...data, updatedAt: new Date() })
-      .where(eq(customers.id, id))
+      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
       .returning();
     return customer;
   }
@@ -309,100 +309,91 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertCustomerMemory(data: InsertCustomerMemory): Promise<CustomerMemory> {
-    const existing = await this.getCustomerMemory(data.tenantId, data.customerId);
-    
-    if (existing) {
-      const [updated] = await db.update(customerMemory)
-        .set({
-          preferences: data.preferences ?? existing.preferences,
-          frequentTopics: data.frequentTopics ?? existing.frequentTopics,
-          lastSummaryText: data.lastSummaryText ?? existing.lastSummaryText,
+    const [result] = await db.insert(customerMemory)
+      .values({
+        ...data,
+        preferences: data.preferences ?? {},
+        frequentTopics: data.frequentTopics ?? {},
+      })
+      .onConflictDoUpdate({
+        target: [customerMemory.tenantId, customerMemory.customerId],
+        set: {
+          preferences: sql`COALESCE(EXCLUDED.preferences, ${customerMemory.preferences})`,
+          frequentTopics: sql`COALESCE(EXCLUDED.frequent_topics, ${customerMemory.frequentTopics})`,
+          lastSummaryText: sql`COALESCE(EXCLUDED.last_summary_text, ${customerMemory.lastSummaryText})`,
           updatedAt: new Date(),
-        })
-        .where(eq(customerMemory.id, existing.id))
-        .returning();
-      return updated;
-    }
-
-    const [created] = await db.insert(customerMemory).values({
-      ...data,
-      preferences: data.preferences ?? {},
-      frequentTopics: data.frequentTopics ?? {},
-    }).returning();
-    return created;
+        },
+      })
+      .returning();
+    return result;
   }
 
   async incrementFrequentTopic(tenantId: string, customerId: string, intent: string): Promise<CustomerMemory> {
-    const existing = await this.getCustomerMemory(tenantId, customerId);
-    
-    const currentTopics = (existing?.frequentTopics as Record<string, number>) ?? {};
-    const newTopics = { ...currentTopics, [intent]: (currentTopics[intent] || 0) + 1 };
-    
-    if (existing) {
-      const [updated] = await db.update(customerMemory)
-        .set({ frequentTopics: newTopics, updatedAt: new Date() })
-        .where(eq(customerMemory.id, existing.id))
-        .returning();
-      return updated;
-    }
-
-    const [created] = await db.insert(customerMemory).values({
-      tenantId,
-      customerId,
-      preferences: {},
-      frequentTopics: newTopics,
-    }).returning();
-    return created;
+    const [result] = await db.insert(customerMemory)
+      .values({ tenantId, customerId, preferences: {}, frequentTopics: { [intent]: 1 } })
+      .onConflictDoUpdate({
+        target: [customerMemory.tenantId, customerMemory.customerId],
+        set: {
+          frequentTopics: sql`
+            CASE WHEN ${customerMemory.frequentTopics} ? ${intent}
+              THEN jsonb_set(
+                ${customerMemory.frequentTopics},
+                array[${intent}],
+                to_jsonb((${customerMemory.frequentTopics} ->> ${intent})::int + 1)
+              )
+              ELSE ${customerMemory.frequentTopics} || jsonb_build_object(${intent}, 1)
+            END
+          `,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return result;
   }
 
   async updateCustomerPreferences(tenantId: string, customerId: string, preferences: Record<string, unknown>): Promise<CustomerMemory> {
-    const existing = await this.getCustomerMemory(tenantId, customerId);
-    
-    if (existing) {
-      const merged = { ...(existing.preferences as Record<string, unknown>), ...preferences };
-      const [updated] = await db.update(customerMemory)
-        .set({ preferences: merged, updatedAt: new Date() })
-        .where(eq(customerMemory.id, existing.id))
-        .returning();
-      return updated;
-    }
-
-    const [created] = await db.insert(customerMemory).values({
-      tenantId,
-      customerId,
-      preferences,
-      frequentTopics: {},
-    }).returning();
-    return created;
+    const preferencesJson = JSON.stringify(preferences);
+    const [result] = await db.insert(customerMemory)
+      .values({ tenantId, customerId, preferences, frequentTopics: {} })
+      .onConflictDoUpdate({
+        target: [customerMemory.tenantId, customerMemory.customerId],
+        set: {
+          // Merge: existing keys preserved, new keys added, conflicts resolved by new value winning
+          preferences: sql`${customerMemory.preferences} || ${preferencesJson}::jsonb`,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return result;
   }
 
-  async getConversation(id: string): Promise<Conversation | undefined> {
-    const [conv] = await db.select().from(conversations).where(eq(conversations.id, id));
+  async getConversation(id: string, tenantId: string): Promise<Conversation | undefined> {
+    const [conv] = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.tenantId, tenantId)));
     return conv;
   }
 
-  async getConversationWithCustomer(id: string): Promise<ConversationWithCustomer | undefined> {
-    const conv = await this.getConversation(id);
+  async getConversationWithCustomer(id: string, tenantId: string): Promise<ConversationWithCustomer | undefined> {
+    const conv = await this.getConversation(id, tenantId);
     if (!conv) return undefined;
 
-    const customer = await this.getCustomer(conv.customerId);
+    const customer = await this.getCustomer(conv.customerId, tenantId);
     if (!customer) return undefined;
 
-    const msgs = await this.getMessagesByConversation(id);
+    const msgs = await this.getMessagesByConversation(id, tenantId);
     const lastMessage = msgs.length > 0 ? msgs[msgs.length - 1] : undefined;
 
     return { ...conv, customer, lastMessage };
   }
 
-  async getConversationDetail(id: string): Promise<ConversationDetail | undefined> {
-    const conv = await this.getConversation(id);
+  async getConversationDetail(id: string, tenantId: string): Promise<ConversationDetail | undefined> {
+    const conv = await this.getConversation(id, tenantId);
     if (!conv) return undefined;
 
-    const customer = await this.getCustomer(conv.customerId);
+    const customer = await this.getCustomer(conv.customerId, tenantId);
     if (!customer) return undefined;
 
-    const msgs = await this.getMessagesByConversation(id);
-    const suggestion = await this.getPendingSuggestionByConversation(id);
+    const msgs = await this.getMessagesByConversation(id, tenantId);
+    const suggestion = await this.getPendingSuggestionByConversation(id, tenantId);
 
     return { ...conv, customer, messages: msgs, currentSuggestion: suggestion };
   }
@@ -517,7 +508,7 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async createConversation(data: InsertConversation & { lastMessageAt?: Date; createdAt?: Date }): Promise<Conversation> {
+  async createConversation(data: InsertConversation & { lastMessageAt?: Date; createdAt?: Date }, _tenantId: string): Promise<Conversation> {
     const [conv] = await db.insert(conversations).values({
       ...data,
       lastMessageAt: data.lastMessageAt || new Date(),
@@ -526,47 +517,62 @@ export class DatabaseStorage implements IStorage {
     return conv;
   }
 
-  async updateConversation(id: string, data: Partial<InsertConversation>): Promise<Conversation | undefined> {
-    const [conv] = await db.update(conversations).set(data).where(eq(conversations.id, id)).returning();
+  async updateConversation(id: string, tenantId: string, data: Partial<InsertConversation>): Promise<Conversation | undefined> {
+    const [conv] = await db.update(conversations).set(data).where(and(eq(conversations.id, id), eq(conversations.tenantId, tenantId))).returning();
     return conv;
   }
 
-  async deleteConversation(id: string): Promise<boolean> {
-    // Get ai_suggestion IDs first to delete human_actions
-    const suggestions = await db.select({ id: aiSuggestions.id })
-      .from(aiSuggestions)
-      .where(eq(aiSuggestions.conversationId, id));
-    const suggestionIds = suggestions.map(s => s.id);
+  async deleteConversation(id: string, tenantId: string): Promise<boolean> {
+    await db.transaction(async (tx) => {
+      // Get ai_suggestion IDs first to delete human_actions
+      const suggestions = await tx.select({ id: aiSuggestions.id })
+        .from(aiSuggestions)
+        .where(eq(aiSuggestions.conversationId, id));
+      const suggestionIds = suggestions.map(s => s.id);
 
-    if (suggestionIds.length > 0) {
-      await db.delete(humanActions).where(inArray(humanActions.suggestionId, suggestionIds));
-    }
-    await db.delete(aiTrainingSamples).where(eq(aiTrainingSamples.conversationId, id));
-    await db.delete(learningQueue).where(eq(learningQueue.conversationId, id));
-    await db.delete(csatRatings).where(eq(csatRatings.conversationId, id));
-    await db.delete(conversions).where(eq(conversions.conversationId, id));
-    await db.delete(lostDeals).where(eq(lostDeals.conversationId, id));
-    await db.delete(vehicleLookupCases).where(eq(vehicleLookupCases.conversationId, id));
-    await db.delete(escalationEvents).where(eq(escalationEvents.conversationId, id));
-    await db.delete(aiSuggestions).where(eq(aiSuggestions.conversationId, id));
-    await db.delete(messages).where(eq(messages.conversationId, id));
-    await db.delete(conversations).where(eq(conversations.id, id));
+      if (suggestionIds.length > 0) {
+        await tx.delete(humanActions).where(inArray(humanActions.suggestionId, suggestionIds));
+      }
+      await tx.delete(aiTrainingSamples).where(eq(aiTrainingSamples.conversationId, id));
+      await tx.delete(learningQueue).where(eq(learningQueue.conversationId, id));
+      await tx.delete(csatRatings).where(eq(csatRatings.conversationId, id));
+      await tx.delete(conversions).where(eq(conversions.conversationId, id));
+      await tx.delete(lostDeals).where(eq(lostDeals.conversationId, id));
+      await tx.delete(vehicleLookupCases).where(eq(vehicleLookupCases.conversationId, id));
+      await tx.delete(escalationEvents).where(eq(escalationEvents.conversationId, id));
+      await tx.delete(aiSuggestions).where(eq(aiSuggestions.conversationId, id));
+      await tx.delete(messages).where(eq(messages.conversationId, id));
+      await tx.delete(conversations).where(and(eq(conversations.id, id), eq(conversations.tenantId, tenantId)));
+    });
     return true;
   }
 
-  async getMessage(id: string): Promise<Message | undefined> {
-    const [msg] = await db.select().from(messages).where(eq(messages.id, id));
+  async getMessage(id: string, tenantId: string): Promise<Message | undefined> {
+    const [msg] = await db.select().from(messages).where(
+      and(
+        eq(messages.id, id),
+        inArray(messages.conversationId,
+          db.select({ id: conversations.id }).from(conversations).where(eq(conversations.tenantId, tenantId))
+        )
+      )
+    );
     return msg;
   }
 
-  async getMessagesByConversation(conversationId: string): Promise<Message[]> {
+  async getMessagesByConversation(conversationId: string, tenantId: string): Promise<Message[]> {
     return db.select().from(messages)
-      .where(eq(messages.conversationId, conversationId))
+      .where(and(
+        eq(messages.conversationId, conversationId),
+        inArray(messages.conversationId,
+          db.select({ id: conversations.id }).from(conversations).where(eq(conversations.tenantId, tenantId))
+        )
+      ))
       .orderBy(messages.createdAt);
   }
 
   async getMessagesByConversationPaginated(
     conversationId: string,
+    tenantId: string,
     cursor?: string,
     limit = 50,
   ): Promise<{ messages: Message[]; nextCursor: string | null }> {
@@ -583,12 +589,15 @@ export class DatabaseStorage implements IStorage {
         whereClause = and(
           eq(messages.conversationId, conversationId),
           gt(messages.createdAt, cursorMsg.createdAt),
+          inArray(messages.conversationId,
+            db.select({ id: conversations.id }).from(conversations).where(eq(conversations.tenantId, tenantId))
+          ),
         );
       } else {
-        whereClause = eq(messages.conversationId, conversationId);
+        whereClause = and(eq(messages.conversationId, conversationId), inArray(messages.conversationId, db.select({ id: conversations.id }).from(conversations).where(eq(conversations.tenantId, tenantId))));
       }
     } else {
-      whereClause = eq(messages.conversationId, conversationId);
+      whereClause = and(eq(messages.conversationId, conversationId), inArray(messages.conversationId, db.select({ id: conversations.id }).from(conversations).where(eq(conversations.tenantId, tenantId))));
     }
 
     const rows = await db
@@ -605,7 +614,7 @@ export class DatabaseStorage implements IStorage {
     return { messages: page, nextCursor };
   }
 
-  async createMessage(data: InsertMessage & { createdAt?: Date }): Promise<Message> {
+  async createMessage(data: InsertMessage & { createdAt?: Date }, _tenantId: string): Promise<Message> {
     const messageTime = data.createdAt || new Date();
     const [msg] = await db.insert(messages).values({
       ...data,
@@ -620,16 +629,16 @@ export class DatabaseStorage implements IStorage {
     return msg;
   }
 
-  async updateMessage(id: string, data: Partial<InsertMessage>): Promise<Message | undefined> {
+  async updateMessage(id: string, tenantId: string, data: Partial<InsertMessage>): Promise<Message | undefined> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const [msg] = await db.update(messages).set(data as any).where(eq(messages.id, id)).returning();
+    const [msg] = await db.update(messages).set(data as any).where(and(eq(messages.id, id), inArray(messages.conversationId, db.select({ id: conversations.id }).from(conversations).where(eq(conversations.tenantId, tenantId))))).returning();
     return msg;
   }
 
-  async getMessagesBySuggestionId(suggestionId: string): Promise<Message[]> {
-    const suggestion = await this.getAiSuggestion(suggestionId);
+  async getMessagesBySuggestionId(suggestionId: string, tenantId: string): Promise<Message[]> {
+    const suggestion = await this.getAiSuggestion(suggestionId, tenantId);
     if (!suggestion) return [];
-    return this.getMessagesByConversation(suggestion.conversationId);
+    return this.getMessagesByConversation(suggestion.conversationId, tenantId);
   }
 
   async getProduct(id: string): Promise<Product | undefined> {
@@ -708,24 +717,39 @@ export class DatabaseStorage implements IStorage {
     );
   }
 
-  async getAiSuggestion(id: string): Promise<AiSuggestion | undefined> {
-    const [suggestion] = await db.select().from(aiSuggestions).where(eq(aiSuggestions.id, id));
+  async getAiSuggestion(id: string, tenantId: string): Promise<AiSuggestion | undefined> {
+    const [suggestion] = await db.select().from(aiSuggestions).where(
+      and(
+        eq(aiSuggestions.id, id),
+        inArray(aiSuggestions.conversationId,
+          db.select({ id: conversations.id }).from(conversations).where(eq(conversations.tenantId, tenantId))
+        )
+      )
+    );
     return suggestion;
   }
 
-  async getPendingSuggestionByConversation(conversationId: string): Promise<AiSuggestion | undefined> {
+  async getPendingSuggestionByConversation(conversationId: string, tenantId: string): Promise<AiSuggestion | undefined> {
     const [suggestion] = await db.select().from(aiSuggestions).where(
       and(
         eq(aiSuggestions.conversationId, conversationId),
-        eq(aiSuggestions.status, "pending")
+        eq(aiSuggestions.status, "pending"),
+        inArray(aiSuggestions.conversationId,
+          db.select({ id: conversations.id }).from(conversations).where(eq(conversations.tenantId, tenantId))
+        )
       )
     ).orderBy(asc(aiSuggestions.createdAt)).limit(1);
     return suggestion;
   }
 
-  async getSuggestionsByConversation(conversationId: string): Promise<AiSuggestion[]> {
+  async getSuggestionsByConversation(conversationId: string, tenantId: string): Promise<AiSuggestion[]> {
     return db.select().from(aiSuggestions)
-      .where(eq(aiSuggestions.conversationId, conversationId))
+      .where(and(
+        eq(aiSuggestions.conversationId, conversationId),
+        inArray(aiSuggestions.conversationId,
+          db.select({ id: conversations.id }).from(conversations).where(eq(conversations.tenantId, tenantId))
+        )
+      ))
       .orderBy(desc(aiSuggestions.createdAt));
   }
 
@@ -762,13 +786,13 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(aiSuggestions.createdAt));
   }
 
-  async createAiSuggestion(data: InsertAiSuggestion): Promise<AiSuggestion> {
+  async createAiSuggestion(data: InsertAiSuggestion, _tenantId: string): Promise<AiSuggestion> {
     const [suggestion] = await db.insert(aiSuggestions).values(data).returning();
     return suggestion;
   }
 
-  async updateAiSuggestion(id: string, data: Partial<InsertAiSuggestion>): Promise<AiSuggestion | undefined> {
-    const [suggestion] = await db.update(aiSuggestions).set(data).where(eq(aiSuggestions.id, id)).returning();
+  async updateAiSuggestion(id: string, tenantId: string, data: Partial<InsertAiSuggestion>): Promise<AiSuggestion | undefined> {
+    const [suggestion] = await db.update(aiSuggestions).set(data).where(and(eq(aiSuggestions.id, id), inArray(aiSuggestions.conversationId, db.select({ id: conversations.id }).from(conversations).where(eq(conversations.tenantId, tenantId))))).returning();
     return suggestion;
   }
 
@@ -868,21 +892,36 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertLearningQueueItem(data: InsertLearningQueueItem): Promise<LearningQueueItem> {
-    const existing = await this.getLearningQueueItem(data.conversationId);
-    if (existing) {
-      const newScore = Math.max(existing.learningScore, data.learningScore ?? 0);
-      const newReasons = [...new Set([...(existing.reasons ?? []), ...(data.reasons ?? [])])];
-      const updated = await this.updateLearningQueueItem(existing.id, {
-        learningScore: newScore,
-        reasons: newReasons,
-      });
-      return updated!;
-    }
-    return this.createLearningQueueItem(data);
+    const [result] = await db.insert(learningQueue)
+      .values(data)
+      .onConflictDoUpdate({
+        target: learningQueue.conversationId,
+        set: {
+          // Keep the highest score seen across all upserts
+          learningScore: sql`GREATEST(${learningQueue.learningScore}, EXCLUDED.learning_score)`,
+          // Merge reason arrays, removing duplicates
+          reasons: sql`(
+            SELECT ARRAY_AGG(DISTINCT r)
+            FROM UNNEST(
+              COALESCE(${learningQueue.reasons}, ARRAY[]::text[]) ||
+              COALESCE(EXCLUDED.reasons, ARRAY[]::text[])
+            ) AS t(r)
+          )`,
+        },
+      })
+      .returning();
+    return result;
   }
 
-  async getEscalationEvent(id: string): Promise<EscalationEvent | undefined> {
-    const [event] = await db.select().from(escalationEvents).where(eq(escalationEvents.id, id));
+  async getEscalationEvent(id: string, tenantId: string): Promise<EscalationEvent | undefined> {
+    const [event] = await db.select().from(escalationEvents).where(
+      and(
+        eq(escalationEvents.id, id),
+        inArray(escalationEvents.conversationId,
+          db.select({ id: conversations.id }).from(conversations).where(eq(conversations.tenantId, tenantId))
+        )
+      )
+    );
     return event;
   }
 
@@ -906,13 +945,13 @@ export class DatabaseStorage implements IStorage {
     return all.slice(0, limit);
   }
 
-  async createEscalationEvent(data: InsertEscalationEvent): Promise<EscalationEvent> {
+  async createEscalationEvent(data: InsertEscalationEvent, _tenantId: string): Promise<EscalationEvent> {
     const [event] = await db.insert(escalationEvents).values(data).returning();
     return event;
   }
 
-  async updateEscalationEvent(id: string, data: Partial<InsertEscalationEvent>): Promise<EscalationEvent | undefined> {
-    const [event] = await db.update(escalationEvents).set(data).where(eq(escalationEvents.id, id)).returning();
+  async updateEscalationEvent(id: string, tenantId: string, data: Partial<InsertEscalationEvent>): Promise<EscalationEvent | undefined> {
+    const [event] = await db.update(escalationEvents).set(data).where(and(eq(escalationEvents.id, id), inArray(escalationEvents.conversationId, db.select({ id: conversations.id }).from(conversations).where(eq(conversations.tenantId, tenantId))))).returning();
     return event;
   }
 
@@ -976,17 +1015,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertDecisionSettings(data: InsertDecisionSettings): Promise<DecisionSettings> {
-    const existing = await this.getDecisionSettings(data.tenantId);
-    if (existing) {
-      const [updated] = await db.update(decisionSettings)
-        .set(data)
-        .where(eq(decisionSettings.tenantId, data.tenantId))
-        .returning();
-      return updated;
-    } else {
-      const [created] = await db.insert(decisionSettings).values(data).returning();
-      return created;
-    }
+    const [result] = await db.insert(decisionSettings)
+      .values(data)
+      .onConflictDoUpdate({
+        target: decisionSettings.tenantId,
+        set: { ...data, updatedAt: new Date() },
+      })
+      .returning();
+    return result;
   }
 
   async getHumanDelaySettings(tenantId: string): Promise<HumanDelaySettings | undefined> {
@@ -1008,17 +1044,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertHumanDelaySettings(data: InsertHumanDelaySettings): Promise<HumanDelaySettings> {
-    const existing = await db.select().from(humanDelaySettings).where(eq(humanDelaySettings.tenantId, data.tenantId));
-    if (existing.length > 0) {
-      const [updated] = await db.update(humanDelaySettings)
-        .set(data)
-        .where(eq(humanDelaySettings.tenantId, data.tenantId))
-        .returning();
-      return updated;
-    } else {
-      const [created] = await db.insert(humanDelaySettings).values(data).returning();
-      return created;
-    }
+    const [result] = await db.insert(humanDelaySettings)
+      .values(data)
+      .onConflictDoUpdate({
+        target: humanDelaySettings.tenantId,
+        set: { ...data, updatedAt: new Date() },
+      })
+      .returning();
+    return result;
   }
 
   async getOnboardingState(tenantId: string): Promise<OnboardingState | undefined> {
@@ -1027,17 +1060,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertOnboardingState(data: InsertOnboardingState): Promise<OnboardingState> {
-    const existing = await this.getOnboardingState(data.tenantId);
-    if (existing) {
-      const [updated] = await db.update(onboardingState)
-        .set({ ...data, updatedAt: new Date() })
-        .where(eq(onboardingState.tenantId, data.tenantId))
-        .returning();
-      return updated;
-    } else {
-      const [created] = await db.insert(onboardingState).values(data).returning();
-      return created;
-    }
+    const [result] = await db.insert(onboardingState)
+      .values(data)
+      .onConflictDoUpdate({
+        target: onboardingState.tenantId,
+        set: { ...data, updatedAt: new Date() },
+      })
+      .returning();
+    return result;
   }
 
   async createReadinessReport(data: InsertReadinessReport): Promise<ReadinessReport> {
@@ -1400,13 +1430,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Vehicle Lookup Cases
-  async createVehicleLookupCase(data: InsertVehicleLookupCase): Promise<VehicleLookupCase> {
+  async createVehicleLookupCase(data: InsertVehicleLookupCase, _tenantId: string): Promise<VehicleLookupCase> {
     const [row] = await db.insert(vehicleLookupCases).values(data).returning();
     return row;
   }
 
-  async getVehicleLookupCaseById(caseId: string): Promise<VehicleLookupCase | undefined> {
-    const [row] = await db.select().from(vehicleLookupCases).where(eq(vehicleLookupCases.id, caseId));
+  async getVehicleLookupCaseById(caseId: string, tenantId: string): Promise<VehicleLookupCase | undefined> {
+    const [row] = await db.select().from(vehicleLookupCases).where(and(eq(vehicleLookupCases.id, caseId), eq(vehicleLookupCases.tenantId, tenantId)));
     return row;
   }
 
@@ -1440,6 +1470,7 @@ export class DatabaseStorage implements IStorage {
 
   async updateVehicleLookupCaseStatus(
     caseId: string,
+    tenantId: string,
     patch: { status?: VehicleLookupCase["status"]; verificationStatus?: VehicleLookupCase["verificationStatus"]; error?: string | null; cacheId?: string | null }
   ): Promise<VehicleLookupCase | undefined> {
     const set: Record<string, unknown> = { updatedAt: new Date() };
@@ -1449,7 +1480,7 @@ export class DatabaseStorage implements IStorage {
     if (patch.cacheId !== undefined) set.cacheId = patch.cacheId;
     const [row] = await db.update(vehicleLookupCases)
       .set(set as Partial<VehicleLookupCase>)
-      .where(eq(vehicleLookupCases.id, caseId))
+      .where(and(eq(vehicleLookupCases.id, caseId), eq(vehicleLookupCases.tenantId, tenantId)))
       .returning();
     return row;
   }
@@ -1792,10 +1823,10 @@ export class DatabaseStorage implements IStorage {
 
   // ─── Price snapshot helpers for decision engine context injection ─────────────
 
-  async getLatestVehicleLookupCase(conversationId: string): Promise<VehicleLookupCase | undefined> {
+  async getLatestVehicleLookupCase(conversationId: string, tenantId: string): Promise<VehicleLookupCase | undefined> {
     const [row] = await db.select()
       .from(vehicleLookupCases)
-      .where(eq(vehicleLookupCases.conversationId, conversationId))
+      .where(and(eq(vehicleLookupCases.conversationId, conversationId), eq(vehicleLookupCases.tenantId, tenantId)))
       .orderBy(desc(vehicleLookupCases.createdAt))
       .limit(1);
     return row;

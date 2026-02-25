@@ -26,7 +26,12 @@ export function registerHealthRoutes(app: Express): void {
   });
 
   // Detailed readiness check - verifies all dependencies
-  app.get("/ready", async (_req: Request, res: Response) => {
+  app.get("/ready", async (req: Request, res: Response) => {
+    const allowedIPs = ["127.0.0.1", "::1", "::ffff:127.0.0.1"];
+    if (!allowedIPs.includes(req.ip ?? "")) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
     const checks: HealthStatus["checks"] = [];
     let overallStatus: HealthStatus["status"] = "healthy";
 
@@ -89,7 +94,12 @@ export function registerHealthRoutes(app: Express): void {
   });
 
   // Metrics endpoint (minimal)
-  app.get("/metrics", async (_req: Request, res: Response) => {
+  app.get("/metrics", async (req: Request, res: Response) => {
+    const allowedIPs = ["127.0.0.1", "::1", "::ffff:127.0.0.1"];
+    if (!allowedIPs.includes(req.ip ?? "")) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
     const memoryUsage = process.memoryUsage();
     
     // Get tenant for customer memory metrics

@@ -987,7 +987,7 @@ class TelegramClientManager {
               channel: "telegram_personal",
               name: customerName,
               metadata: { username, telegramId: chatId },
-            });
+            }, tenantId);
             console.log(`[TelegramClientManager] Created customer: ${customer.id} - ${customerName}`);
           }
 
@@ -1007,14 +1007,14 @@ class TelegramClientManager {
               channelId: channelId,
               status: "active",
               lastMessageAt: new Date(),
-            });
+            }, tenantId);
             conversationId = newConv.id;
             dialogsImported++;
           }
 
           const tgMessages = await connection.client.getMessages(dialog.id, { limit: messageLimit });
 
-          const existingMessages = await storage.getMessagesByConversation(conversationId);
+          const existingMessages = await storage.getMessagesByConversation(conversationId, tenantId);
           const existingMsgIds = new Set(
             existingMessages
               .filter(m => m.metadata && typeof m.metadata === 'object' && 'telegramMsgId' in (m.metadata as object))
@@ -1043,13 +1043,13 @@ class TelegramClientManager {
                 senderName: isOutgoing ? "Operator" : customerName,
               },
               createdAt: new Date((msg.date || 0) * 1000),
-            });
+            }, tenantId);
             messagesImported++;
           }
 
           if (tgMessages.length > 0) {
             const lastMsg = tgMessages[0];
-            await storage.updateConversation(conversationId, {
+            await storage.updateConversation(conversationId, tenantId, {
               lastMessageAt: new Date((lastMsg.date || 0) * 1000),
             });
           }
@@ -1087,7 +1087,7 @@ class TelegramClientManager {
 
     try {
       const tgMessages = await connection.client.getMessages(chatId, { limit: messageLimit });
-      const existingMessages = await storage.getMessagesByConversation(conversationId);
+      const existingMessages = await storage.getMessagesByConversation(conversationId, tenantId);
       const existingMsgIds = new Set(
         existingMessages
           .filter(m => m.metadata && typeof m.metadata === "object" && "telegramMsgId" in (m.metadata as object))
@@ -1113,7 +1113,7 @@ class TelegramClientManager {
             senderName: msg.out ? "Operator" : customerName,
           },
           createdAt: new Date((msg.date || 0) * 1000),
-        });
+        }, tenantId);
         imported++;
       }
       if (imported > 0) {

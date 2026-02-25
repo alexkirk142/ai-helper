@@ -8,7 +8,7 @@ export async function submitCsatRating(data: InsertCsatRating): Promise<{ succes
     return { success: false, error: "CSAT rating already submitted for this conversation" };
   }
 
-  const conversation = await storage.getConversation(data.conversationId);
+  const conversation = await storage.getConversation(data.conversationId, data.tenantId);
   if (!conversation) {
     return { success: false, error: "Conversation not found" };
   }

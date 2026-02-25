@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { WhatsAppAdapter, whatsappAdapter } from "../services/whatsapp-adapter";
 import { featureFlagService } from "../services/feature-flags";
 import { auditLog } from "../services/audit-log";
+import { processIncomingMessageFull } from "../services/inbound-message-handler";
 
 export async function whatsappWebhookVerifyHandler(
   req: Request,
@@ -117,6 +118,8 @@ export async function whatsappWebhookHandler(
         metadata: parsed.metadata,
       }
     );
+
+    await processIncomingMessageFull("", parsed);
 
     res.status(200).json({
       ok: true,

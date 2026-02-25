@@ -87,7 +87,7 @@ async function maybeCreatePaymentMethodsSuggestion(
       status: "pending",
       decision: "NEED_APPROVAL",
       autosendEligible: false,
-    });
+    }, tenantId);
 
     broadcastSuggestion(tenantId, conversationId, suggestion.id);
     console.log(`[PriceLookupWorker] Created payment methods suggestion ${suggestion.id}`);
@@ -138,7 +138,7 @@ async function createSuggestionRecord(
     status: "pending",
     decision: "NEED_APPROVAL",
     autosendEligible: false,
-  });
+  }, tenantId);
   broadcastSuggestion(tenantId, conversationId, suggestion.id);
   console.log(`[PriceLookupWorker] Created ${intent} suggestion ${suggestion.id}`);
 }
@@ -329,7 +329,7 @@ async function createPriceSuggestion(
     status: "pending",
     decision: "NEED_APPROVAL",
     autosendEligible: false,
-  });
+  }, tenantId);
 
   broadcastSuggestion(tenantId, conversationId, suggestion.id);
   await maybeCreatePaymentMethodsSuggestion(tenantId, conversationId);
@@ -773,7 +773,7 @@ async function createEscalationSuggestion(
       status: "pending",
       autosendEligible: false,
       autosendBlockReason: "manual_price_search_required",
-    });
+    }, tenantId);
     broadcastSuggestion(tenantId, conversationId, suggestion.id);
     console.log(
       `[PriceLookupWorker] Created escalation suggestion ${suggestion.id} for OEM ${oem}`
@@ -809,7 +809,7 @@ async function createNotFoundSuggestion(
       status: "pending",
       decision: "NEED_APPROVAL",
       autosendEligible: false,
-    });
+    }, tenantId);
 
     broadcastSuggestion(tenantId, conversationId, suggestion.id);
     console.log(`[PriceLookupWorker] Created not-found suggestion ${suggestion.id}`);
@@ -977,7 +977,7 @@ async function lookupPricesByFallback(
       status: "pending",
       decision: "NEED_APPROVAL",
       autosendEligible: false,
-    });
+    }, tenantId);
 
     broadcastSuggestion(tenantId, conversationId, suggestion.id);
     await maybeCreatePaymentMethodsSuggestion(tenantId, conversationId);

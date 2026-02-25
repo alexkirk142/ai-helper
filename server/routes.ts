@@ -1245,7 +1245,7 @@ export async function registerRoutes(
             name: customerName,
             channel: "telegram_personal",
             metadata: { phone: phoneNumber },
-          });
+          }, tenantId);
         } catch (e: any) {
           customer = await storage.getCustomerByExternalId(tenantId, "telegram_personal", result.userId!);
           if (!customer) throw e;
@@ -1262,7 +1262,7 @@ export async function registerRoutes(
           channelId: channel.id,
           status: "active",
           mode: "learning",
-        });
+        }, tenantId);
       }
 
       res.json({ 
@@ -1360,7 +1360,7 @@ export async function registerRoutes(
             channel: "max_personal",
             phone: `+${cleanDigits}`,
             metadata: {},
-          });
+          }, tenantId);
         } catch (e: any) {
           customer = await storage.getCustomerByExternalId(tenantId, "max_personal", chatId);
           if (!customer) throw e;
@@ -1377,7 +1377,7 @@ export async function registerRoutes(
           customerId: customer.id,
           status: "active",
           mode: "learning",
-        });
+        }, tenantId);
       }
 
       // Send initial message if provided
@@ -1397,7 +1397,7 @@ export async function registerRoutes(
               accountId: account.accountId,
               chatId,
             },
-          });
+          }, tenantId);
         }
       }
 
@@ -1730,7 +1730,7 @@ export async function registerRoutes(
 
         if (conversationId) {
           // Reuse existing conversation — look up customer from it
-          const existingConv = await storage.getConversationWithCustomer(conversationId);
+          const existingConv = await storage.getConversationWithCustomer(conversationId, user.tenantId);
           if (!existingConv || existingConv.tenantId !== user.tenantId) {
             return res.status(404).json({ error: "Conversation not found" });
           }
@@ -1788,7 +1788,7 @@ export async function registerRoutes(
           (c) => c.customerId === customer.id && (c.status === "active" || c.status === "pending")
         );
 
-        const conversation = conv ? await storage.getConversationWithCustomer(conv.id) : null;
+        const conversation = conv ? await storage.getConversationWithCustomer(conv.id, user.tenantId) : null;
 
         console.log(`[TestEndpoint] Simulated message for tenant ${user.tenantId}, customer ${customer.id}`);
         res.json({ success: true, conversation, customer });

@@ -9,10 +9,25 @@ function getApiHost(idInstance: string): string {
 const BASE_URL = (idInstance: string) =>
   `${getApiHost(idInstance)}/v3/waInstance${idInstance}`;
 
+function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 20000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
+
 export class MaxGreenApiAdapter {
   async getState(idInstance: string, token: string): Promise<string> {
     const url = `${BASE_URL(idInstance)}/getStateInstance/${token}`;
-    const res = await fetch(url);
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(url);
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        throw new Error(`GREEN-API request timed out after 20s: ${url}`);
+      }
+      throw err;
+    }
     if (!res.ok) {
       throw new Error(`GREEN-API getState failed: ${res.status} ${res.statusText}`);
     }
@@ -25,7 +40,15 @@ export class MaxGreenApiAdapter {
     token: string
   ): Promise<{ nameAccount?: string; wid?: string }> {
     const url = `${BASE_URL(idInstance)}/getAccountSettings/${token}`;
-    const res = await fetch(url);
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(url);
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        throw new Error(`GREEN-API request timed out after 20s: ${url}`);
+      }
+      throw err;
+    }
     if (!res.ok) {
       throw new Error(`GREEN-API getAccountInfo failed: ${res.status} ${res.statusText}`);
     }
@@ -34,7 +57,15 @@ export class MaxGreenApiAdapter {
 
   async getQR(idInstance: string, token: string): Promise<{ type: string; message: string }> {
     const url = `${BASE_URL(idInstance)}/qr/${token}`;
-    const res = await fetch(url);
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(url);
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        throw new Error(`GREEN-API request timed out after 20s: ${url}`);
+      }
+      throw err;
+    }
     if (!res.ok) {
       throw new Error(`GREEN-API getQR failed: ${res.status} ${res.statusText}`);
     }
@@ -43,15 +74,23 @@ export class MaxGreenApiAdapter {
 
   async setWebhook(idInstance: string, token: string, webhookUrl: string): Promise<void> {
     const url = `${BASE_URL(idInstance)}/setSettings/${token}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        webhookUrl,
-        incomingWebhook: "yes",
-        outgoingWebhook: "no",
-      }),
-    });
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          webhookUrl,
+          incomingWebhook: "yes",
+          outgoingWebhook: "no",
+        }),
+      });
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        throw new Error(`GREEN-API request timed out after 20s: ${url}`);
+      }
+      throw err;
+    }
     if (!res.ok) {
       throw new Error(`GREEN-API setWebhook failed: ${res.status} ${res.statusText}`);
     }
@@ -64,11 +103,19 @@ export class MaxGreenApiAdapter {
     text: string
   ): Promise<{ idMessage: string }> {
     const url = `${BASE_URL(idInstance)}/sendMessage/${token}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId, message: text }),
-    });
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId, message: text }),
+      });
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        throw new Error(`GREEN-API request timed out after 20s: ${url}`);
+      }
+      throw err;
+    }
     if (!res.ok) {
       throw new Error(`GREEN-API sendMessage failed: ${res.status} ${res.statusText}`);
     }
@@ -90,7 +137,15 @@ export class MaxGreenApiAdapter {
     form.append("file", new Blob([buffer], { type: mimeType }), fileName);
     if (caption) form.append("caption", caption);
 
-    const res = await fetch(url, { method: "POST", body: form });
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(url, { method: "POST", body: form });
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        throw new Error(`GREEN-API request timed out after 20s: ${url}`);
+      }
+      throw err;
+    }
     if (!res.ok) {
       throw new Error(`GREEN-API sendFile failed: ${res.status} ${res.statusText}`);
     }

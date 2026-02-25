@@ -9,6 +9,9 @@ import { featureFlagService } from "../services/feature-flags";
 import { auditLog } from "../services/audit-log";
 import { scheduleDelayedMessage, cancelDelayedMessage, getDelayedJobs, getQueueMetrics } from "../services/message-queue";
 import { WhatsAppPersonalAdapter } from "../services/whatsapp-personal-adapter";
+import { telegramAdapter } from "../services/telegram-adapter";
+import { whatsappAdapter } from "../services/whatsapp-adapter";
+import { maxAdapter } from "../services/max-adapter";
 import { recordTrainingSample, getTrainingSamples, exportTrainingSamples, type TrainingOutcome } from "../services/training-sample-service";
 import { addToLearningQueue } from "../services/learning-score-service";
 import { sanitizeString, sanitizeForLog } from "../utils/sanitizer";
@@ -83,7 +86,7 @@ router.get("/api/conversations/:id", requireAuth, requirePermission("VIEW_CONVER
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
     
-    const detail = await storage.getConversationDetail(req.params.id);
+    const detail = await storage.getConversationDetail(req.params.id, user.tenantId);
     if (!detail) {
       return res.status(404).json({ error: "Conversation not found" });
     }
@@ -108,7 +111,7 @@ router.patch("/api/conversations/:id", requireAuth, requireOperator, async (req:
     if (!user?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const conversation = await storage.getConversation(req.params.id);
+    const conversation = await storage.getConversation(req.params.id, user.tenantId);
     if (!conversation || conversation.tenantId !== user.tenantId) {
       return res.status(404).json({ error: "Conversation not found" });
     }
@@ -116,7 +119,7 @@ router.patch("/api/conversations/:id", requireAuth, requireOperator, async (req:
     const { status, mode } = req.body;
     const previousStatus = conversation.status;
 
-    const updated = await storage.updateConversation(req.params.id, { status, mode });
+    const updated = await storage.updateConversation(req.params.id, user.tenantId, { status, mode });
     
     if (status === "resolved" && previousStatus !== "resolved") {
       const { triggerSummaryOnConversationResolved } = await import("../services/customer-summary-service");
@@ -141,11 +144,11 @@ router.delete("/api/conversations/:id", requireAuth, requirePermission("MANAGE_C
     if (!user?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const conversation = await storage.getConversation(req.params.id);
+    const conversation = await storage.getConversation(req.params.id, user.tenantId);
     if (!conversation || conversation.tenantId !== user.tenantId) {
       return res.status(404).json({ error: "Conversation not found" });
     }
-    await storage.deleteConversation(req.params.id);
+    await storage.deleteConversation(req.params.id, user.tenantId);
     res.json({ success: true });
   } catch (error) {
     console.error("Error deleting conversation:", error);
@@ -163,12 +166,12 @@ router.post("/api/conversations/:id/read", requireAuth, requirePermission("VIEW_
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
 
-    const conversation = await storage.getConversation(req.params.id);
+    const conversation = await storage.getConversation(req.params.id, user.tenantId);
     if (!conversation || conversation.tenantId !== user.tenantId) {
       return res.status(404).json({ error: "Conversation not found" });
     }
 
-    await storage.updateConversation(req.params.id, { unreadCount: 0 });
+    await storage.updateConversation(req.params.id, user.tenantId, { unreadCount: 0 });
     res.json({ success: true });
   } catch (error) {
     console.error("Error marking conversation as read:", error);
@@ -185,12 +188,12 @@ router.post("/api/conversations/:id/mute", requireAuth, requireOperator, async (
     if (!user?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const conversation = await storage.getConversation(req.params.id);
+    const conversation = await storage.getConversation(req.params.id, user.tenantId);
     if (!conversation || conversation.tenantId !== user.tenantId) {
       return res.status(404).json({ error: "Conversation not found" });
     }
     const { muted } = req.body as { muted: boolean };
-    await storage.updateConversation(req.params.id, { isMuted: muted });
+    await storage.updateConversation(req.params.id, user.tenantId, { isMuted: muted });
     res.json({ success: true, isMuted: muted });
   } catch (error) {
     console.error("Error toggling conversation mute:", error);
@@ -210,7 +213,7 @@ router.get("/api/conversations/:id/messages", requireAuth, requirePermission("VI
 
     const conversationId = req.params.id;
 
-    const conversation = await storage.getConversation(conversationId);
+    const conversation = await storage.getConversation(conversationId, user.tenantId);
     if (!conversation || conversation.tenantId !== user.tenantId) {
       return res.status(404).json({ error: "Conversation not found" });
     }
@@ -225,7 +228,7 @@ router.get("/api/conversations/:id/messages", requireAuth, requirePermission("VI
     }
     const { cursor, limit } = parsed.data;
 
-    const result = await storage.getMessagesByConversationPaginated(conversationId, cursor, limit);
+    const result = await storage.getMessagesByConversationPaginated(conversationId, user.tenantId, cursor, limit);
 
     res.json(result);
   } catch (error) {
@@ -259,7 +262,7 @@ router.post(
         return res.status(403).json({ error: "User not associated with a tenant" });
       }
 
-      const conversation = await storage.getConversationDetail(req.params.id);
+      const conversation = await storage.getConversationDetail(req.params.id, msgUser.tenantId);
       if (!conversation || conversation.tenantId !== msgUser.tenantId) {
         return res.status(404).json({ error: "Conversation not found" });
       }
@@ -374,9 +377,9 @@ router.post(
         content: messageContent,
         attachments: outboundAttachment ? [outboundAttachment] : [],
         metadata: {},
-      });
+      }, msgUser.tenantId);
 
-      await storage.updateConversation(req.params.id, { unreadCount: 0 });
+      await storage.updateConversation(req.params.id, msgUser.tenantId, { unreadCount: 0 });
 
       // ── VIN OCR for customer image uploads ─────────────────────────────────
       // When an image is uploaded explicitly as a customer message (role: "customer"),
@@ -403,7 +406,7 @@ router.post(
                   normalizedValue: vinFromImage,
                   status: "PENDING",
                   verificationStatus: "NONE",
-                });
+                }, msgUser.tenantId);
                 const { enqueueVehicleLookup } = await import("../services/vehicle-lookup-queue");
                 await enqueueVehicleLookup({
                   caseId: row.id,
@@ -525,7 +528,7 @@ router.post("/api/conversations/:id/generate-suggestion", requireAuth, requirePe
     if (!genUser?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const conversation = await storage.getConversationDetail(req.params.id);
+    const conversation = await storage.getConversationDetail(req.params.id, genUser.tenantId);
     if (!conversation || conversation.tenantId !== genUser.tenantId) {
       return res.status(404).json({ error: "Conversation not found" });
     }
@@ -585,7 +588,7 @@ router.post("/api/conversations/:id/generate-suggestion", requireAuth, requirePe
       autosendBlockReason: decisionResult.autosendBlockReason,
       selfCheckNeedHandoff: decisionResult.selfCheckNeedHandoff,
       selfCheckReasons: decisionResult.selfCheckReasons,
-    });
+    }, genUser.tenantId);
 
     await auditLog.logSuggestionGenerated(suggestion.id, req.params.id, {
       intent: decisionResult.intent,
@@ -600,10 +603,36 @@ router.post("/api/conversations/:id/generate-suggestion", requireAuth, requirePe
   }
 });
 
+async function resolveConversationChannel(conversationId: string, tenantId: string): Promise<{ effectiveChannelType: string | undefined; effectiveChannelId: string | undefined }> {
+  const conversationDetail = await storage.getConversationDetail(conversationId, tenantId);
+  if (!conversationDetail) return { effectiveChannelType: undefined, effectiveChannelId: undefined };
+
+  const messages = conversationDetail.messages || [];
+  const lastCustomerMsg = messages.filter((m: any) => m.role === "customer").pop();
+
+  let effectiveChannelType = conversationDetail.customer?.channel as string | undefined;
+  if (!effectiveChannelType && lastCustomerMsg) {
+    effectiveChannelType = (lastCustomerMsg.metadata as any)?.channel;
+  }
+  if (!effectiveChannelType && conversationDetail.channelId) {
+    const channel = await storage.getChannel(conversationDetail.channelId);
+    effectiveChannelType = channel?.type;
+  }
+  if (!effectiveChannelType) {
+    for (const msg of messages) {
+      const ch = (msg.metadata as any)?.channel as string | undefined;
+      if (ch) { effectiveChannelType = ch; break; }
+    }
+  }
+
+  const effectiveChannelId = conversationDetail.channelId || (lastCustomerMsg?.metadata as any)?.channelId;
+  return { effectiveChannelType, effectiveChannelId };
+}
+
 async function sendToChannel(conversationId: string, text: string, tenantId: string) {
   let channelSendResult = null;
   try {
-    const conversationDetail = await storage.getConversationDetail(conversationId);
+    const conversationDetail = await storage.getConversationDetail(conversationId, tenantId);
     if (!conversationDetail) return null;
     
     const messages = conversationDetail.messages || [];
@@ -678,6 +707,47 @@ async function sendToChannel(conversationId: string, text: string, tenantId: str
       } catch (maxError: any) {
         console.error(`[Outbound] MAX Personal send error:`, maxError.message);
       }
+    } else if (effectiveChannelType === "telegram" && conversationDetail.customer) {
+      try {
+        const chatId = conversationDetail.customer.externalId;
+        console.log(`[Outbound] Sending Telegram Bot message to ${chatId}`);
+        channelSendResult = await telegramAdapter.sendMessage(chatId, text);
+        if (channelSendResult.success) {
+          console.log(`[Outbound] Telegram Bot message sent: ${channelSendResult.externalMessageId}`);
+        } else {
+          console.error(`[Outbound] Telegram Bot send failed: ${channelSendResult.error}`);
+        }
+      } catch (tgError: any) {
+        console.error(`[Outbound] Telegram Bot send error:`, tgError.message);
+      }
+    } else if (effectiveChannelType === "whatsapp" && conversationDetail.customer) {
+      try {
+        const recipientId = conversationDetail.customer.externalId;
+        console.log(`[Outbound] Sending WhatsApp Business message to ${recipientId}`);
+        channelSendResult = await whatsappAdapter.sendMessage(recipientId, text);
+        if (channelSendResult.success) {
+          console.log(`[Outbound] WhatsApp Business message sent: ${channelSendResult.externalMessageId}`);
+        } else {
+          console.error(`[Outbound] WhatsApp Business send failed: ${channelSendResult.error}`);
+        }
+      } catch (waError: any) {
+        console.error(`[Outbound] WhatsApp Business send error:`, waError.message);
+      }
+    } else if (effectiveChannelType === "max" && conversationDetail.customer) {
+      try {
+        const chatId = conversationDetail.customer.externalId;
+        console.log(`[Outbound] Sending MAX Bot message to ${chatId}`);
+        channelSendResult = await maxAdapter.sendMessage(chatId, text);
+        if (channelSendResult.success) {
+          console.log(`[Outbound] MAX Bot message sent: ${channelSendResult.externalMessageId}`);
+        } else {
+          console.error(`[Outbound] MAX Bot send failed: ${channelSendResult.error}`);
+        }
+      } catch (maxBotError: any) {
+        console.error(`[Outbound] MAX Bot send error:`, maxBotError.message);
+      }
+    } else if (effectiveChannelType) {
+      console.warn(`[sendToChannel] Unknown channel type: ${effectiveChannelType}`);
     }
   } catch (channelError) {
     console.error("[Outbound] Channel send error:", channelError);
@@ -687,17 +757,13 @@ async function sendToChannel(conversationId: string, text: string, tenantId: str
 
 router.post("/api/suggestions/:id/approve", requireAuth, requirePermission("MANAGE_CONVERSATIONS"), async (req: Request, res: Response) => {
   try {
-    const suggestion = await storage.getAiSuggestion(req.params.id);
-    if (!suggestion) {
-      return res.status(404).json({ error: "Suggestion not found" });
-    }
-
     const approveUser = await getUserForConversations(req.userId ?? "");
     if (!approveUser?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const suggestionConv = await storage.getConversation(suggestion.conversationId);
-    if (!suggestionConv || suggestionConv.tenantId !== approveUser.tenantId) {
+
+    const suggestion = await storage.getAiSuggestion(req.params.id, approveUser.tenantId);
+    if (!suggestion) {
       return res.status(404).json({ error: "Suggestion not found" });
     }
 
@@ -738,7 +804,7 @@ router.post("/api/suggestions/:id/approve", requireAuth, requirePermission("MANA
       }
     }
 
-    await storage.updateAiSuggestion(req.params.id, { status: "approved" });
+    await storage.updateAiSuggestion(req.params.id, approveUser.tenantId, { status: "approved" });
 
     const message = await storage.createMessage({
       conversationId: suggestion.conversationId,
@@ -751,7 +817,7 @@ router.post("/api/suggestions/:id/approve", requireAuth, requirePermission("MANA
         isNightMode: delayResult?.delay?.isNightMode || false,
         status: "pending",
       },
-    });
+    }, approveUser.tenantId);
 
     await storage.createHumanAction({
       suggestionId: suggestion.id,
@@ -759,7 +825,7 @@ router.post("/api/suggestions/:id/approve", requireAuth, requirePermission("MANA
       originalText: suggestion.suggestedReply,
     });
 
-    const messages = await storage.getMessagesByConversation(suggestion.conversationId);
+    const messages = await storage.getMessagesByConversation(suggestion.conversationId, approveUser.tenantId);
     const lastCustomerMessage = [...messages].reverse().find(m => m.role === "customer");
     if (lastCustomerMessage) {
       await recordTrainingSample({
@@ -781,6 +847,9 @@ router.post("/api/suggestions/:id/approve", requireAuth, requirePermission("MANA
 
     let scheduledJob = null;
     let sentImmediately = false;
+
+    const { effectiveChannelType: approveChannelType, effectiveChannelId: approveChannelId } =
+      await resolveConversationChannel(suggestion.conversationId, approveUser.tenantId);
     
     if (humanDelayEnabled && delayResult?.delay?.finalDelayMs) {
       const delaySettings = await storage.getHumanDelaySettings(tenant.id);
@@ -789,7 +858,7 @@ router.post("/api/suggestions/:id/approve", requireAuth, requirePermission("MANA
         conversationId: suggestion.conversationId,
         messageId: message.id,
         suggestionId: suggestion.id,
-        channel: "mock",
+        channel: approveChannelType ?? "mock",
         text: messageToSend,
         delayMs: delayResult.delay.finalDelayMs,
         typingEnabled: delaySettings?.typingIndicatorEnabled || false,
@@ -817,17 +886,14 @@ router.post("/api/suggestions/:id/approve", requireAuth, requirePermission("MANA
 router.post("/api/suggestions/:id/edit", requireAuth, requirePermission("MANAGE_CONVERSATIONS"), async (req: Request, res: Response) => {
   try {
     const { editedText } = req.body;
-    const suggestion = await storage.getAiSuggestion(req.params.id);
-    if (!suggestion) {
-      return res.status(404).json({ error: "Suggestion not found" });
-    }
 
     const editUser = await getUserForConversations(req.userId ?? "");
     if (!editUser?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const editSuggestionConv = await storage.getConversation(suggestion.conversationId);
-    if (!editSuggestionConv || editSuggestionConv.tenantId !== editUser.tenantId) {
+
+    const suggestion = await storage.getAiSuggestion(req.params.id, editUser.tenantId);
+    if (!suggestion) {
       return res.status(404).json({ error: "Suggestion not found" });
     }
 
@@ -863,7 +929,7 @@ router.post("/api/suggestions/:id/edit", requireAuth, requirePermission("MANAGE_
       }
     }
 
-    await storage.updateAiSuggestion(req.params.id, { status: "edited" });
+    await storage.updateAiSuggestion(req.params.id, editUser.tenantId, { status: "edited" });
 
     const message = await storage.createMessage({
       conversationId: suggestion.conversationId,
@@ -877,7 +943,7 @@ router.post("/api/suggestions/:id/edit", requireAuth, requirePermission("MANAGE_
         isNightMode: delayResult?.delay?.isNightMode || false,
         status: "pending",
       },
-    });
+    }, editUser.tenantId);
 
     await storage.createHumanAction({
       suggestionId: suggestion.id,
@@ -886,7 +952,7 @@ router.post("/api/suggestions/:id/edit", requireAuth, requirePermission("MANAGE_
       editedText,
     });
 
-    const convMessages = await storage.getMessagesByConversation(suggestion.conversationId);
+    const convMessages = await storage.getMessagesByConversation(suggestion.conversationId, editUser.tenantId);
     const lastCustomerMsg = [...convMessages].reverse().find(m => m.role === "customer");
     if (lastCustomerMsg) {
       await recordTrainingSample({
@@ -908,6 +974,9 @@ router.post("/api/suggestions/:id/edit", requireAuth, requirePermission("MANAGE_
 
     let scheduledJob = null;
     let sentImmediately = false;
+
+    const { effectiveChannelType: editChannelType, effectiveChannelId: editChannelId } =
+      await resolveConversationChannel(suggestion.conversationId, editUser.tenantId);
     
     if (humanDelayEnabled && delayResult?.delay?.finalDelayMs) {
       const delaySettings = await storage.getHumanDelaySettings(tenant.id);
@@ -916,7 +985,7 @@ router.post("/api/suggestions/:id/edit", requireAuth, requirePermission("MANAGE_
         conversationId: suggestion.conversationId,
         messageId: message.id,
         suggestionId: suggestion.id,
-        channel: "mock",
+        channel: editChannelType ?? "mock",
         text: editedText,
         delayMs: delayResult.delay.finalDelayMs,
         typingEnabled: delaySettings?.typingIndicatorEnabled || false,
@@ -943,21 +1012,17 @@ router.post("/api/suggestions/:id/edit", requireAuth, requirePermission("MANAGE_
 
 router.post("/api/suggestions/:id/reject", requireAuth, requirePermission("MANAGE_CONVERSATIONS"), async (req: Request, res: Response) => {
   try {
-    const suggestion = await storage.getAiSuggestion(req.params.id);
-    if (!suggestion) {
-      return res.status(404).json({ error: "Suggestion not found" });
-    }
-
     const rejectUser = await getUserForConversations(req.userId ?? "");
     if (!rejectUser?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const rejectSuggestionConv = await storage.getConversation(suggestion.conversationId);
-    if (!rejectSuggestionConv || rejectSuggestionConv.tenantId !== rejectUser.tenantId) {
+
+    const suggestion = await storage.getAiSuggestion(req.params.id, rejectUser.tenantId);
+    if (!suggestion) {
       return res.status(404).json({ error: "Suggestion not found" });
     }
 
-    await storage.updateAiSuggestion(req.params.id, { status: "rejected" });
+    await storage.updateAiSuggestion(req.params.id, rejectUser.tenantId, { status: "rejected" });
     await storage.createHumanAction({
       suggestionId: suggestion.id,
       action: "reject",
@@ -965,7 +1030,7 @@ router.post("/api/suggestions/:id/reject", requireAuth, requirePermission("MANAG
       reason: req.body.reason,
     });
 
-    const rejectMessages = await storage.getMessagesByConversation(suggestion.conversationId);
+    const rejectMessages = await storage.getMessagesByConversation(suggestion.conversationId, rejectUser.tenantId);
     const lastCustomerMsgReject = [...rejectMessages].reverse().find(m => m.role === "customer");
     if (lastCustomerMsgReject) {
       await recordTrainingSample({
@@ -986,7 +1051,7 @@ router.post("/api/suggestions/:id/reject", requireAuth, requirePermission("MANAG
       conversationId: suggestion.conversationId,
     });
 
-    const messages = await storage.getMessagesBySuggestionId?.(suggestion.id);
+    const messages = await storage.getMessagesBySuggestionId?.(suggestion.id, rejectUser.tenantId);
     if (messages) {
       for (const msg of messages) {
         await cancelDelayedMessage(msg.id, "rejected");
@@ -1004,24 +1069,20 @@ router.post("/api/suggestions/:id/reject", requireAuth, requirePermission("MANAG
 
 router.post("/api/suggestions/:id/escalate", requireAuth, requirePermission("MANAGE_CONVERSATIONS"), async (req: Request, res: Response) => {
   try {
-    const suggestion = await storage.getAiSuggestion(req.params.id);
-    if (!suggestion) {
-      return res.status(404).json({ error: "Suggestion not found" });
-    }
-
     const escalateUser = await getUserForConversations(req.userId ?? "");
     if (!escalateUser?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const escalateSuggestionConv = await storage.getConversation(suggestion.conversationId);
-    if (!escalateSuggestionConv || escalateSuggestionConv.tenantId !== escalateUser.tenantId) {
+
+    const suggestion = await storage.getAiSuggestion(req.params.id, escalateUser.tenantId);
+    if (!suggestion) {
       return res.status(404).json({ error: "Suggestion not found" });
     }
 
-    await storage.updateAiSuggestion(req.params.id, { status: "rejected" });
-    await storage.updateConversation(suggestion.conversationId, { status: "escalated" });
+    await storage.updateAiSuggestion(req.params.id, escalateUser.tenantId, { status: "rejected" });
+    await storage.updateConversation(suggestion.conversationId, escalateUser.tenantId, { status: "escalated" });
 
-    const messages = await storage.getMessagesBySuggestionId?.(suggestion.id);
+    const messages = await storage.getMessagesBySuggestionId?.(suggestion.id, escalateUser.tenantId);
     if (messages) {
       for (const msg of messages) {
         await cancelDelayedMessage(msg.id, "escalated");
@@ -1035,7 +1096,7 @@ router.post("/api/suggestions/:id/escalate", requireAuth, requirePermission("MAN
       suggestedResponse: suggestion.suggestedReply,
       clarificationNeeded: suggestion.questionsToAsk?.join(", ") || null,
       status: "pending",
-    });
+    }, escalateUser.tenantId);
 
     await storage.createHumanAction({
       suggestionId: suggestion.id,
@@ -1271,17 +1332,17 @@ router.patch("/api/escalations/:id", requireAuth, requirePermission("MANAGE_CONV
     if (!escalUser?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const existingEscalation = await storage.getEscalationEvent(req.params.id);
+    const existingEscalation = await storage.getEscalationEvent(req.params.id, escalUser.tenantId);
     if (!existingEscalation) {
       return res.status(404).json({ error: "Escalation not found" });
     }
-    const escalConv = await storage.getConversation(existingEscalation.conversationId);
+    const escalConv = await storage.getConversation(existingEscalation.conversationId, escalUser.tenantId);
     if (!escalConv || escalConv.tenantId !== escalUser.tenantId) {
       return res.status(404).json({ error: "Escalation not found" });
     }
 
     const { status } = req.body;
-    const escalation = await storage.updateEscalationEvent(req.params.id, {
+    const escalation = await storage.updateEscalationEvent(req.params.id, escalUser.tenantId, {
       status,
       handledAt: new Date(),
     });
@@ -1290,7 +1351,7 @@ router.patch("/api/escalations/:id", requireAuth, requirePermission("MANAGE_CONV
     }
 
     if (status === "handled" || status === "dismissed") {
-      await storage.updateConversation(escalation.conversationId, { status: "active" });
+      await storage.updateConversation(escalation.conversationId, escalUser.tenantId, { status: "active" });
     }
 
     res.json(escalation);
@@ -1319,7 +1380,7 @@ router.post("/api/conversations/:id/csat", requireAuth, requirePermission("MANAG
       return res.status(400).json({ error: "Rating must be between 1 and 5" });
     }
 
-    const conversation = await storage.getConversationWithCustomer(conversationId);
+    const conversation = await storage.getConversationWithCustomer(conversationId, user.tenantId);
     if (!conversation) {
       return res.status(404).json({ error: "Conversation not found" });
     }
@@ -1328,7 +1389,7 @@ router.post("/api/conversations/:id/csat", requireAuth, requirePermission("MANAG
       return res.status(403).json({ error: "Access denied" });
     }
 
-    const messages = await storage.getMessagesByConversation(conversationId);
+    const messages = await storage.getMessagesByConversation(conversationId, user.tenantId);
     const lastAiSuggestion = messages
       .filter(m => m.suggestionId)
       .map(m => m.suggestionId)
@@ -1338,7 +1399,7 @@ router.post("/api/conversations/:id/csat", requireAuth, requirePermission("MANAG
     let decision: string | null = null;
 
     if (lastAiSuggestion) {
-      const suggestion = await storage.getAiSuggestion(lastAiSuggestion);
+      const suggestion = await storage.getAiSuggestion(lastAiSuggestion, user.tenantId);
       if (suggestion) {
         intent = suggestion.intent || null;
         decision = suggestion.decision || null;
@@ -1446,7 +1507,7 @@ router.get("/api/conversations/:id/conversion", requireAuth, requirePermission("
 
     const conversationId = req.params.id;
     
-    const conversation = await storage.getConversation(conversationId);
+    const conversation = await storage.getConversation(conversationId, user.tenantId);
     if (!conversation) {
       return res.status(404).json({ error: "Conversation not found" });
     }

@@ -38,7 +38,7 @@ router.get("/api/customers/:id", requireAuth, requirePermission("VIEW_CUSTOMERS"
     if (!user?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const customer = await storage.getCustomer(req.params.id);
+    const customer = await storage.getCustomer(req.params.id, user.tenantId);
     if (!customer || customer.tenantId !== user.tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
@@ -56,7 +56,7 @@ router.patch("/api/customers/:id", requireAuth, requireOperator, async (req: Req
     if (!user?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const customer = await storage.getCustomer(req.params.id);
+    const customer = await storage.getCustomer(req.params.id, user.tenantId);
     if (!customer || customer.tenantId !== user.tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
@@ -66,7 +66,7 @@ router.patch("/api/customers/:id", requireAuth, requireOperator, async (req: Req
       return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
     }
     
-    const updated = await storage.updateCustomer(req.params.id, parsed.data);
+    const updated = await storage.updateCustomer(req.params.id, user.tenantId, parsed.data);
     res.json(updated);
   } catch (error) {
     console.error("Error updating customer:", error);
@@ -81,7 +81,7 @@ router.get("/api/customers/:id/notes", requireAuth, requirePermission("VIEW_CUST
     if (!user?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const customer = await storage.getCustomer(req.params.id);
+    const customer = await storage.getCustomer(req.params.id, user.tenantId);
     if (!customer || customer.tenantId !== user.tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
@@ -100,7 +100,7 @@ router.post("/api/customers/:id/notes", requireAuth, requireOperator, async (req
     if (!user?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const customer = await storage.getCustomer(req.params.id);
+    const customer = await storage.getCustomer(req.params.id, user.tenantId);
     if (!customer || customer.tenantId !== user.tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
@@ -155,7 +155,7 @@ router.delete("/api/customers/:id/notes/:noteId", requireAuth, requireOperator, 
     if (!user?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const customer = await storage.getCustomer(req.params.id);
+    const customer = await storage.getCustomer(req.params.id, user.tenantId);
     if (!customer || customer.tenantId !== user.tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
@@ -191,7 +191,7 @@ router.delete("/api/customers/:id/data", requireAuth, requirePermission("DELETE_
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const customer = await storage.getCustomer(customerId);
+    const customer = await storage.getCustomer(customerId, tenantId);
     
     if (!customer) {
       return res.json({
@@ -240,7 +240,7 @@ router.get("/api/customers/:id/memory", requireAuth, requirePermission("VIEW_CUS
     if (!user?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const customer = await storage.getCustomer(req.params.id);
+    const customer = await storage.getCustomer(req.params.id, user.tenantId);
     if (!customer || customer.tenantId !== user.tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
@@ -270,7 +270,7 @@ router.patch("/api/customers/:id/memory", requireAuth, requireOperator, async (r
     if (!user?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const customer = await storage.getCustomer(req.params.id);
+    const customer = await storage.getCustomer(req.params.id, user.tenantId);
     if (!customer || customer.tenantId !== user.tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
@@ -319,7 +319,7 @@ router.post("/api/customers/:id/memory/rebuild-summary", requireAuth, requireAdm
     if (!user?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
-    const customer = await storage.getCustomer(req.params.id);
+    const customer = await storage.getCustomer(req.params.id, user.tenantId);
     if (!customer || customer.tenantId !== user.tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }

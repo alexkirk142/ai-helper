@@ -585,7 +585,8 @@ export async function generateWithDecisionEngine(
   try {
     // Get the latest vehicle lookup case for this conversation
     const latestCase = await storage.getLatestVehicleLookupCase(
-      context.conversationId
+      context.conversationId,
+      context.tenantId
     );
     if (latestCase?.normalizedValue) {
       // Try to find a fresh price snapshot using the OEM from the case

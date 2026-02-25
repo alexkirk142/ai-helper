@@ -20,7 +20,7 @@ export async function submitConversion(input: SubmitConversionInput): Promise<Su
     return { success: false, error: "Conversion already submitted for this conversation" };
   }
 
-  const conversation = await storage.getConversation(input.conversationId);
+  const conversation = await storage.getConversation(input.conversationId, input.tenantId);
   if (!conversation) {
     return { success: false, error: "Conversation not found" };
   }
@@ -29,7 +29,7 @@ export async function submitConversion(input: SubmitConversionInput): Promise<Su
     return { success: false, error: "Tenant mismatch" };
   }
 
-  const suggestions = await storage.getSuggestionsByConversation(input.conversationId);
+  const suggestions = await storage.getSuggestionsByConversation(input.conversationId, input.tenantId);
   const lastSuggestion = suggestions.length > 0 ? suggestions[suggestions.length - 1] : null;
 
   const conversion = await storage.createConversion({

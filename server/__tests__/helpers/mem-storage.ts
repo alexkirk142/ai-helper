@@ -536,7 +536,8 @@ export class MemStorage implements IStorage {
     );
   }
 
-  async updateCustomer(id: string, data: UpdateCustomer): Promise<Customer | undefined> {
+  // TODO: add tenantId filtering in tests
+  async updateCustomer(id: string, _tenantId: string, data: UpdateCustomer): Promise<Customer | undefined> {
     const customer = this.customers.get(id);
     if (!customer) return undefined;
     const updated: Customer = { ...customer, ...data, updatedAt: new Date() };
@@ -717,7 +718,8 @@ export class MemStorage implements IStorage {
     return newConv;
   }
 
-  async updateConversation(id: string, data: Partial<InsertConversation>): Promise<Conversation | undefined> {
+  // TODO: add tenantId filtering in tests
+  async updateConversation(id: string, _tenantId: string, data: Partial<InsertConversation>): Promise<Conversation | undefined> {
     const conv = this.conversations.get(id);
     if (!conv) return undefined;
     const updated = { ...conv, ...data };
@@ -736,8 +738,10 @@ export class MemStorage implements IStorage {
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   }
 
+  // TODO: add tenantId filtering in tests
   async getMessagesByConversationPaginated(
     conversationId: string,
+    _tenantId: string,
     cursor?: string,
     limit = 50,
   ): Promise<{ messages: Message[]; nextCursor: string | null }> {
@@ -781,7 +785,8 @@ export class MemStorage implements IStorage {
     return newMessage;
   }
 
-  async updateMessage(id: string, data: Partial<InsertMessage>): Promise<Message | undefined> {
+  // TODO: add tenantId filtering in tests
+  async updateMessage(id: string, _tenantId: string, data: Partial<InsertMessage>): Promise<Message | undefined> {
     const msg = this.messages.get(id);
     if (!msg) return undefined;
     const updated: Message = { ...msg, ...(data as Partial<Message>) };
@@ -909,7 +914,8 @@ export class MemStorage implements IStorage {
     return newSuggestion;
   }
 
-  async updateAiSuggestion(id: string, data: Partial<InsertAiSuggestion>): Promise<AiSuggestion | undefined> {
+  // TODO: add tenantId filtering in tests
+  async updateAiSuggestion(id: string, _tenantId: string, data: Partial<InsertAiSuggestion>): Promise<AiSuggestion | undefined> {
     const suggestion = this.aiSuggestions.get(id);
     if (!suggestion) return undefined;
     const updated = { ...suggestion, ...data };
@@ -1049,7 +1055,8 @@ export class MemStorage implements IStorage {
     return newEvent;
   }
 
-  async updateEscalationEvent(id: string, data: Partial<InsertEscalationEvent>): Promise<EscalationEvent | undefined> {
+  // TODO: add tenantId filtering in tests
+  async updateEscalationEvent(id: string, _tenantId: string, data: Partial<InsertEscalationEvent>): Promise<EscalationEvent | undefined> {
     const event = this.escalationEvents.get(id);
     if (!event) return undefined;
     const updated = { ...event, ...data };
@@ -1431,8 +1438,10 @@ export class MemStorage implements IStorage {
     return undefined;
   }
 
+  // TODO: add tenantId filtering in tests
   async updateVehicleLookupCaseStatus(
     _caseId: string,
+    _tenantId: string,
     _patch: { status?: VehicleLookupCaseStatus; verificationStatus?: VehicleLookupVerificationStatus; error?: string | null; cacheId?: string | null }
   ): Promise<VehicleLookupCase | undefined> {
     return undefined;

@@ -38,7 +38,7 @@ router.post("/api/conversations/:id/vehicle-lookup-case", requireAuth, requirePe
       ? rawValue.toUpperCase().replace(/\s/g, "")
       : rawValue.replace(/\s/g, "");
 
-    const conversation = await storage.getConversation(conversationId);
+    const conversation = await storage.getConversation(conversationId, user.tenantId);
     if (!conversation) {
       return res.status(404).json({ error: "Conversation not found" });
     }
@@ -55,7 +55,7 @@ router.post("/api/conversations/:id/vehicle-lookup-case", requireAuth, requirePe
       normalizedValue,
       status: "PENDING",
       verificationStatus: "NONE",
-    });
+    }, user.tenantId);
 
     const { enqueueVehicleLookup } = await import("../services/vehicle-lookup-queue");
     await enqueueVehicleLookup({
@@ -155,7 +155,7 @@ router.post("/api/conversations/:id/price-lookup", requireAuth, requirePermissio
     }
 
     const conversationId = req.params.id;
-    const conversation = await storage.getConversation(conversationId);
+    const conversation = await storage.getConversation(conversationId, user.tenantId);
     if (!conversation) {
       return res.status(404).json({ error: "Conversation not found" });
     }
@@ -208,7 +208,7 @@ router.get("/api/conversations/:id/price-history", requireAuth, requirePermissio
     }
 
     const conversationId = req.params.id;
-    const conversation = await storage.getConversation(conversationId);
+    const conversation = await storage.getConversation(conversationId, user.tenantId);
     if (!conversation) {
       return res.status(404).json({ error: "Conversation not found" });
     }

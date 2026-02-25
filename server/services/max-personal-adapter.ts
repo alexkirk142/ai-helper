@@ -82,14 +82,8 @@ export class MaxPersonalAdapter implements ChannelAdapter {
         .limit(1);
       return accounts[0] ?? null;
     }
-    // Fallback for single-tenant deployments only — multi-tenant setups must use sendMessageForTenant.
-    console.warn("[MaxPersonal] getAccount() called without tenantId encoding — use sendMessageForTenant() for multi-tenant safety.");
-    const accounts = await db
-      .select()
-      .from(maxPersonalAccounts)
-      .where(eq(maxPersonalAccounts.status, "authorized"))
-      .limit(1);
-    return accounts[0] ?? null;
+    console.warn("[MaxPersonal] getAccount() called without tenantId encoding — tenantId is required. Use sendMessageForTenant() for all calls.");
+    throw new Error("[MaxPersonalAdapter] tenantId is required to resolve account. Cross-tenant fallback has been removed.");
   }
 
   /**

@@ -4,6 +4,7 @@ import { maxAdapter, MaxWebhookPayload } from "../services/max-adapter";
 import { featureFlagService } from "../services/feature-flags";
 import { auditLog } from "../services/audit-log";
 import { processInboundMessage } from "../services/channel-adapter";
+import { processIncomingMessageFull } from "../services/inbound-message-handler";
 
 const router = Router();
 
@@ -107,6 +108,8 @@ router.post("/", async (req: Request, res: Response) => {
         requestId,
       }
     );
+
+    await processIncomingMessageFull("", parsed);
 
     res.status(200).json({
       ok: true,

@@ -221,7 +221,10 @@ export const conversations = pgTable("conversations", {
   lastMessageAt: timestamp("last_message_at").default(sql`CURRENT_TIMESTAMP`),
   unreadCount: integer("unread_count").default(0),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+}, (table) => [
+  index("idx_conversations_tenant_id").on(table.tenantId),
+  index("idx_conversations_customer_id").on(table.customerId),
+]);
 
 // Messages
 export const messages = pgTable("messages", {
@@ -232,7 +235,9 @@ export const messages = pgTable("messages", {
   attachments: jsonb("attachments").default([]),
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+}, (table) => [
+  index("idx_messages_conversation_id").on(table.conversationId),
+]);
 
 // Products catalog
 export const products = pgTable("products", {
@@ -308,7 +313,9 @@ export const ragChunks = pgTable("rag_chunks", {
   metadata: jsonb("metadata").default({}),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+}, (table) => [
+  index("idx_rag_chunks_rag_document_id").on(table.ragDocumentId),
+]);
 
 // AI Suggestions (extended for Phase 1 Decision Engine)
 export const aiSuggestions = pgTable("ai_suggestions", {
@@ -340,7 +347,9 @@ export const aiSuggestions = pgTable("ai_suggestions", {
     selfCheckNeedHandoff: boolean("self_check_need_handoff").default(false),
   selfCheckReasons: jsonb("self_check_reasons").default([]), // array of strings
   escalationData: jsonb("escalation_data"),
-});
+}, (table) => [
+  index("idx_ai_suggestions_conversation_id").on(table.conversationId),
+]);
 
 // Human Actions (approve/edit/reject tracking)
 export const humanActions = pgTable("human_actions", {
@@ -389,7 +398,9 @@ export const learningQueue = pgTable("learning_queue", {
   reviewedBy: varchar("reviewed_by").references(() => users.id),
   reviewedAt: timestamp("reviewed_at"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+}, (table) => [
+  uniqueIndex("idx_learning_queue_conversation_id").on(table.conversationId),
+]);
 
 // Learning score reason codes
 export const LEARNING_SCORE_REASONS = {
@@ -415,7 +426,9 @@ export const escalationEvents = pgTable("escalation_events", {
   handledBy: varchar("handled_by").references(() => users.id),
   handledAt: timestamp("handled_at"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+}, (table) => [
+  index("idx_escalation_events_conversation_id").on(table.conversationId),
+]);
 
 // Response Templates
 export const responseTemplates = pgTable("response_templates", {

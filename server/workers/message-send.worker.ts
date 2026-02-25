@@ -21,9 +21,10 @@ const CANCELLED_SUGGESTION_STATUSES = new Set(["rejected", "cancelled"]);
 async function isMessageStillValid(
   messageId: string,
   conversationId: string,
+  tenantId: string,
   suggestionId?: string
 ): Promise<{ valid: boolean; reason?: string }> {
-  const conversation = await storage.getConversation(conversationId);
+  const conversation = await storage.getConversation(conversationId, tenantId);
   if (!conversation) {
     return { valid: false, reason: "Conversation not found" };
   }
@@ -32,7 +33,7 @@ async function isMessageStillValid(
   }
 
   if (suggestionId) {
-    const suggestion = await storage.getAiSuggestion(suggestionId);
+    const suggestion = await storage.getAiSuggestion(suggestionId, tenantId);
     if (!suggestion) {
       return { valid: false, reason: "Suggestion not found" };
     }
@@ -46,11 +47,12 @@ async function isMessageStillValid(
 
 async function markMessageAsSent(
   messageId: string,
+  tenantId: string,
   externalId: string
 ): Promise<void> {
-  const existing = await storage.getMessage(messageId);
+  const existing = await storage.getMessage(messageId, tenantId);
   const existingMeta = (existing?.metadata ?? {}) as Record<string, unknown>;
-  await storage.updateMessage(messageId, {
+  await storage.updateMessage(messageId, tenantId, {
     metadata: {
       ...existingMeta,
       deliveryStatus: "sent",
@@ -62,11 +64,12 @@ async function markMessageAsSent(
 
 async function markMessageAsFailed(
   messageId: string,
+  tenantId: string,
   error: string
 ): Promise<void> {
-  const existing = await storage.getMessage(messageId);
+  const existing = await storage.getMessage(messageId, tenantId);
   const existingMeta = (existing?.metadata ?? {}) as Record<string, unknown>;
-  await storage.updateMessage(messageId, {
+  await storage.updateMessage(messageId, tenantId, {
     metadata: {
       ...existingMeta,
       deliveryStatus: "failed",
@@ -77,7 +80,7 @@ async function markMessageAsFailed(
 }
 
 async function processDelayedMessage(job: Job<DelayedMessageJobData>): Promise<void> {
-  const { messageId, conversationId, suggestionId, channel, text, typingEnabled, createdAt, delayMs } = job.data;
+  const { tenantId, messageId, conversationId, suggestionId, channel, text, typingEnabled, createdAt, delayMs } = job.data;
 
   const jobStartTime = Date.now();
   const actualDelayMs = jobStartTime - new Date(createdAt).getTime();
@@ -85,7 +88,7 @@ async function processDelayedMessage(job: Job<DelayedMessageJobData>): Promise<v
   console.log(`[Worker] Processing job: ${job.id}, messageId: ${messageId}`);
   console.log(`[Worker] Scheduled delay: ${delayMs}ms, Actual delay: ${actualDelayMs}ms`);
 
-  const validity = await isMessageStillValid(messageId, conversationId, suggestionId);
+  const validity = await isMessageStillValid(messageId, conversationId, tenantId, suggestionId);
   if (!validity.valid) {
     console.log(`[Worker] Message no longer valid: ${messageId}, reason: ${validity.reason}`);
     await auditLog.log(
@@ -110,7 +113,7 @@ async function processDelayedMessage(job: Job<DelayedMessageJobData>): Promise<v
   const result = await adapter.sendMessage(conversationId, text);
 
   if (result.success) {
-    await markMessageAsSent(messageId, result.externalMessageId || "");
+    await markMessageAsSent(messageId, tenantId, result.externalMessageId || "");
     recordJobCompleted(actualDelayMs);
 
     await auditLog.log(
@@ -163,7 +166,7 @@ export function createMessageSendWorker(connectionConfig: IORedis): Worker<Delay
       const maxAttempts = job.opts.attempts || 3;
 
       if (attemptsMade >= maxAttempts) {
-        await markMessageAsFailed(job.data.messageId, error.message);
+        await markMessageAsFailed(job.data.messageId, job.data.tenantId, error.message);
         await auditLog.log(
           "message_send_failed" as any,
           "message",

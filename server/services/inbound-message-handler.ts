@@ -184,7 +184,7 @@ export async function handleIncomingMessage(
       name: customerName,
       phone: customerPhone,
       metadata: { remoteJid },
-    });
+    }, tenant.id);
     console.log(`[InboundHandler] Created new customer: ${customer.id} for ${parsed.channel}:${parsed.externalUserId}${isLid ? " (LID contact)" : ""}`);
   }
 
@@ -211,13 +211,13 @@ export async function handleIncomingMessage(
       unreadCount: 1,
       lastMessageAt: messageTime,
       createdAt: messageTime,
-    });
+    }, tenant.id);
     conversationId = newConv.id;
     unreadCount = 0;
     console.log(`[InboundHandler] Created new conversation: ${newConv.id}`);
   }
 
-  const existingMessages = await storage.getMessagesByConversation(conversationId);
+  const existingMessages = await storage.getMessagesByConversation(conversationId, tenant.id);
   const existingMessage = existingMessages.find(m => 
     m.metadata && (m.metadata as any).externalId === parsed.externalMessageId
   );
@@ -239,18 +239,18 @@ export async function handleIncomingMessage(
       ...parsed.metadata,
     },
     createdAt: parsed.timestamp ? new Date(parsed.timestamp) : undefined,
-  });
+  }, tenant.id);
 
   console.log(`[InboundHandler] Saved message ${message.id} to conversation ${conversationId}`);
 
-  await storage.updateConversation(conversationId, {
+  await storage.updateConversation(conversationId, tenant.id, {
     unreadCount: unreadCount + 1,
   });
 
   realtimeService.broadcastNewMessage(tenant.id, message, conversationId);
   
   if (isNew) {
-    const conversationWithCustomer = await storage.getConversationWithCustomer(conversationId);
+    const conversationWithCustomer = await storage.getConversationWithCustomer(conversationId, tenant.id);
     if (conversationWithCustomer) {
       realtimeService.broadcastNewConversation(tenant.id, conversationWithCustomer);
     }
@@ -264,9 +264,9 @@ export async function handleIncomingMessage(
   return { conversationId, messageId: message.id, isNew };
 }
 
-export async function triggerAiSuggestion(conversationId: string): Promise<void> {
+export async function triggerAiSuggestion(conversationId: string, tenantId: string): Promise<void> {
   try {
-    const conversation = await storage.getConversationDetail(conversationId);
+    const conversation = await storage.getConversationDetail(conversationId, tenantId);
     if (!conversation) {
       console.warn(`[InboundHandler] Conversation not found for AI: ${conversationId}`);
       return;
@@ -287,7 +287,7 @@ export async function triggerAiSuggestion(conversationId: string): Promise<void>
       return;
     }
 
-    const pendingSuggestion = await storage.getPendingSuggestionByConversation(conversationId);
+    const pendingSuggestion = await storage.getPendingSuggestionByConversation(conversationId, tenantId);
     if (pendingSuggestion) {
       console.log(`[InboundHandler] Already has pending suggestion for ${conversationId}`);
       return;
@@ -339,7 +339,7 @@ export async function triggerAiSuggestion(conversationId: string): Promise<void>
       explanations: decisionResult.explanations,
       penalties: decisionResult.penalties,
       sourceConflicts: decisionResult.usedSources.length > 0,
-    });
+    }, tenantId);
 
     console.log(`[InboundHandler] Created AI suggestion ${suggestion.id} with decision: ${decisionResult.decision}`);
 
@@ -386,7 +386,7 @@ export async function processIncomingMessageFull(
     const text = (parsed.text || "").trim();
 
     // Skip AI suggestion entirely if conversation is muted
-    const conversation = await storage.getConversation(result.conversationId);
+    const conversation = await storage.getConversation(result.conversationId, tenantId);
     if (conversation?.isMuted) {
       console.log(`[InboundHandler] Conversation ${result.conversationId} is muted — skipping AI suggestion`);
       return;
@@ -395,7 +395,7 @@ export async function processIncomingMessageFull(
     const autoPartsEnabled = await featureFlagService.isEnabled("AUTO_PARTS_ENABLED", tenantId);
 
     if (!autoPartsEnabled) {
-      await triggerAiSuggestion(result.conversationId);
+      await triggerAiSuggestion(result.conversationId, tenantId);
       return;
     }
 
@@ -489,7 +489,7 @@ export async function processIncomingMessageFull(
                 questionsToAsk: [],
                 usedSources: [],
                 status: "pending",
-              });
+              }, tenant.id);
               realtimeService.broadcastNewSuggestion(tenant.id, result.conversationId, suggestion.id);
               console.log(`[InboundHandler] Created registration_doc suggestion for conversation ${result.conversationId}`);
             }
@@ -520,7 +520,7 @@ export async function processIncomingMessageFull(
     }
 
     if (vehicleDet && "isIncompleteVin" in vehicleDet && vehicleDet.isIncompleteVin) {
-      const conversation = await storage.getConversationDetail(result.conversationId);
+      const conversation = await storage.getConversationDetail(result.conversationId, tenantId);
       const tenant = conversation ? await storage.getTenant(conversation.tenantId) ?? await storage.getDefaultTenant() : null;
       if (conversation && tenant) {
         const suggestion = await storage.createAiSuggestion({
@@ -534,7 +534,7 @@ export async function processIncomingMessageFull(
           questionsToAsk: [],
           usedSources: [],
           status: "pending",
-        });
+        }, tenantId);
         realtimeService.broadcastNewSuggestion(tenant.id, result.conversationId, suggestion.id);
         console.log(`[InboundHandler] Incomplete VIN detected, created vehicle_id_request suggestion for ${result.conversationId}`);
       }
@@ -555,7 +555,7 @@ export async function processIncomingMessageFull(
           normalizedValue: vehicleDet.normalizedValue,
           status: "PENDING",
           verificationStatus: "NONE",
-        });
+        }, tenantId);
         const { enqueueVehicleLookup } = await import("./vehicle-lookup-queue");
         await enqueueVehicleLookup({
           caseId: row.id,
@@ -583,7 +583,7 @@ export async function processIncomingMessageFull(
               questionsToAsk: [],
               usedSources: [],
               status: "pending",
-            });
+            }, tenant.id);
             realtimeService.broadcastNewSuggestion(tenant.id, result.conversationId, suggestion.id);
             console.log(`[InboundHandler] Created gearbox_tag_request suggestion for vehicle lookup case ${row.id}`);
           }
@@ -617,7 +617,7 @@ export async function processIncomingMessageFull(
       if (mentionedGearboxType !== "unknown") {
         const tenant = await storage.getTenant(tenantId) ?? await storage.getDefaultTenant();
         if (tenant) {
-          const pendingSuggestion = await storage.getPendingSuggestionByConversation(result.conversationId);
+          const pendingSuggestion = await storage.getPendingSuggestionByConversation(result.conversationId, tenantId);
           if (!pendingSuggestion) {
             const templates = getMergedGearboxTemplates(tenant);
             const replyText = fillGearboxTemplate(templates.gearboxNoVin, {
@@ -636,7 +636,7 @@ export async function processIncomingMessageFull(
               status: "pending",
               decision: "NEED_APPROVAL",
               autosendEligible: false,
-            });
+            }, tenant.id);
             realtimeService.broadcastNewSuggestion(tenant.id, result.conversationId, suggestion.id);
             console.log(`[InboundHandler] Gearbox type "${mentionedGearboxType}" without VIN, created gearbox_no_vin suggestion`);
           }
@@ -645,7 +645,7 @@ export async function processIncomingMessageFull(
       }
     }
 
-    await triggerAiSuggestion(result.conversationId);
+    await triggerAiSuggestion(result.conversationId, tenantId);
   } catch (error) {
     console.error(`[InboundHandler] Error processing message:`, error);
   }
