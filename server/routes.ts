@@ -32,6 +32,7 @@ import onboardingRouter from "./routes/onboarding.routes";
 import billingRouter from "./routes/billing.routes";
 import vehicleLookupRouter from "./routes/vehicle-lookup.routes";
 import tenantConfigRouter from "./routes/tenant-config.routes";
+import { getAppUrl } from "./utils/app-url";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -300,10 +301,10 @@ export async function registerRoutes(
           displayName = info.nameAccount || info.wid;
         } catch { /* non-fatal */ }
 
-        const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
-        const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${account.accountId}`;
         let webhookRegistered = false;
         try {
+          const appUrl = getAppUrl();
+          const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${account.accountId}`;
           await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
           webhookRegistered = true;
         } catch (err: any) {

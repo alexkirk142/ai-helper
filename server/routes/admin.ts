@@ -11,6 +11,7 @@ import { adminActionService } from "../services/admin-action-service";
 import { encryptSecret, isValidKeyName } from "../services/secret-store";
 import { clearSecretCache } from "../services/secret-resolver";
 import { updateService } from "../services/update-service";
+import { getAppUrl } from "../utils/app-url";
 
 const MAX_GRANT_DURATION_DAYS = 365;
 
@@ -2045,9 +2046,9 @@ router.post(
       const accountId = randomUUID();
       let webhookRegistered = false;
       if (state === "authorized") {
-        const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
-        const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
         try {
+          const appUrl = getAppUrl();
+          const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
           await maxGreenApiAdapter.setWebhook(idInstance, apiTokenInstance, webhookUrl);
           webhookRegistered = true;
         } catch (err: any) {
@@ -2151,10 +2152,10 @@ router.get(
           // non-fatal
         }
 
-        const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
-        const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
         let webhookRegistered = false;
         try {
+          const appUrl = getAppUrl();
+          const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
           await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
           webhookRegistered = true;
         } catch (err: any) {
@@ -2235,7 +2236,7 @@ router.post(
         return res.status(400).json({ error: "Account is not authorized" });
       }
 
-      const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+      const appUrl = getAppUrl();
       const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
       await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
 
