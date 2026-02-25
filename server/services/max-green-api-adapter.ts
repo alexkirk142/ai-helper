@@ -83,6 +83,13 @@ export class MaxGreenApiAdapter {
           webhookUrl,
           incomingWebhook: "yes",
           outgoingWebhook: "no",
+          outgoingMessageWebhook: "no",
+          outgoingAPIMessageWebhook: "no",
+          stateWebhook: "yes",
+          deviceWebhook: "no",
+          pollMessageWebhook: "no",
+          editedMessageWebhook: "no",
+          deletedMessageWebhook: "no",
         }),
       });
     } catch (err: any) {
