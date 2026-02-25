@@ -126,6 +126,7 @@ router.post("/:tenantId/:accountId", async (req, res) => {
       metadata: {
         senderName: sender.senderName || sender.chatName,
         chatId: sender.chatId,
+        accountId: account.accountId,
       },
       attachments: attachments.length > 0 ? attachments : undefined,
     };

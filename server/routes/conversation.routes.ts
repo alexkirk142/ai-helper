@@ -268,13 +268,31 @@ router.post(
       const customerMessages = conversation.messages.filter((m) => m.role === "customer");
       const lastCustomerMsg = customerMessages[customerMessages.length - 1];
       const channelType = (lastCustomerMsg?.metadata as any)?.channel as string | undefined;
-      let effectiveChannelType = channelType;
+      let effectiveChannelType: string | undefined = channelType;
+      // Fallback 1: customer entity channel (set when customer was created via start-conversation)
+      if (!effectiveChannelType) {
+        effectiveChannelType = (conversation.customer as any)?.channel as string | undefined;
+      }
+      // Fallback 2: channel record linked to conversation
       if (!effectiveChannelType && conversation.channelId) {
         const ch = await storage.getChannel(conversation.channelId);
         effectiveChannelType = ch?.type;
       }
+      // Fallback 3: scan all messages for any channel hint (covers operator-started conversations
+      // where no customer messages exist yet and conversation has no channelId)
+      if (!effectiveChannelType) {
+        for (const msg of conversation.messages) {
+          const ch = (msg.metadata as any)?.channel as string | undefined;
+          if (ch) { effectiveChannelType = ch; break; }
+        }
+      }
       const effectiveChannelId =
         conversation.channelId || ((lastCustomerMsg?.metadata as any)?.channelId as string | undefined);
+      // For multi-account channels (max_personal): prefer accountId from last customer msg,
+      // then fall back to any message that carries one (e.g. the initial outbound message).
+      const effectiveAccountId: string | undefined =
+        ((lastCustomerMsg?.metadata as any)?.accountId as string | undefined) ??
+        (conversation.messages.find((m) => (m.metadata as any)?.accountId)?.metadata as any)?.accountId;
 
       console.log(
         `[OutboundHandler] channel=${effectiveChannelType}, channelId=${effectiveChannelId}, hasFile=${!!uploadedFile}`,
@@ -451,6 +469,8 @@ router.post(
               conversation.tenantId,
               chatId,
               content.trim(),
+              undefined,
+              effectiveAccountId,
             );
             if (sendResult.success) {
               console.log(`[OutboundHandler] MAX Personal message sent: ${sendResult.externalMessageId}`);
@@ -597,8 +617,19 @@ async function sendToChannel(conversationId: string, text: string, tenantId: str
       const channel = await storage.getChannel(conversationDetail.channelId);
       effectiveChannelType = channel?.type;
     }
+    // Fallback: scan all messages for channel hint (covers operator-started conversations)
+    if (!effectiveChannelType) {
+      for (const msg of messages) {
+        const ch = (msg.metadata as any)?.channel as string | undefined;
+        if (ch) { effectiveChannelType = ch; break; }
+      }
+    }
     
     const effectiveChannelId = conversationDetail.channelId || (lastCustomerMsg?.metadata as any)?.channelId;
+    // For multi-account max_personal: prefer accountId from customer msg, then any message
+    const effectiveAccountId: string | undefined =
+      ((lastCustomerMsg?.metadata as any)?.accountId as string | undefined) ??
+      (messages.find((m) => (m.metadata as any)?.accountId)?.metadata as any)?.accountId;
     
     console.log(`[Outbound] Channel: ${effectiveChannelType}, ChannelId: ${effectiveChannelId}, CustomerExternalId: ${conversationDetail.customer?.externalId}`);
     
@@ -638,7 +669,7 @@ async function sendToChannel(conversationId: string, text: string, tenantId: str
         const { maxPersonalAdapter } = await import("../services/max-personal-adapter");
         const chatId = conversationDetail.customer.externalId;
         console.log(`[Outbound] Sending MAX Personal message to ${chatId}`);
-        channelSendResult = await maxPersonalAdapter.sendMessageForTenant(tenantId, chatId, text);
+        channelSendResult = await maxPersonalAdapter.sendMessageForTenant(tenantId, chatId, text, undefined, effectiveAccountId);
         if (channelSendResult.success) {
           console.log(`[Outbound] MAX Personal message sent: ${channelSendResult.externalMessageId}`);
         } else {

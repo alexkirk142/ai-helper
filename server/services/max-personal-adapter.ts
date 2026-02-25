@@ -66,36 +66,55 @@ export class MaxPersonalAdapter implements ChannelAdapter {
   }
 
   /**
-   * Resolve the tenant account from a chatId. The chatId belongs to a conversation
-   * that was opened for a specific tenant — we look up by conversationId in practice,
-   * but here we need the tenantId from the calling context. Since sendMessage is called
-   * from the message-send worker which has the full conversation, we pass the tenantId
-   * as a prefix separated by "::" in the externalConversationId when needed. Otherwise
-   * the caller should use sendMessageForTenant directly.
+   * Resolve the tenant account from an externalConversationId.
+   * Callers should prefer `sendMessageForTenant` which carries an explicit tenantId.
+   * This method supports an optional "tenantId::chatId" encoding for contexts where
+   * only the generic sendMessage interface is available (e.g. message-send worker).
    */
   private async getAccount(externalConversationId: string) {
-    // The channel-adapter sendMessage signature doesn't carry tenantId, so we
-    // look for any single configured account (single-tenant scenario) or log a warning.
-    // The per-tenant resolution is handled in sendMessageForTenant below.
-    const accounts = await db.select().from(maxPersonalAccounts).limit(1);
+    const parts = externalConversationId.split("::");
+    if (parts.length === 2) {
+      const tenantId = parts[0];
+      const accounts = await db
+        .select()
+        .from(maxPersonalAccounts)
+        .where(and(eq(maxPersonalAccounts.tenantId, tenantId), eq(maxPersonalAccounts.status, "authorized")))
+        .limit(1);
+      return accounts[0] ?? null;
+    }
+    // Fallback for single-tenant deployments only — multi-tenant setups must use sendMessageForTenant.
+    console.warn("[MaxPersonal] getAccount() called without tenantId encoding — use sendMessageForTenant() for multi-tenant safety.");
+    const accounts = await db
+      .select()
+      .from(maxPersonalAccounts)
+      .where(eq(maxPersonalAccounts.status, "authorized"))
+      .limit(1);
     return accounts[0] ?? null;
   }
 
   /**
    * Preferred send path — use when tenantId is known.
-   * Routes to the first authorized account for the tenant.
+   * Pass `accountId` (the webhook UUID) to route through a specific account when the
+   * tenant has multiple MAX Personal accounts configured.
    */
   async sendMessageForTenant(
     tenantId: string,
     chatId: string,
     text: string,
-    attachments?: Array<{ url: string; mimeType?: string; fileName?: string; caption?: string }>
+    attachments?: Array<{ url: string; mimeType?: string; fileName?: string; caption?: string }>,
+    accountId?: string,
   ): Promise<ChannelSendResult> {
     const account = await db.query.maxPersonalAccounts.findFirst({
-      where: and(
-        eq(maxPersonalAccounts.tenantId, tenantId),
-        eq(maxPersonalAccounts.status, "authorized"),
-      ),
+      where: accountId
+        ? and(
+            eq(maxPersonalAccounts.tenantId, tenantId),
+            eq(maxPersonalAccounts.accountId, accountId),
+            eq(maxPersonalAccounts.status, "authorized"),
+          )
+        : and(
+            eq(maxPersonalAccounts.tenantId, tenantId),
+            eq(maxPersonalAccounts.status, "authorized"),
+          ),
     });
     if (!account) {
       return { success: false, error: "No MAX Personal account connected" };

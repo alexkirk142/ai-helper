@@ -1390,7 +1390,13 @@ export async function registerRoutes(
             conversationId: conversation.id,
             role: "assistant",
             content: trimmed,
-            metadata: { isOutbound: true, externalMessageId: sendResult.externalMessageId ?? null },
+            metadata: {
+              isOutbound: true,
+              externalMessageId: sendResult.externalMessageId ?? null,
+              channel: "max_personal",
+              accountId: account.accountId,
+              chatId,
+            },
           });
         }
       }
