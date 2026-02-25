@@ -35,10 +35,18 @@ CRITICAL RULES:
    - "5AT" or "5A/T" = 5-speed AUTOMATIC (АКПП)
    - "CVT" or "CVT8" = continuously variable transmission (вариатор)
    - "S6FA/T" = S6FA series, MANUAL
-3. For Mitsubishi Lancer CY4A with "5FM/T":
-   - W5MBB = 5-speed manual, 4WD (most common for Lancer 4WD)
-   - W5M51 = 5-speed manual, 2WD
-   - Look at drive type: "4WD" → W5MBB, "2WD"/"FWD" → W5M51
+3. For Mitsubishi transmissions — match by EXACT model, not generic rules:
+
+   Lancer CY4A with 5FM/T:
+   - W5MBB = 5-speed manual, 4WD
+   - W5M51 = 5-speed manual, 2WD (FWD)
+
+   Space Gear / Delica L400 (body codes: PA3W, PA4W, PB4W, PC4W, PD4W, PD6W, PD8W, PE8W, PF8W) with 5FM/T:
+   - R5M217EJDL = 5-speed manual (DO NOT use W5M51 for this model)
+
+   IMPORTANT: W5M51 is ONLY for Lancer/Galant FWD platform.
+   It is NOT used in Space Gear, Delica, Pajero, or other body-on-frame vehicles.
+   Always check the body code (modely/kuzova field) before applying W5M series.
 4. The "modifikaciya" field is the most reliable source for transmission type — always prioritize it over general knowledge.
 5. Return JSON only: { modelName, manufacturer, origin, confidence, notes }
 
@@ -190,6 +198,19 @@ export async function identifyTransmissionByOem(
         : "low",
       notes: typeof parsed.notes === "string" ? parsed.notes : "",
     };
+
+    // Space Gear / Delica L400 guard: W5M series is FWD-platform only (Lancer/Galant).
+    // If GPT returns a W5M model for a body-on-frame Mitsubishi body code, downgrade
+    // confidence so the result requires operator approval instead of auto-sending.
+    const spaceGearBodyPattern = /^P[A-F]\d+W$/i;
+    const bodyCode = context?.partsApiRawData?.modely as string | undefined;
+    if (bodyCode && spaceGearBodyPattern.test(bodyCode) && result.modelName?.startsWith("W5M")) {
+      console.warn(
+        `[TransmissionIdentifier] W5M series detected for Space Gear body ${bodyCode} — likely wrong. Setting confidence to low.`
+      );
+      result.confidence = "low";
+      result.notes = `WARNING: W5M series unlikely for Space Gear/Delica L400 body ${bodyCode}. Manual verification required. ` + result.notes;
+    }
 
     if (
       result.modelName &&

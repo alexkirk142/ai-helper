@@ -1,4 +1,4 @@
-import { eq, desc, asc, and, or, ilike, inArray, sql, gte, gt } from "drizzle-orm";
+import { eq, desc, asc, and, or, ilike, inArray, sql, gte, gt, isNull } from "drizzle-orm";
 import { db } from "./db";
 import {
   tenants, channels, users, userInvites, emailTokens, customers, customerNotes, customerMemory, conversations, messages,
@@ -1787,7 +1787,13 @@ export class DatabaseStorage implements IStorage {
     const [row] = await db
       .select()
       .from(transmissionIdentityCache)
-      .where(eq(transmissionIdentityCache.normalizedOem, normalizedOem))
+      .where(and(
+        eq(transmissionIdentityCache.normalizedOem, normalizedOem),
+        or(
+          isNull(transmissionIdentityCache.expiresAt),
+          gt(transmissionIdentityCache.expiresAt, sql`CURRENT_TIMESTAMP`)
+        )
+      ))
       .limit(1);
     return row;
   }
