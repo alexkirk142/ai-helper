@@ -424,7 +424,38 @@ export async function processIncomingMessageFull(
         const safeUrls = imageAttachments.map((a) => logSafeUrl(a.url ?? ""));
         console.log(`[InboundHandler] No text VIN found, classifying ${imageAttachments.length} image(s): ${safeUrls.join(", ")}`);
 
-        const imageResult = await analyzeImages(imageAttachments).catch(() => ({ type: "unknown" as const }));
+        // OpenAI cannot access relative or authenticated URLs — resolve Telegram media
+        // proxy paths to base64 data: URLs before passing to vision API
+        const resolvedAttachments = await Promise.all(
+          imageAttachments.map(async (att) => {
+            const url = att.url ?? "";
+            const match = url.match(/^\/api\/telegram-personal\/media\/([^/]+)\/([^/]+)\/(\d+)$/);
+            if (!match) return att; // already absolute or data: URL — pass through
+            const [, accountId, chatId, msgId] = match;
+            try {
+              const { telegramClientManager } = await import("./telegram-client-manager");
+              const client = telegramClientManager.getClientForAccount(tenantId, accountId);
+              if (!client) {
+                console.warn(`[InboundHandler] No TG client for accountId=${accountId}, skipping image download`);
+                return att;
+              }
+              const messages = await client.getMessages(BigInt(chatId), { ids: [parseInt(msgId, 10)] });
+              const msg = messages?.[0];
+              if (!msg) return att;
+              const buffer = await client.downloadMedia(msg, {}) as Buffer | undefined;
+              if (!buffer || buffer.length === 0) return att;
+              const mimeType = att.mimeType ?? "image/jpeg";
+              const dataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
+              console.log(`[InboundHandler] Resolved TG media → data URL (${buffer.length} bytes)`);
+              return { ...att, url: dataUrl };
+            } catch (dlErr: any) {
+              console.warn(`[InboundHandler] Failed to download TG media for OCR: ${dlErr.message}`);
+              return att;
+            }
+          })
+        );
+
+        const imageResult = await analyzeImages(resolvedAttachments).catch(() => ({ type: "unknown" as const }));
 
         if (imageResult.type === "gearbox_tag" && imageResult.code) {
           console.log(`[InboundHandler] Gearbox tag detected in image: ${imageResult.code} — enqueueing direct price lookup`);
@@ -471,7 +502,7 @@ export async function processIncomingMessageFull(
 
         // Fallback: plain VIN extraction for images not classified as gearbox_tag or registration_doc
         if (!vehicleDet && imageResult.type === "unknown") {
-          const vinFromImage = await extractVinFromImages(imageAttachments).catch(() => null);
+          const vinFromImage = await extractVinFromImages(resolvedAttachments).catch(() => null);
           if (vinFromImage) {
             console.log(`[InboundHandler] VIN extracted via image OCR fallback: ${vinFromImage}`);
             let correctedVin = vinFromImage;
