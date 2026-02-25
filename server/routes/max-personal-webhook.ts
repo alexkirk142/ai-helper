@@ -116,20 +116,26 @@ router.post("/:tenantId/:accountId", async (req, res) => {
       }
     }
 
-    // Always use sender.chatId (always "79XXXXXXXXX@c.us") as the customer key.
-    // sender.sender can arrive without the "@c.us" suffix in some GREEN-API versions,
-    // which would create a duplicate customer vs the one created by start-conversation
-    // (which always stores externalId in "79XXXXXXXXX@c.us" format).
+    // Normalize chatId to always include the "@c.us" suffix.
+    // GREEN-API sometimes sends chatId without the suffix (e.g. "205361510" instead of
+    // "205361510@c.us"), which would break the lookup against customers created by
+    // start-conversation (which always appends "@c.us").
+    // Rule: if chatId already contains "@" leave it untouched (covers @c.us and @g.us),
+    // otherwise append "@c.us".
+    const normalizedChatId = sender.chatId.includes("@")
+      ? sender.chatId
+      : `${sender.chatId}@c.us`;
+
     const parsed: ParsedIncomingMessage = {
       externalMessageId: payload.idMessage || `mp_${Date.now()}`,
-      externalConversationId: sender.chatId,
-      externalUserId: sender.chatId,
+      externalConversationId: normalizedChatId,
+      externalUserId: normalizedChatId,
       text,
       timestamp: payload.timestamp ? new Date(payload.timestamp * 1000) : new Date(),
       channel: "max_personal",
       metadata: {
         senderName: sender.senderName || sender.chatName,
-        chatId: sender.chatId,
+        chatId: normalizedChatId,
         accountId: account.accountId,
       },
       attachments: attachments.length > 0 ? attachments : undefined,
