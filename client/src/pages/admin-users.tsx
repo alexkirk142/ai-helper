@@ -280,6 +280,26 @@ export default function AdminUsers() {
     },
   });
 
+  const [reregisteringWebhookId, setReregisteringWebhookId] = useState<string | null>(null);
+
+  const reregisterWebhook = async (accountId: string) => {
+    setReregisteringWebhookId(accountId);
+    try {
+      const res = await apiRequest("POST", `/api/admin/users/${selectedUser?.id}/max-personal/${accountId}/register-webhook`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to register webhook");
+      toast({
+        title: "Вебхук зарегистрирован",
+        description: `Вебхук зарегистрирован: ${data.webhookUrl}`,
+      });
+      refetchMaxPersonal();
+    } catch (error: any) {
+      toast({ title: "Ошибка регистрации вебхука", description: error.message, variant: "destructive" });
+    } finally {
+      setReregisteringWebhookId(null);
+    }
+  };
+
   const registerWebhookMutation = useMutation({
     mutationFn: async (accountId: string) => {
       const res = await apiRequest("POST", `/api/admin/users/${selectedUser?.id}/max-personal/${accountId}/register-webhook`);
@@ -287,8 +307,8 @@ export default function AdminUsers() {
       if (!res.ok) throw new Error(data.error || "Failed to register webhook");
       return data;
     },
-    onSuccess: () => {
-      toast({ title: "Вебхук зарегистрирован", description: "GREEN-API теперь будет слать входящие сообщения на наш сервер" });
+    onSuccess: (data) => {
+      toast({ title: "Вебхук зарегистрирован", description: `Вебхук зарегистрирован: ${data.webhookUrl}` });
       refetchMaxPersonal();
     },
     onError: (error: Error) => {
@@ -725,19 +745,36 @@ export default function AdminUsers() {
                                               </p>
                                             </div>
                                           </div>
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => deleteMaxPersonalMutation.mutate(acc.accountId)}
-                                            disabled={deleteMaxPersonalMutation.isPending}
-                                            data-testid={`button-max-personal-disconnect-${acc.accountId}`}
-                                          >
-                                            {deleteMaxPersonalMutation.isPending ? (
-                                              <Loader2 className="h-4 w-4 animate-spin" />
-                                            ) : (
-                                              "Удалить"
+                                          <div className="flex items-center gap-1.5 shrink-0">
+                                            {acc.status === "authorized" && (
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => reregisterWebhook(acc.accountId)}
+                                                disabled={reregisteringWebhookId === acc.accountId}
+                                                data-testid={`button-max-personal-reregister-${acc.accountId}`}
+                                              >
+                                                {reregisteringWebhookId === acc.accountId ? (
+                                                  <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Регистрация...</>
+                                                ) : (
+                                                  "Перерегистрировать вебхук"
+                                                )}
+                                              </Button>
                                             )}
-                                          </Button>
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              onClick={() => deleteMaxPersonalMutation.mutate(acc.accountId)}
+                                              disabled={deleteMaxPersonalMutation.isPending}
+                                              data-testid={`button-max-personal-disconnect-${acc.accountId}`}
+                                            >
+                                              {deleteMaxPersonalMutation.isPending ? (
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                              ) : (
+                                                "Удалить"
+                                              )}
+                                            </Button>
+                                          </div>
                                         </div>
                                         {acc.webhookRegistered === false && acc.status === "authorized" && (
                                           <div className="flex items-center gap-2 text-amber-600 text-xs">

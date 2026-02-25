@@ -301,15 +301,19 @@ export async function registerRoutes(
           displayName = info.nameAccount || info.wid;
         } catch { /* non-fatal */ }
 
-        let webhookRegistered = false;
-        try {
-          const appUrl = getAppUrl();
-          const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${account.accountId}`;
-          await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
-          webhookRegistered = true;
-        } catch (err: any) {
-          console.error("[Routes] GREEN-API setWebhook failed:", err.message);
-        }
+      let webhookRegistered = false;
+      try {
+        console.log('[DEBUG] Current APP_URL:', process.env.APP_URL);
+        console.log('[DEBUG] RAILWAY_PUBLIC_DOMAIN:', process.env.RAILWAY_PUBLIC_DOMAIN);
+        const appUrl = getAppUrl();
+        const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${account.accountId}`;
+        console.log(`[DEBUG] Registering webhook for tenant=${tenantId} account=${account.accountId} url=${webhookUrl}`);
+        await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
+        webhookRegistered = true;
+        console.log(`[DEBUG] setWebhook SUCCESS for idInstance=${account.idInstance}`);
+      } catch (err: any) {
+        console.error("[Routes] GREEN-API setWebhook failed:", err.message);
+      }
 
         await db.update(maxPersonalAccounts)
           .set({ status: "authorized", webhookRegistered, displayName: displayName ?? account.displayName, updatedAt: new Date() })
@@ -320,6 +324,46 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error polling GREEN-API status:", error);
       res.status(500).json({ error: error.message || "Failed to poll status" });
+    }
+  });
+
+  // POST /api/channels/max-personal/:accountId/reregister-webhook
+  // Re-registers the GREEN-API webhook for a specific account using the current APP_URL.
+  // Useful when the deployment domain changed after initial authorization.
+  app.post("/api/channels/max-personal/:accountId/reregister-webhook", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = req.userId ? await storage.getUser(req.userId) : undefined;
+      const tenantId = user?.tenantId;
+      if (!tenantId) return res.status(404).json({ error: "Tenant not found" });
+
+      const { db: dbInst } = await import("./db");
+      const { maxPersonalAccounts: mpTable } = await import("@shared/schema");
+      const { and: andOp, eq: eqOp } = await import("drizzle-orm");
+      const account = await dbInst.query.maxPersonalAccounts.findFirst({
+        where: andOp(
+          eqOp(mpTable.tenantId, tenantId),
+          eqOp(mpTable.accountId, req.params.accountId)
+        ),
+      });
+      if (!account) return res.status(404).json({ error: "Account not found" });
+
+      console.log('[DEBUG] reregister-webhook: APP_URL =', process.env.APP_URL);
+      console.log('[DEBUG] reregister-webhook: RAILWAY_PUBLIC_DOMAIN =', process.env.RAILWAY_PUBLIC_DOMAIN);
+      const appUrl = getAppUrl();
+      const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${account.accountId}`;
+      console.log(`[Routes] Re-registering webhook: ${webhookUrl}`);
+
+      const { maxGreenApiAdapter: greenApi } = await import("./services/max-green-api-adapter");
+      await greenApi.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
+
+      await dbInst.update(mpTable)
+        .set({ webhookRegistered: true, updatedAt: new Date() })
+        .where(andOp(eqOp(mpTable.tenantId, tenantId), eqOp(mpTable.accountId, account.accountId)));
+
+      return res.json({ ok: true, webhookUrl });
+    } catch (err: any) {
+      console.error("[Routes] reregister-webhook error:", err.message);
+      return res.status(500).json({ error: err.message });
     }
   });
 
@@ -1812,6 +1856,12 @@ export async function registerRoutes(
   app.use("/webhooks/max", maxWebhookRouter);
 
   // ============ MAX PERSONAL (GREEN-API) WEBHOOK ============
+
+  // Reachability probe — must be registered BEFORE the wildcard router.
+  app.get("/webhooks/max-personal/ping", (_req, res) => {
+    res.json({ ok: true, timestamp: new Date().toISOString() });
+  });
+
   app.use("/webhooks/max-personal", webhookRateLimiter, maxPersonalWebhookRouter);
 
   // ============ AUTH ROUTES (email/password) ============
