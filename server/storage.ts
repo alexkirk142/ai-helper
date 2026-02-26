@@ -89,6 +89,7 @@ export interface IStorage {
   getCustomersByTenant(tenantId: string): Promise<Customer[]>;
   searchCustomers(tenantId: string, query: string): Promise<Customer[]>;
   getCustomerByExternalId(tenantId: string, channel: string, externalId: string): Promise<Customer | undefined>;
+  getCustomerByOutboundMessageId(tenantId: string, channel: string, idMessage: string): Promise<Customer | undefined>;
   createCustomer(customer: InsertCustomer, tenantId: string): Promise<Customer>;
   updateCustomer(id: string, tenantId: string, data: UpdateCustomer): Promise<Customer | undefined>;
 

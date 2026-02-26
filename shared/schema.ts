@@ -630,6 +630,7 @@ export const updateCustomerSchema = z.object({
   email: z.string().email().optional().nullable(),
   phone: z.string().optional().nullable(),
   tags: z.array(z.string()).optional(),
+  externalId: z.string().optional(),
 });
 export const insertConversationSchema = createInsertSchema(conversations).omit({ id: true, createdAt: true });
 export const insertMessageSchema = createInsertSchema(messages).omit({ id: true, createdAt: true });

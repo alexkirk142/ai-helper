@@ -4,6 +4,7 @@ import { maxPersonalAccounts } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
 import type { ParsedIncomingMessage, ParsedAttachment } from "../services/channel-adapter";
 import { processIncomingMessageFull } from "../services/inbound-message-handler";
+import { storage } from "../storage";
 
 const router = Router();
 
@@ -88,7 +89,39 @@ router.post("/:tenantId/:accountId", async (req, res) => {
 
     const payload = req.body as GreenApiWebhook;
 
-    // Only process incoming messages
+    // When we send a message via API, GREEN-API fires outgoingAPIMessageReceived with the
+    // recipient's internal numeric chatId (e.g. "58240096@c.us").  This differs from the
+    // phone-based chatId we used when creating the customer ("79786768846@c.us").
+    // Capture the numeric chatId and update the customer record so that future inbound
+    // webhooks (which always carry the numeric chatId) match the right customer.
+    if (payload.typeWebhook === "outgoingAPIMessageReceived") {
+      const numericChatId = payload.senderData?.chatId;
+      const idMessage = payload.idMessage;
+      if (numericChatId && idMessage) {
+        const normalized = numericChatId.includes("@") ? numericChatId : `${numericChatId}@c.us`;
+        // Only act when the chatId looks like a numeric MAX ID (no digits > 11 means not a phone)
+        const localPart = normalized.split("@")[0];
+        const isNumericId = /^\d+$/.test(localPart) && localPart.length <= 11;
+        if (isNumericId) {
+          try {
+            const customer = await storage.getCustomerByOutboundMessageId(tenantId, "max_personal", idMessage);
+            if (customer && customer.externalId !== normalized) {
+              const oldId = customer.externalId;
+              // Only migrate phone-based IDs (digits-only prefix longer than 11 chars = phone)
+              const oldLocal = (oldId ?? "").split("@")[0];
+              if (/^\d{12,}$/.test(oldLocal)) {
+                await storage.updateCustomer(customer.id, tenantId, { externalId: normalized });
+                console.log(`[MaxPersonalWebhook] Updated customer ${customer.id} externalId: ${oldId} → ${normalized}`);
+              }
+            }
+          } catch (err: any) {
+            console.error(`[MaxPersonalWebhook] Failed to remap chatId for idMessage ${idMessage}:`, err.message);
+          }
+        }
+      }
+      return res.json({ ok: true });
+    }
+
     if (payload.typeWebhook !== "incomingMessageReceived") {
       return res.json({ ok: true });
     }

@@ -269,6 +269,28 @@ export class DatabaseStorage implements IStorage {
     return customer;
   }
 
+  /**
+   * Find a customer via an outbound message's idMessage stored in message.metadata.externalMessageId.
+   * Used by the outgoingAPIMessageReceived webhook handler to map a GREEN-API numeric chatId
+   * back to the customer that was originally created with a phone-based chatId.
+   */
+  async getCustomerByOutboundMessageId(tenantId: string, channel: string, idMessage: string): Promise<Customer | undefined> {
+    const rows = await db
+      .select({ customer: customers })
+      .from(messages)
+      .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+      .innerJoin(customers, eq(conversations.customerId, customers.id))
+      .where(
+        and(
+          eq(conversations.tenantId, tenantId),
+          eq(customers.channel, channel),
+          sql`${messages.metadata}->>'externalMessageId' = ${idMessage}`
+        )
+      )
+      .limit(1);
+    return rows[0]?.customer;
+  }
+
   async updateCustomer(id: string, tenantId: string, data: UpdateCustomer): Promise<Customer | undefined> {
     const [customer] = await db.update(customers)
       .set({ ...data, updatedAt: new Date() })

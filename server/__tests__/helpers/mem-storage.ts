@@ -536,6 +536,18 @@ export class MemStorage implements IStorage {
     );
   }
 
+  async getCustomerByOutboundMessageId(tenantId: string, channel: string, idMessage: string): Promise<Customer | undefined> {
+    for (const msg of this.messages.values()) {
+      const meta = msg.metadata as Record<string, unknown> | null;
+      if (!meta || meta.externalMessageId !== idMessage) continue;
+      const conv = this.conversations.get(msg.conversationId);
+      if (!conv || conv.tenantId !== tenantId) continue;
+      const customer = this.customers.get(conv.customerId);
+      if (customer && customer.channel === channel) return customer;
+    }
+    return undefined;
+  }
+
   // TODO: add tenantId filtering in tests
   async updateCustomer(id: string, _tenantId: string, data: UpdateCustomer): Promise<Customer | undefined> {
     const customer = this.customers.get(id);
