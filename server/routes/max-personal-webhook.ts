@@ -134,6 +134,8 @@ router.post("/:tenantId/:accountId", async (req, res) => {
       timestamp: payload.timestamp ? new Date(payload.timestamp * 1000) : new Date(),
       channel: "max_personal",
       metadata: {
+        // pushName / firstName are checked by inbound-message-handler for customer name
+        pushName: sender.senderName || sender.chatName,
         senderName: sender.senderName || sender.chatName,
         chatId: normalizedChatId,
         accountId: account.accountId,

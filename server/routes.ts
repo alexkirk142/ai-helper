@@ -1400,7 +1400,7 @@ export async function registerRoutes(
           customer = await storage.createCustomer({
             tenantId,
             externalId: chatId,
-            name: `WhatsApp +${cleanDigits}`,
+            name: `MAX +${cleanDigits}`,
             channel: "max_personal",
             phone: `+${cleanDigits}`,
             metadata: {},
