@@ -95,27 +95,50 @@ router.post("/:tenantId/:accountId", async (req, res) => {
     // Capture the numeric chatId and update the customer record so that future inbound
     // webhooks (which always carry the numeric chatId) match the right customer.
     if (payload.typeWebhook === "outgoingAPIMessageReceived") {
+      console.log("[MaxPersonal Migration DEBUG]", JSON.stringify({
+        typeWebhook: payload.typeWebhook,
+        senderData: payload.senderData,
+        idMessage: payload.idMessage,
+        fullPayload: JSON.stringify(payload).slice(0, 500),
+      }));
+
       const numericChatId = payload.senderData?.chatId;
       const idMessage = payload.idMessage;
-      if (numericChatId && idMessage) {
+
+      if (!numericChatId || !idMessage) {
+        console.log(`[MaxPersonal Migration DEBUG] SKIP — missing field: numericChatId=${numericChatId ?? "null"} idMessage=${idMessage ?? "null"}`);
+      } else {
         const normalized = numericChatId.includes("@") ? numericChatId : `${numericChatId}@c.us`;
-        // Only act when the chatId looks like a numeric MAX ID (no digits > 11 means not a phone)
         const localPart = normalized.split("@")[0];
         const isNumericId = /^\d+$/.test(localPart) && localPart.length <= 11;
-        if (isNumericId) {
+        console.log(`[MaxPersonal Migration DEBUG] normalized=${normalized} localPart=${localPart} isNumericId=${isNumericId}`);
+
+        if (!isNumericId) {
+          console.log(`[MaxPersonal Migration DEBUG] SKIP — chatId looks like a phone number, not a numeric MAX ID`);
+        } else {
           try {
             const customer = await storage.getCustomerByOutboundMessageId(tenantId, "max_personal", idMessage);
-            if (customer && customer.externalId !== normalized) {
+            console.log(`[MaxPersonal Migration DEBUG] customer lookup by idMessage=${idMessage}: ${customer ? `found id=${customer.id} externalId=${customer.externalId}` : "NOT FOUND"}`);
+
+            if (!customer) {
+              console.log(`[MaxPersonal Migration DEBUG] SKIP — no customer found for outbound message id=${idMessage}`);
+            } else if (customer.externalId === normalized) {
+              console.log(`[MaxPersonal Migration DEBUG] SKIP — customer ${customer.id} externalId already matches ${normalized}`);
+            } else {
               const oldId = customer.externalId;
-              // Only migrate phone-based IDs (digits-only prefix longer than 11 chars = phone)
               const oldLocal = (oldId ?? "").split("@")[0];
-              if (/^\d{12,}$/.test(oldLocal)) {
+              const isPhoneBased = /^\d{12,}$/.test(oldLocal);
+              console.log(`[MaxPersonal Migration DEBUG] oldId=${oldId} oldLocal=${oldLocal} isPhoneBased=${isPhoneBased}`);
+
+              if (!isPhoneBased) {
+                console.log(`[MaxPersonal Migration DEBUG] SKIP — oldLocal="${oldLocal}" does not match phone pattern /^\\d{12,}$/`);
+              } else {
                 await storage.updateCustomer(customer.id, tenantId, { externalId: normalized });
-                console.log(`[MaxPersonalWebhook] Updated customer ${customer.id} externalId: ${oldId} → ${normalized}`);
+                console.log(`[MaxPersonal Migration DEBUG] SUCCESS — updated customer ${customer.id} externalId: ${oldId} → ${normalized}`);
               }
             }
           } catch (err: any) {
-            console.error(`[MaxPersonalWebhook] Failed to remap chatId for idMessage ${idMessage}:`, err.message);
+            console.error(`[MaxPersonal Migration DEBUG] ERROR during remap for idMessage=${idMessage}:`, err.message);
           }
         }
       }
