@@ -4,12 +4,19 @@ import { PriceLookupJobData, SearchFallback } from "../services/price-lookup-que
 import { getRedisConnectionConfig } from "../services/message-queue";
 import { storage } from "../storage";
 import type { GearboxType } from "../services/price-sources/types";
-import { identifyTransmissionByOem, TransmissionIdentification, VehicleContext } from "../services/transmission-identifier";
+import {
+  identifyTransmissionByOem,
+  identifyTransmissionByTransmissionCode,
+  identifyTransmissionByOemPartNumber,
+  TransmissionIdentification,
+  VehicleContext,
+} from "../services/transmission-identifier";
 import { searchUsedTransmissionPrice } from "../services/price-searcher";
 import { renderTemplate, DEFAULT_TEMPLATES } from "../services/template-renderer";
 import type { PriceSnapshot, TenantAgentSettings } from "@shared/schema";
 import { openai } from "../services/decision-engine";
 import { featureFlagService } from "../services/feature-flags";
+import { incr } from "../services/observability/metrics";
 
 const QUEUE_NAME = "price_lookup_queue";
 
@@ -21,6 +28,41 @@ function buildCacheKey(
   model?: string | null
 ): string {
   const parts = [oem.toLowerCase().trim()];
+  if (make) parts.push(make.toLowerCase().trim());
+  if (model) parts.push(model.toLowerCase().trim());
+  return parts.join("::");
+}
+
+// ─── Price snapshot key helpers (Step 6) ─────────────────────────────────────
+
+/**
+ * Normalise a raw transmissionCode or oemPartNumber value for use in a
+ * snapshot searchKey.  Mirrors the normalisation applied to the legacy `oem`
+ * value inside buildCacheKey (lowercase + trim) so the two schemes remain
+ * consistent.  Multiple internal spaces are collapsed to one.
+ */
+function normalizePriceKeyValue(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Build a prefixed price-snapshot searchKey that distinguishes
+ * transmissionCode ("tc::") from oemPartNumber ("pn::"), mirroring the
+ * identity cache key scheme introduced in Step 5.
+ *
+ * Format:
+ *   tc::<normalizedValue>                         (no vehicle context)
+ *   tc::<normalizedValue>::<make>::<model>        (with vehicle context)
+ *   pn::<normalizedValue>::<make>::<model>
+ */
+function buildPriceSnapshotKey(
+  kind: "transmissionCode" | "oemPartNumber",
+  normalizedValue: string,
+  make?: string | null,
+  model?: string | null
+): string {
+  const prefix = kind === "transmissionCode" ? "tc" : "pn";
+  const parts = [`${prefix}::${normalizedValue}`];
   if (make) parts.push(make.toLowerCase().trim());
   if (model) parts.push(model.toLowerCase().trim());
   return parts.join("::");
@@ -463,7 +505,9 @@ async function lookupPricesByOem(
   oem: string,
   conversationId: string,
   oemModelHint?: string | null,
-  vehicleContext?: VehicleContext
+  vehicleContext?: VehicleContext,
+  transmissionCode?: string | null,
+  oemPartNumber?: string | null
 ): Promise<void> {
   // Load agent settings once — needed for mileage tier thresholds
   const agentSettings = await storage.getTenantAgentSettings(tenantId);
@@ -471,14 +515,110 @@ async function lookupPricesByOem(
   // Determine correct Russian gearbox term from vehicleContext.gearboxType
   const gearboxLabel = pickGearboxLabel(vehicleContext?.gearboxType);
 
-  // Composite cache key: oem::make::model (lowercase) — prevents cross-vehicle collisions
-  const cacheKey = buildCacheKey(oem, vehicleContext?.make, vehicleContext?.model);
+  // ── Step 6: prefixed snapshot key scheme ────────────────────────────────────
+  // Determine input kind from the explicit fields forwarded by processPriceLookup.
+  const keyKind: "transmissionCode" | "oemPartNumber" | null =
+    transmissionCode ? "transmissionCode" :
+    oemPartNumber    ? "oemPartNumber"    : null;
 
-  // 1. Check global cache first (any tenant, respects expiresAt)
-  const cached = await storage.getGlobalPriceSnapshot(cacheKey);
+  // Prefixed key (new scheme): "tc::<value>::<make>::<model>" or "pn::..."
+  const prefixedKey: string | null = keyKind
+    ? buildPriceSnapshotKey(
+        keyKind,
+        normalizePriceKeyValue(keyKind === "transmissionCode" ? transmissionCode! : oemPartNumber!),
+        vehicleContext?.make,
+        vehicleContext?.model
+      )
+    : null;
+
+  // Legacy key for backward compatibility: "oem::make::model" (lowercase)
+  const legacyCacheKey = buildCacheKey(oem, vehicleContext?.make, vehicleContext?.model);
+
+  // Key used for all new snapshot writes — always prefixed when possible
+  const writeKey = prefixedKey ?? legacyCacheKey;
+
+  // 1. Check global cache (prefixed key first, then legacy fallback)
+  let cached: PriceSnapshot | null = null;
+  let cacheHit: "prefixed" | "legacy" | "miss" = "miss";
+
+  if (prefixedKey) {
+    cached = await storage.getGlobalPriceSnapshot(prefixedKey);
+    if (cached) {
+      cacheHit = "prefixed";
+      incr("price_cache.hit", { key: "prefixed", kind: keyKind ?? "unknown" });
+      console.log(
+        `[PriceLookupWorker] Cache hit (prefixed) key="${prefixedKey}" snapshot=${cached.id} source=${cached.source}`
+      );
+      console.log(
+        `[PriceLookupWorker] CacheOutcome: ${JSON.stringify({ kind: keyKind, cacheHit: "prefixed" })}`
+      );
+    }
+  }
+
+  if (!cached) {
+    cached = await storage.getGlobalPriceSnapshot(legacyCacheKey);
+    if (cached) {
+      cacheHit = "legacy";
+      incr("price_cache.hit", { key: "legacy", kind: keyKind ?? "unknown" });
+      console.log(
+        `[PriceLookupWorker] Cache hit (legacy) key="${legacyCacheKey}" snapshot=${cached.id} source=${cached.source}`
+      );
+      console.log(
+        `[PriceLookupWorker] CacheOutcome: ${JSON.stringify({ kind: keyKind, cacheHit: "legacy" })}`
+      );
+      // Soft-migrate: write a new snapshot row under the prefixed key so future
+      // reads skip this legacy path.  Non-fatal — never blocks the main flow.
+      if (prefixedKey) {
+        try {
+          await storage.createPriceSnapshot({
+            tenantId: null,
+            oem: cached.oem,
+            source: cached.source,
+            minPrice: cached.minPrice,
+            maxPrice: cached.maxPrice,
+            avgPrice: cached.avgPrice,
+            currency: cached.currency ?? "RUB",
+            modelName: cached.modelName,
+            manufacturer: cached.manufacturer,
+            origin: cached.origin,
+            mileageMin: cached.mileageMin,
+            mileageMax: cached.mileageMax,
+            listingsCount: cached.listingsCount,
+            searchQuery: cached.searchQuery,
+            expiresAt: cached.expiresAt,
+            stage: cached.stage,
+            urls: cached.urls,
+            domains: cached.domains,
+            raw: cached.raw as any,
+            searchKey: prefixedKey,
+          });
+          incr("price_cache.soft_migration", { result: "success", kind: keyKind ?? "unknown" });
+          console.log(
+            `[PriceLookupWorker] Soft-migrated legacy snapshot ${cached.id} → prefixed key="${prefixedKey}"`
+          );
+        } catch (migrateErr: any) {
+          incr("price_cache.soft_migration", { result: "fail", kind: keyKind ?? "unknown" });
+          console.warn(
+            `[PriceLookupWorker] Soft-migration non-fatal error: ${migrateErr.message}`
+          );
+        }
+      }
+    } else {
+      incr("price_cache.miss", { kind: keyKind ?? "unknown" });
+      console.log(
+        `[PriceLookupWorker] Cache miss for OEM "${oem}" ` +
+        `(prefixedKey=${prefixedKey ?? "n/a"}, legacyKey=${legacyCacheKey})`
+      );
+      console.log(
+        `[PriceLookupWorker] CacheOutcome: ${JSON.stringify({ kind: keyKind, cacheHit: "miss" })}`
+      );
+    }
+  }
+
   if (cached) {
     console.log(
-      `[PriceLookupWorker] Using global cached snapshot ${cached.id} for OEM "${oem}" (source: ${cached.source})`
+      `[PriceLookupWorker] Using global cached snapshot ${cached.id} for OEM "${oem}" ` +
+      `(source: ${cached.source}, cacheHit: ${cacheHit})`
     );
     if (cached.source === "ai_estimate" || cached.source === "openai_web_search" || cached.source === "yandex") {
       const priceMin = cached.minPrice ?? 0;
@@ -520,7 +660,15 @@ async function lookupPricesByOem(
       console.log(`[VehicleLookupWorker] oemModelHint "${oemModelHint}" rejected as internal code — will use GPT identification`);
     }
     console.log(`[PriceLookupWorker] Identifying transmission for OEM "${oem}"`);
-    identification = await identifyTransmissionByOem(oem, vehicleContext);
+    if (transmissionCode) {
+      console.log(`[PriceLookupWorker] Using identifyTransmissionByTransmissionCode for "${transmissionCode}"`);
+      identification = await identifyTransmissionByTransmissionCode(transmissionCode, vehicleContext);
+    } else if (oemPartNumber) {
+      console.log(`[PriceLookupWorker] Using identifyTransmissionByOemPartNumber for "${oemPartNumber}"`);
+      identification = await identifyTransmissionByOemPartNumber(oemPartNumber, vehicleContext);
+    } else {
+      identification = await identifyTransmissionByOem(oem, vehicleContext);
+    }
     console.log(
       `[PriceLookupWorker] Identification: model=${identification.modelName}, ` +
         `mfr=${identification.manufacturer}, origin=${identification.origin}, ` +
@@ -549,13 +697,23 @@ async function lookupPricesByOem(
 
   // 3. Search real prices (Yandex + Playwright, then GPT web_search as fallback)
   console.log(`[PriceLookupWorker] Searching prices for OEM "${oem}"`);
+  // Derive inputKind from the explicit fields so the Yandex anchor policy can
+  // distinguish TC vs PN inputs.  Backward-compatible: legacy path when neither
+  // explicit field is set (both falsy).
+  const searchInputKind =
+    transmissionCode ? "transmissionCode" :
+    oemPartNumber    ? "oemPartNumber"    : "legacy";
   const priceData = await searchUsedTransmissionPrice(
     oem,
     identification.modelName,
     identification.origin,
     identification.manufacturer,
     vehicleContext,
-    tenantId
+    tenantId,
+    {
+      inputKind: searchInputKind,
+      inputValue: transmissionCode ?? oemPartNumber ?? oem,
+    }
   );
 
   // Do NOT save mock results — only save real search results (including not_found)
@@ -618,7 +776,7 @@ async function lookupPricesByOem(
           origin: identification.origin,
           expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
           raw: { priceMin, priceMax, identification } as any,
-          searchKey: cacheKey,
+          searchKey: writeKey,
         });
         console.log(`[PriceLookupWorker] AI estimate snapshot ${aiSnapshot.id} for OEM "${oem}" (${priceMin}–${priceMax} RUB)`);
         await createSuggestionRecord(tenantId, conversationId, suggestedReply, "price", 0.5);
@@ -653,7 +811,7 @@ async function lookupPricesByOem(
       urls: priceData.urlsChecked ?? [],
       domains: Array.from(new Set(priceData.listings.map((l) => l.site).filter(Boolean))),
       raw: { ...priceData, identification } as any,
-      searchKey: cacheKey,
+      searchKey: writeKey,
     });
 
     console.log(
@@ -1015,15 +1173,48 @@ async function lookupPricesByFallback(
 
 // ─── Main processor ───────────────────────────────────────────────────────────
 
+/**
+ * Pattern that distinguishes an OEM part number (e.g. 31020-3VX2D) from a
+ * transmission model code (e.g. JF011E, 6HP19).  A part number always contains
+ * a hyphen adjacent to a digit.
+ */
+const OEM_PART_NUMBER_RE = /\d-|-\d/;
+
 async function processPriceLookup(job: Job<PriceLookupJobData>): Promise<void> {
   const { tenantId, conversationId, oem, oemModelHint, vehicleContext, searchFallback, isModelOnly } = job.data;
 
-  console.log(`[PriceLookupWorker] oemModelHint received: ${oemModelHint ?? "none"}`);
+  // ── Normalize legacy "oem" field ──────────────────────────────────────────
+  // If the caller did not populate the explicit fields, derive them from the
+  // legacy `oem` value so the rest of the worker can use a single source of
+  // truth.  Both fields stay undefined when `oem` is absent.
+  let transmissionCode = job.data.transmissionCode ?? undefined;
+  let oemPartNumber    = job.data.oemPartNumber    ?? undefined;
+
+  if (transmissionCode === undefined && oemPartNumber === undefined && oem) {
+    if (OEM_PART_NUMBER_RE.test(oem)) {
+      oemPartNumber = oem;
+    } else {
+      transmissionCode = oem;
+    }
+  }
+
+  console.log(
+    `[PriceLookupWorker] oemModelHint received: ${oemModelHint ?? "none"} | ` +
+    `transmissionCode: ${transmissionCode ?? "none"} | oemPartNumber: ${oemPartNumber ?? "none"}`
+  );
 
   if (oem) {
     // New flow: global cache + AI identification + OpenAI web search
     console.log(`[PriceLookupWorker] OEM mode for "${oem}", conversation ${conversationId}`);
-    await lookupPricesByOem(tenantId, oem, conversationId, oemModelHint ?? null, vehicleContext);
+    await lookupPricesByOem(
+      tenantId,
+      oem,
+      conversationId,
+      oemModelHint ?? null,
+      vehicleContext,
+      transmissionCode ?? null,
+      oemPartNumber ?? null
+    );
   } else if (searchFallback) {
     // Fallback flow: no OEM, use make/model/gearboxType
     const mode = isModelOnly ? "MODEL_ONLY" : "FALLBACK";

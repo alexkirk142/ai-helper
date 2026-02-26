@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "description": "Regression cases for transmission price pipeline. Used by price pipeline tests to assert expected behavior for VIN lookup and OEM price search.",
+  "cases": [
+    {
+      "id": "vin_lancer_cy4a",
+      "type": "vin_lookup",
+      "input": {
+        "idType": "VIN",
+        "value": "JA3CY4A46K0100123"
+      },
+      "expected": {
+        "hasOem": true,
+        "oemPattern": "2500A230|25[0-9]{2}A[0-9]{3}",
+        "modelHint": "W5MBB",
+        "shouldFail": false,
+        "gearboxType": "MT"
+      },
+      "notes": "Mitsubishi Lancer CY4A 5FM/T — expect OEM and W5MBB hint"
+    },
+    {
+      "id": "vin_invalid_checksum",
+      "type": "vin_lookup",
+      "input": {
+        "idType": "VIN",
+        "value": "AAAAAAAAAAAAAAAAA"
+      },
+      "expected": {
+        "shouldFail": true,
+        "errorCode": "NOT_FOUND"
+      },
+      "notes": "Invalid VIN — Podzamenu/PartsAPI may return NOT_FOUND or empty"
+    },
+    {
+      "id": "vin_frame_japanese",
+      "type": "vin_lookup",
+      "input": {
+        "idType": "FRAME",
+        "value": "EU11105303"
+      },
+      "expected": {
+        "hasOem": false,
+        "modelHint": null,
+        "shouldFail": false
+      },
+      "notes": "Japanese FRAME — may resolve via PartsAPI only; OEM may be absent"
+    },
+    {
+      "id": "oem_w5mbb",
+      "type": "oem_price",
+      "input": {
+        "oem": "2500A230",
+        "make": "Mitsubishi",
+        "model": "Lancer",
+        "gearboxType": "MT"
+      },
+      "expected": {
+        "sourceOneOf": ["yandex", "openai_web_search", "not_found"],
+        "minListings": 0,
+        "priceRange": { "min": 50000, "max": 200000 },
+        "orNotFound": true
+      },
+      "notes": "W5MBB / 2500A230 — expect price band in RU range or not_found"
+    },
+    {
+      "id": "oem_rare_no_results",
+      "type": "oem_price",
+      "input": {
+        "oem": "9999ZZ999",
+        "make": "Unknown",
+        "model": "Unknown",
+        "gearboxType": "AT"
+      },
+      "expected": {
+        "source": "not_found",
+        "minListings": 0,
+        "orNotFound": true
+      },
+      "notes": "Fake OEM — expect not_found or escalation"
+    },
+    {
+      "id": "oem_jf011e",
+      "type": "oem_price",
+      "input": {
+        "oem": "310203VX2D",
+        "make": "Nissan",
+        "model": "X-Trail",
+        "gearboxType": "CVT"
+      },
+      "expected": {
+        "sourceOneOf": ["yandex", "openai_web_search", "not_found"],
+        "minListings": 0,
+        "priceRange": { "min": 80000, "max": 350000 },
+        "orNotFound": true
+      },
+      "notes": "Jatco CVT JF011E — common in RU market"
+    },
+    {
+      "id": "oem_no_model_hint",
+      "type": "oem_price",
+      "input": {
+        "oem": "0AM300045",
+        "make": "VW",
+        "model": "Polo",
+        "gearboxType": "AT"
+      },
+      "expected": {
+        "sourceOneOf": ["yandex", "openai_web_search", "not_found"],
+        "orNotFound": true
+      },
+      "notes": "VW DSG — GPT identification required; may return model code"
+    },
+    {
+      "id": "parse_price_on_request",
+      "type": "parse_only",
+      "input": {
+        "content": "[{\"title\": \"КПП W5MBB цена по запросу\", \"price\": 0, \"source\": \"example.ru\"}]"
+      },
+      "expected": {
+        "listingsCount": 0,
+        "excludePriceOnRequest": true
+      },
+      "notes": "After PR1: listings with only 'цена по запросу' and no valid price excluded"
+    },
+    {
+      "id": "parse_ot_price",
+      "type": "parse_only",
+      "input": {
+        "text": "от 70 000 ₽"
+      },
+      "expected": {
+        "parsedPrice": 70000
+      },
+      "notes": "After PR2: parsePriceFromText('от 70 000 ₽') → 70000"
+    },
+    {
+      "id": "aggregation_outlier",
+      "type": "aggregation_only",
+      "input": {
+        "prices": [50000, 55000, 60000, 58000, 500000]
+      },
+      "expected": {
+        "afterOutlierRemoval": [50000, 55000, 60000, 58000],
+        "medianBetween": [55000, 60000],
+        "maxPriceUnder": 65000
+      },
+      "notes": "IQR or winsorization should drop 500000; median in 55k–60k"
+    }
+  ]
+}

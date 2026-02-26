@@ -1,58 +1,37 @@
 import { storage } from "../storage";
 import type { ParsedIncomingMessage } from "./channel-adapter";
 import { getMergedGearboxTemplates, fillGearboxTemplate } from "./gearbox-templates";
-import { detectGearboxType } from "./price-sources/types";
 import { realtimeService } from "./websocket-server";
 import { featureFlagService } from "./feature-flags";
-import { isValidVinChecksum, tryAutoCorrectVin } from "../utils/vin-validator";
+import {
+  extractCandidatesFromText,
+  extractCandidatesFromOcr,
+  chooseBestCandidate,
+  maskCandidateValue,
+  type OcrAnalysisResult,
+} from "./detection/candidate-detector";
+import { incr } from "./observability/metrics";
 
-const VIN_CHARS = "A-HJ-NPR-Z0-9"; // VIN excludes I, O, Q
-const VIN_REGEX = new RegExp(`[${VIN_CHARS}]{17}`, "gi");
-const VIN_INCOMPLETE_REGEX = new RegExp(`[${VIN_CHARS}]{16}(?![${VIN_CHARS}])`, "gi");
-const FRAME_REGEX = /[A-Z0-9]{3,}\s*-\s*[A-Z0-9]{3,}/gi;
-
-// Japanese FRAME without dash: 2-5 letters + 6-10 digits, total 8-14 chars
-// e.g. EU11105303, GX1001234567, AT2111234567
-const FRAME_DASHLESS_REGEX = /\b[A-Z]{2,5}\d{6,10}\b/gi;
-const FRAME_DASHLESS_MIN_LEN = 8;
-const FRAME_DASHLESS_MAX_LEN = 14;
-
-// Cyrillic chars visually identical to Latin ones (uppercase + lowercase)
-const CYRILLIC_TO_LATIN: Record<string, string> = {
-  "\u0410": "A", "\u0430": "a", // А → A
-  "\u0412": "B",                // В → B (lowercase в not similar)
-  "\u0421": "C", "\u0441": "c", // С → C
-  "\u0415": "E", "\u0435": "e", // Е → E
-  "\u041A": "K", "\u043A": "k", // К → K
-  "\u041C": "M", "\u043C": "m", // М → M
-  "\u041D": "H", "\u043D": "h", // Н → H
-  "\u041E": "O", "\u043E": "o", // О → O
-  "\u0420": "P", "\u0440": "p", // Р → P
-  "\u0422": "T", "\u0442": "t", // Т → T
-  "\u0423": "Y", "\u0443": "y", // У → Y
-  "\u0425": "X", "\u0445": "x", // Х → X
-};
-const CYRILLIC_RE = new RegExp(`[${Object.keys(CYRILLIC_TO_LATIN).join("")}]`, "g");
-
-/**
- * Pre-normalize text for vehicle ID detection:
- * 1) Replace Cyrillic lookalikes with Latin equivalents
- * 2) Replace en-dash, em-dash, minus sign, non-breaking hyphen → regular hyphen
- */
-function normalizeVehicleIdText(text: string): string {
-  let result = text.replace(CYRILLIC_RE, (ch) => CYRILLIC_TO_LATIN[ch] ?? ch);
-  result = result.replace(/[\u2013\u2014\u2212\u2011]/g, "-");
-  return result;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Exported types
+// ─────────────────────────────────────────────────────────────────────────────
 
 export type VehicleIdDetection =
   | { idType: "VIN"; rawValue: string; normalizedValue: string }
   | { idType: "VIN"; rawValue: string; normalizedValue: string; isIncompleteVin: true }
   | { idType: "FRAME"; rawValue: string; normalizedValue: string };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Exported legacy functions (signatures unchanged — callers must not break)
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Detect a gearbox OEM marking from plain text when no VIN/FRAME was found.
  * Returns the first plausible marking or null.
+ *
+ * Internally delegates to the new candidate-based pipeline so that Cyrillic
+ * homoglyph normalisation and strong/weak classification are applied
+ * consistently, while preserving the original string | null return contract.
  *
  * Patterns covered:
  *   Japanese:  A245E, U150E, JF010E, RE4F04A, U660E
@@ -63,94 +42,69 @@ export type VehicleIdDetection =
 export function detectGearboxMarkingFromText(text: string): string | null {
   if (!text || text.trim().length < 2) return null;
 
-  const upper = text.toUpperCase().trim();
-
-  // Skip if already detected as VIN or frame by detectVehicleIdFromText
-  if (/^[A-HJ-NPR-Z0-9]{17}$/.test(upper)) return null;
-
-  // Skip OEM part numbers (digits-digits pattern like 24600-42L00)
-  if (/^\d{4,6}-\d{4,6}[A-Z0-9]*$/.test(upper)) return null;
-
-  // Two alternatives:
-  //   1. letter(s)+digits+letter  — covers U150E, A245E, JF010E, U660E
-  //   2. alphanumeric+letter+digits — covers RE4F04A, NAG1, 6HP19, A8TR1
-  const oemPattern =
-    /\b((?:[A-Z]{1,3}[0-9]{2,4}[A-Z][A-Z0-9]{0,4}|[A-Z0-9]{2,4}[A-Z][0-9]{1,4}[A-Z0-9]{0,4})(?:-[A-Z0-9]{2,5})?)\b/g;
-  const matches = upper.match(oemPattern);
-  if (!matches) return null;
-
-  const filtered = matches.filter(
-    (m) =>
-      m.length >= 2 &&
-      m.length <= 14 &&
-      m.length !== 17 && // not a VIN
-      !/^\d+$/.test(m) && // not all digits
-      !/^[A-Z]{1,2}\d{6,}$/.test(m), // not a frame number pattern
+  // Use the full candidate extraction so Cyrillic normalisation is applied.
+  // Only consider strong codes standalone; weak codes require context — which
+  // matches the intent of the old function (it used the same strong patterns).
+  const cands = extractCandidatesFromText(text).filter(
+    (c) =>
+      (c.type === "TRANSMISSION_CODE" || c.type === "OCR_TRANSMISSION_CODE") &&
+      c.score >= 0.55, // weak+context (0.55) or strong (0.70+) accepted here
   );
 
-  return filtered.length > 0 ? filtered[0] : null;
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => b.score - a.score);
+  return cands[0].value;
 }
 
+/**
+ * Detect a VIN or FRAME number from plain text.
+ *
+ * Internally delegates to the new candidate-based pipeline while preserving
+ * the original VehicleIdDetection | null return type.
+ */
 export function detectVehicleIdFromText(text: string): VehicleIdDetection | null {
   if (!text || typeof text !== "string") return null;
   const trimmed = text.trim();
   if (!trimmed.length) return null;
 
-  // Normalize Cyrillic lookalikes and non-standard dashes before matching
-  const normalized = normalizeVehicleIdText(trimmed);
+  const cands = extractCandidatesFromText(trimmed);
+  const vinFrameCands = cands.filter(
+    (c) =>
+      c.type === "VIN" || c.type === "FRAME",
+  );
 
-  const candidates: { index: number; det: VehicleIdDetection }[] = [];
+  if (vinFrameCands.length === 0) return null;
 
-  // VIN 17 (full)
-  let m: RegExpExecArray | null;
-  VIN_REGEX.lastIndex = 0;
-  while ((m = VIN_REGEX.exec(normalized)) !== null) {
-    const raw = m[0];
-    const norm = raw.replace(/\s/g, "").toUpperCase();
-    if (norm.length === 17) {
-      candidates.push({ index: m.index, det: { idType: "VIN", rawValue: trimmed.substring(m.index, m.index + raw.length), normalizedValue: norm } });
-    }
+  // Sort: highest score first, VIN before FRAME on tie
+  vinFrameCands.sort((a, b) => {
+    const diff = b.score - a.score;
+    if (Math.abs(diff) > 0.01) return diff;
+    if (a.type === "VIN" && b.type !== "VIN") return -1;
+    if (b.type === "VIN" && a.type !== "VIN") return 1;
+    return 0;
+  });
+
+  const best = vinFrameCands[0];
+
+  if (best.meta?.isIncompleteVin) {
+    return {
+      idType: "VIN",
+      rawValue: best.raw,
+      normalizedValue: best.value,
+      isIncompleteVin: true,
+    };
   }
 
-  // VIN 16 (incomplete)
-  VIN_INCOMPLETE_REGEX.lastIndex = 0;
-  while ((m = VIN_INCOMPLETE_REGEX.exec(normalized)) !== null) {
-    const raw = m[0];
-    const norm = raw.replace(/\s/g, "").toUpperCase();
-    if (norm.length === 16) {
-      candidates.push({
-        index: m.index,
-        det: { idType: "VIN", rawValue: trimmed.substring(m.index, m.index + raw.length), normalizedValue: norm, isIncompleteVin: true },
-      });
-    }
-  }
-
-  // FRAME with dash (e.g. GX100-1234567)
-  FRAME_REGEX.lastIndex = 0;
-  while ((m = FRAME_REGEX.exec(normalized)) !== null) {
-    const raw = m[0].trim();
-    const norm = raw.replace(/\s/g, "").toUpperCase();
-    candidates.push({ index: m.index, det: { idType: "FRAME", rawValue: trimmed.substring(m.index, m.index + m[0].length).trim(), normalizedValue: norm } });
-  }
-
-  // FRAME without dash — Japanese chassis codes (e.g. EU11105303)
-  FRAME_DASHLESS_REGEX.lastIndex = 0;
-  while ((m = FRAME_DASHLESS_REGEX.exec(normalized)) !== null) {
-    const raw = m[0];
-    if (raw.length < FRAME_DASHLESS_MIN_LEN || raw.length > FRAME_DASHLESS_MAX_LEN) continue;
-    const norm = raw.toUpperCase();
-    // Skip if already covered by a VIN or dashed FRAME candidate at the same position
-    const alreadyCovered = candidates.some(
-      (c) => c.index <= m!.index && c.index + c.det.rawValue.length >= m!.index + raw.length
-    );
-    if (alreadyCovered) continue;
-    candidates.push({ index: m.index, det: { idType: "FRAME", rawValue: trimmed.substring(m.index, m.index + raw.length), normalizedValue: norm } });
-  }
-
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => a.index - b.index);
-  return candidates[0].det;
+  return {
+    idType: best.type === "VIN" ? "VIN" : "FRAME",
+    rawValue: best.raw,
+    normalizedValue: best.value,
+  };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// handleIncomingMessage — unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 
 const INCOMPLETE_VIN_REPLY =
   "Похоже VIN содержит 16 символов. Проверьте, пожалуйста — обычно VIN состоит из 17 символов. Пришлите полный VIN или номер кузова (FRAME).";
@@ -164,19 +118,18 @@ export async function handleIncomingMessage(
     throw new Error("Tenant not found");
   }
 
-  // Find existing customer by (tenantId, channel, externalUserId)
   let customer = await storage.getCustomerByExternalId(tenant.id, parsed.channel, parsed.externalUserId);
-  
+
   if (!customer) {
     const customerName = (parsed.metadata?.pushName as string) ||
                          (parsed.metadata?.firstName as string) ||
                          (parsed.metadata?.contactName as string) ||
                          `User ${parsed.externalUserId.slice(-4)}`;
-    
+
     const isLid = parsed.metadata?.isLid === true;
     const remoteJid = (parsed.metadata?.remoteJid as string) || parsed.externalConversationId;
-    let customerPhone = (parsed.metadata?.phone as string) || "";
-    
+    const customerPhone = (parsed.metadata?.phone as string) || "";
+
     customer = await storage.createCustomer({
       tenantId: tenant.id,
       channel: parsed.channel,
@@ -189,8 +142,8 @@ export async function handleIncomingMessage(
   }
 
   const allConversations = await storage.getConversationsByTenant(tenant.id);
-  const existingConv = allConversations.find(c => 
-    c.customerId === customer!.id && 
+  const existingConv = allConversations.find(c =>
+    c.customerId === customer!.id &&
     (c.status === "active" || c.status === "pending")
   );
   let isNew = false;
@@ -218,10 +171,10 @@ export async function handleIncomingMessage(
   }
 
   const existingMessages = await storage.getMessagesByConversation(conversationId, tenant.id);
-  const existingMessage = existingMessages.find(m => 
+  const existingMessage = existingMessages.find(m =>
     m.metadata && (m.metadata as any).externalId === parsed.externalMessageId
   );
-  
+
   if (existingMessage) {
     console.log(`[InboundHandler] Duplicate message ignored: ${parsed.externalMessageId}`);
     return { conversationId, messageId: existingMessage.id, isNew: false };
@@ -248,7 +201,7 @@ export async function handleIncomingMessage(
   });
 
   realtimeService.broadcastNewMessage(tenant.id, message, conversationId);
-  
+
   if (isNew) {
     const conversationWithCustomer = await storage.getConversationWithCustomer(conversationId, tenant.id);
     if (conversationWithCustomer) {
@@ -263,6 +216,10 @@ export async function handleIncomingMessage(
 
   return { conversationId, messageId: message.id, isNew };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// triggerAiSuggestion — unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function triggerAiSuggestion(conversationId: string, tenantId: string): Promise<void> {
   try {
@@ -343,10 +300,8 @@ export async function triggerAiSuggestion(conversationId: string, tenantId: stri
 
     console.log(`[InboundHandler] Created AI suggestion ${suggestion.id} with decision: ${decisionResult.decision}`);
 
-    // Notify frontend about new suggestion via WebSocket
     realtimeService.broadcastNewSuggestion(tenant.id, conversationId, suggestion.id);
 
-    // Increment frequent topic for customer memory
     if (decisionResult.intent && decisionResult.intent !== "other") {
       try {
         await storage.incrementFrequentTopic(tenant.id, conversation.customer.id, decisionResult.intent);
@@ -356,7 +311,6 @@ export async function triggerAiSuggestion(conversationId: string, tenantId: stri
       }
     }
 
-    // Trigger summary generation based on message count
     try {
       const { shouldTriggerSummaryByMessageCount, generateCustomerSummary } = await import("./customer-summary-service");
       const shouldTrigger = await shouldTriggerSummaryByMessageCount(tenant.id, conversation.customer.id);
@@ -377,6 +331,46 @@ export async function triggerAiSuggestion(conversationId: string, tenantId: stri
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Internal helpers for processIncomingMessageFull
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Build a human-readable clarification message for detected conflicts. */
+function buildConflictClarificationText(conflicts: string[]): string {
+  for (const conflict of conflicts) {
+    if (conflict.startsWith("multiple_vin:")) {
+      const vins = conflict.replace("multiple_vin:", "").split("|");
+      const listed = vins.map((v) => `*${v}*`).join(" и ");
+      return (
+        `Нашёл несколько VIN-кодов в вашем сообщении: ${listed}. ` +
+        `Уточните, пожалуйста, какой из них относится к вашему автомобилю.`
+      );
+    }
+    if (conflict.startsWith("multiple_frame:")) {
+      const frames = conflict.replace("multiple_frame:", "").split("|");
+      const listed = frames.map((f) => `*${f}*`).join(" и ");
+      return (
+        `Нашёл несколько номеров кузова: ${listed}. ` +
+        `Уточните, пожалуйста, какой из них относится к вашему автомобилю.`
+      );
+    }
+  }
+  return "Найдено несколько вариантов. Уточните, пожалуйста, VIN или номер кузова вашего автомобиля.";
+}
+
+/** Build a clarification message for a medium-confidence transmission code. */
+function buildWeakCodeClarificationText(code: string): string {
+  return (
+    `Похоже на маркировку КПП: *${code}*. ` +
+    `Это обозначение коробки передач? Для точного подбора пришлите VIN или номер кузова (FRAME) — ` +
+    `или сделайте чёткое фото таблички КПП без бликов.`
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// processIncomingMessageFull — Step 2 candidate pipeline
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function processIncomingMessageFull(
   tenantId: string,
   parsed: ParsedIncomingMessage
@@ -385,7 +379,6 @@ export async function processIncomingMessageFull(
     const result = await handleIncomingMessage(tenantId, parsed);
     const text = (parsed.text || "").trim();
 
-    // Skip AI suggestion entirely if conversation is muted
     const conversation = await storage.getConversation(result.conversationId, tenantId);
     if (conversation?.isMuted) {
       console.log(`[InboundHandler] Conversation ${result.conversationId} is muted — skipping AI suggestion`);
@@ -399,38 +392,29 @@ export async function processIncomingMessageFull(
       return;
     }
 
-    let vehicleDet = detectVehicleIdFromText(text);
+    // ── 1. Extract candidates from text ─────────────────────────────────────
+    let allCandidates = extractCandidatesFromText(text);
 
-    if (vehicleDet && vehicleDet.idType === "VIN" && !("isIncompleteVin" in vehicleDet)) {
-      if (!isValidVinChecksum(vehicleDet.normalizedValue)) {
-        const corrected = tryAutoCorrectVin(vehicleDet.normalizedValue);
-        if (corrected) {
-          console.log(`[InboundHandler] Auto-corrected VIN: ${vehicleDet.normalizedValue} → ${corrected}`);
-          vehicleDet = { ...vehicleDet, normalizedValue: corrected };
-        }
-        // If not correctable — still proceed; the pipeline handles invalid VINs downstream
-      }
-    }
-
+    // ── 2. Extract candidates from images (only when text is empty) ──────────
     let imageAnalysisType: "gearbox_tag" | "registration_doc" | null = null;
+    let ocrQualityGateFailed = false;
 
-    // If no VIN/FRAME in text but there are image attachments → classify image
-    if (!vehicleDet && !text) {
+    if (!text) {
       const imageAttachments = (parsed.attachments ?? []).filter(
         (a) => a.type === "image" && a.url
       );
+
       if (imageAttachments.length > 0) {
         const { analyzeImages, extractVinFromImages, logSafeUrl } = await import("./vin-ocr.service");
         const safeUrls = imageAttachments.map((a) => logSafeUrl(a.url ?? ""));
-        console.log(`[InboundHandler] No text VIN found, classifying ${imageAttachments.length} image(s): ${safeUrls.join(", ")}`);
+        console.log(`[InboundHandler] No text — classifying ${imageAttachments.length} image(s): ${safeUrls.join(", ")}`);
 
-        // OpenAI cannot access relative or authenticated URLs — resolve Telegram media
-        // proxy paths to base64 data: URLs before passing to vision API
+        // Resolve Telegram media proxy paths to base64 data URLs
         const resolvedAttachments = await Promise.all(
           imageAttachments.map(async (att) => {
             const url = att.url ?? "";
             const match = url.match(/^\/api\/telegram-personal\/media\/([^/]+)\/([^/]+)\/(\d+)$/);
-            if (!match) return att; // already absolute or data: URL — pass through
+            if (!match) return att;
             const [, accountId, chatId, msgId] = match;
             try {
               const { telegramClientManager } = await import("./telegram-client-manager");
@@ -455,74 +439,117 @@ export async function processIncomingMessageFull(
           })
         );
 
-        const imageResult = await analyzeImages(resolvedAttachments).catch(() => ({ type: "unknown" as const }));
+        const imageResult = await analyzeImages(resolvedAttachments).catch(
+          () => ({ type: "unknown" as const })
+        );
 
-        if (imageResult.type === "gearbox_tag" && imageResult.code) {
-          console.log(`[InboundHandler] Gearbox tag detected in image: ${imageResult.code} — enqueueing direct price lookup`);
-          const { enqueuePriceLookup } = await import("./price-lookup-queue");
-          await enqueuePriceLookup({
-            tenantId,
-            conversationId: result.conversationId,
-            oem: imageResult.code,
-          });
-          return;
+        if (imageResult.type === "gearbox_tag" || imageResult.type === "registration_doc") {
+          imageAnalysisType = imageResult.type;
         }
 
-        if (imageResult.type === "registration_doc") {
-          imageAnalysisType = "registration_doc";
-          const identifier = imageResult.vin ?? imageResult.frame;
-          if (identifier) {
-            const idType: "VIN" | "FRAME" = imageResult.vin ? "VIN" : "FRAME";
-            const labelRu = imageResult.vin ? "VIN" : "номер кузова";
-            console.log(`[InboundHandler] Registration doc detected, ${idType}: ${identifier}`);
+        // Build OcrAnalysisResult interface from analyzeImages return value
+        const ocrInput: OcrAnalysisResult = {
+          type: imageResult.type,
+          code: (imageResult as any).code,
+          vin: (imageResult as any).vin,
+          frame: (imageResult as any).frame,
+        };
 
-            const tenant = await storage.getTenant(tenantId) ?? await storage.getDefaultTenant();
-            if (tenant) {
-              const suggestion = await storage.createAiSuggestion({
-                conversationId: result.conversationId,
-                messageId: result.messageId,
-                suggestedReply: `Вижу свидетельство о регистрации. Нашёл ${labelRu}: ${identifier}. Начинаю подбор КПП.`,
-                intent: "gearbox_tag_request",
-                confidence: 1,
-                needsApproval: true,
-                needsHandoff: false,
-                questionsToAsk: [],
-                usedSources: [],
-                status: "pending",
-              }, tenant.id);
-              realtimeService.broadcastNewSuggestion(tenant.id, result.conversationId, suggestion.id);
-              console.log(`[InboundHandler] Created registration_doc suggestion for conversation ${result.conversationId}`);
-            }
+        const ocrCandidates = extractCandidatesFromOcr(ocrInput);
 
-            vehicleDet = { idType, rawValue: identifier, normalizedValue: identifier };
-          } else {
-            console.log(`[InboundHandler] Registration doc detected but no VIN/frame found in image`);
-          }
+        // Detect quality gate failure: gearbox_tag returned a code but it failed
+        // the OCR quality checks (no candidates produced)
+        if (
+          imageResult.type === "gearbox_tag" &&
+          (imageResult as any).code &&
+          ocrCandidates.length === 0
+        ) {
+          ocrQualityGateFailed = true;
+          console.log(`[InboundHandler] OCR quality gate failed for gearbox_tag code: "${(imageResult as any).code}" — will ask for clearer photo`);
         }
 
-        // Fallback: plain VIN extraction for images not classified as gearbox_tag or registration_doc
-        if (!vehicleDet && imageResult.type === "unknown") {
+        allCandidates = [...allCandidates, ...ocrCandidates];
+
+        // Fallback: plain VIN extraction for images not classified as gearbox_tag/registration_doc
+        if (imageResult.type === "unknown" && ocrCandidates.length === 0) {
           const vinFromImage = await extractVinFromImages(resolvedAttachments).catch(() => null);
           if (vinFromImage) {
             console.log(`[InboundHandler] VIN extracted via image OCR fallback: ${vinFromImage}`);
-            let correctedVin = vinFromImage;
-            if (!isValidVinChecksum(vinFromImage)) {
-              const corrected = tryAutoCorrectVin(vinFromImage);
-              if (corrected) {
-                console.log(`[InboundHandler] Auto-corrected OCR fallback VIN: ${vinFromImage} → ${corrected}`);
-                correctedVin = corrected;
-              }
-            }
-            vehicleDet = { idType: "VIN", rawValue: vinFromImage, normalizedValue: correctedVin };
+            const fallbackOcr: OcrAnalysisResult = {
+              type: "registration_doc",
+              vin: vinFromImage,
+            };
+            const fallbackCands = extractCandidatesFromOcr(fallbackOcr);
+            allCandidates = [...allCandidates, ...fallbackCands];
           }
         }
       }
     }
 
-    if (vehicleDet && "isIncompleteVin" in vehicleDet && vehicleDet.isIncompleteVin) {
-      const conversation = await storage.getConversationDetail(result.conversationId, tenantId);
-      const tenant = conversation ? await storage.getTenant(conversation.tenantId) ?? await storage.getDefaultTenant() : null;
-      if (conversation && tenant) {
+    // ── 3. Choose best candidate ─────────────────────────────────────────────
+    const { best, alternates, conflicts } = chooseBestCandidate(allCandidates);
+
+    // ── 3a. Detection outcome metrics ────────────────────────────────────────
+    incr("detector.candidates_total", { count: allCandidates.length });
+    if (best) {
+      const scoreBucket =
+        best.score >= 0.8 ? ">=0.8" : best.score >= 0.55 ? "0.55-0.79" : "<0.55";
+      incr("detector.best", { type: best.type, source: best.source, score_bucket: scoreBucket });
+    }
+
+    // ── 4. Structured detection log (debug) ──────────────────────────────────
+    const logCandidates = allCandidates.map((c) => ({
+      type: c.type,
+      value: maskCandidateValue(c),
+      score: c.score.toFixed(2),
+      reasons: c.reasons,
+      source: c.source,
+    }));
+    console.log(
+      `[InboundHandler] Detection candidates (${allCandidates.length}):`,
+      JSON.stringify(logCandidates),
+    );
+    if (best) {
+      console.log(
+        `[InboundHandler] Best candidate: type=${best.type} value=${maskCandidateValue(best)} score=${best.score.toFixed(2)} reasons=${best.reasons.join(",")}`,
+      );
+    } else {
+      console.log(`[InboundHandler] No candidate found`);
+    }
+    if (conflicts?.length) {
+      console.log(`[InboundHandler] Conflicts detected: ${conflicts.join(", ")}`);
+    }
+
+    // ── 5. Handle OCR quality gate failure ───────────────────────────────────
+    if (ocrQualityGateFailed && !best) {
+      incr("detector.ocr_rejected");
+      const tenant = await storage.getTenant(tenantId) ?? await storage.getDefaultTenant();
+      if (tenant) {
+        const suggestion = await storage.createAiSuggestion({
+          conversationId: result.conversationId,
+          messageId: result.messageId,
+          suggestedReply:
+            "Не удалось распознать маркировку КПП на фото. Пожалуйста, пришлите чёткое фото таблички — " +
+            "без бликов, с хорошим освещением, плёнка/табличка целиком в кадре.",
+          intent: "gearbox_tag_request",
+          confidence: 1,
+          needsApproval: true,
+          needsHandoff: false,
+          questionsToAsk: [],
+          usedSources: [],
+          status: "pending",
+        }, tenant.id);
+        realtimeService.broadcastNewSuggestion(tenant.id, result.conversationId, suggestion.id);
+        console.log(`[InboundHandler] OCR quality gate — requested clearer photo for ${result.conversationId}`);
+      }
+      return;
+    }
+
+    // ── 6. Incomplete VIN ────────────────────────────────────────────────────
+    if (best?.meta?.isIncompleteVin) {
+      incr("detector.incomplete_vin");
+      const tenant = await storage.getTenant(tenantId) ?? await storage.getDefaultTenant();
+      if (tenant) {
         const suggestion = await storage.createAiSuggestion({
           conversationId: result.conversationId,
           messageId: result.messageId,
@@ -536,13 +563,56 @@ export async function processIncomingMessageFull(
           status: "pending",
         }, tenantId);
         realtimeService.broadcastNewSuggestion(tenant.id, result.conversationId, suggestion.id);
-        console.log(`[InboundHandler] Incomplete VIN detected, created vehicle_id_request suggestion for ${result.conversationId}`);
+        console.log(`[InboundHandler] Incomplete VIN — created vehicle_id_request suggestion for ${result.conversationId}`);
       }
       return;
     }
 
-    if (vehicleDet && !("isIncompleteVin" in vehicleDet && vehicleDet.isIncompleteVin)) {
-      const activeCase = await storage.findActiveVehicleLookupCase(tenantId, result.conversationId, vehicleDet.normalizedValue);
+    // ── 7. Conflict clarification ────────────────────────────────────────────
+    if (conflicts?.length) {
+      for (const conflict of conflicts) {
+        const conflictKind = conflict.startsWith("multiple_vin:") ? "multiple_vin"
+          : conflict.startsWith("multiple_frame:") ? "multiple_frame"
+          : "unknown";
+        incr("detector.conflict", { kind: conflictKind });
+      }
+      const tenant = await storage.getTenant(tenantId) ?? await storage.getDefaultTenant();
+      if (tenant) {
+        const replyText = buildConflictClarificationText(conflicts);
+        const suggestion = await storage.createAiSuggestion({
+          conversationId: result.conversationId,
+          messageId: result.messageId,
+          suggestedReply: replyText,
+          intent: "vehicle_id_request",
+          confidence: 0.9,
+          needsApproval: true,
+          needsHandoff: false,
+          questionsToAsk: [],
+          usedSources: [],
+          status: "pending",
+          decision: "NEED_APPROVAL",
+          autosendEligible: false,
+        }, tenant.id);
+        realtimeService.broadcastNewSuggestion(tenant.id, result.conversationId, suggestion.id);
+        console.log(`[InboundHandler] Conflict clarification created for ${result.conversationId}: ${conflicts.join(", ")}`);
+      }
+      return;
+    }
+
+    // ── 8. VIN / FRAME path (score >= 0.80) ─────────────────────────────────
+    if (
+      best &&
+      (best.type === "VIN" || best.type === "FRAME" ||
+       best.type === "OCR_VIN" || best.type === "OCR_FRAME") &&
+      best.score >= 0.80
+    ) {
+      const idType: "VIN" | "FRAME" =
+        best.type === "VIN" || best.type === "OCR_VIN" ? "VIN" : "FRAME";
+
+      const activeCase = await storage.findActiveVehicleLookupCase(
+        tenantId, result.conversationId, best.value,
+      );
+
       if (activeCase) {
         console.log("[InboundHandler] Skipped duplicate vehicle lookup case");
       } else {
@@ -550,28 +620,32 @@ export async function processIncomingMessageFull(
           tenantId,
           conversationId: result.conversationId,
           messageId: result.messageId,
-          idType: vehicleDet.idType,
-          rawValue: vehicleDet.rawValue,
-          normalizedValue: vehicleDet.normalizedValue,
+          idType,
+          rawValue: best.raw,
+          normalizedValue: best.value,
           status: "PENDING",
           verificationStatus: "NONE",
         }, tenantId);
+
+        incr("detector.route_vehicle_lookup", { idType });
         const { enqueueVehicleLookup } = await import("./vehicle-lookup-queue");
         await enqueueVehicleLookup({
           caseId: row.id,
           tenantId,
           conversationId: result.conversationId,
-          idType: vehicleDet.idType,
-          normalizedValue: vehicleDet.normalizedValue,
+          idType,
+          normalizedValue: best.value,
         });
-        console.log(`[InboundHandler] Vehicle ID detected (${vehicleDet.idType}), created case ${row.id} and enqueued lookup`);
+        console.log(
+          `[InboundHandler] Vehicle ID (${idType} score=${best.score.toFixed(2)}) — case ${row.id} enqueued`,
+        );
 
-        // Skip the generic gearbox_tag_request if we already created a registration_doc suggestion
+        // Skip gearboxTagRequest if we already created a registration_doc suggestion
         if (imageAnalysisType !== "registration_doc") {
           const tenant = await storage.getTenant(tenantId) ?? await storage.getDefaultTenant();
           if (tenant) {
             const templates = getMergedGearboxTemplates(tenant);
-            const idTypeLabel = vehicleDet.idType === "VIN" ? "VIN-коду" : "номеру кузова";
+            const idTypeLabel = idType === "VIN" ? "VIN-коду" : "номеру кузова";
             const suggestion = await storage.createAiSuggestion({
               conversationId: result.conversationId,
               messageId: result.messageId,
@@ -585,66 +659,123 @@ export async function processIncomingMessageFull(
               status: "pending",
             }, tenant.id);
             realtimeService.broadcastNewSuggestion(tenant.id, result.conversationId, suggestion.id);
-            console.log(`[InboundHandler] Created gearbox_tag_request suggestion for vehicle lookup case ${row.id}`);
+            console.log(`[InboundHandler] Created gearbox_tag_request suggestion for case ${row.id}`);
+          }
+        }
+
+        // Create registration_doc acknowledgement suggestion
+        if (imageAnalysisType === "registration_doc") {
+          const tenant = await storage.getTenant(tenantId) ?? await storage.getDefaultTenant();
+          if (tenant) {
+            const labelRu = idType === "VIN" ? "VIN" : "номер кузова";
+            const suggestion = await storage.createAiSuggestion({
+              conversationId: result.conversationId,
+              messageId: result.messageId,
+              suggestedReply: `Вижу свидетельство о регистрации. Нашёл ${labelRu}: ${best.value}. Начинаю подбор КПП.`,
+              intent: "gearbox_tag_request",
+              confidence: 1,
+              needsApproval: true,
+              needsHandoff: false,
+              questionsToAsk: [],
+              usedSources: [],
+              status: "pending",
+            }, tenant.id);
+            realtimeService.broadcastNewSuggestion(tenant.id, result.conversationId, suggestion.id);
+            console.log(`[InboundHandler] Created registration_doc suggestion for ${result.conversationId}`);
           }
         }
       }
       return;
     }
 
-    // If no VIN/FRAME detected, try to detect a gearbox OEM marking (e.g. A245E, K9K, 01M)
-    // and enqueue a direct price lookup — skip Podzamenu VIN/FRAME lookup entirely.
-    if (!vehicleDet && autoPartsEnabled) {
-      const detectedMarking = detectGearboxMarkingFromText(text);
-      console.log('[GearboxDetect] autoPartsEnabled:', autoPartsEnabled, '| detected:', detectedMarking);
-      if (detectedMarking) {
-        console.log(
-          `[InboundHandler] Gearbox marking detected (${detectedMarking}) — enqueueing direct price lookup for ${result.conversationId}`,
+    // ── 9. Transmission code path (score >= 0.70) ────────────────────────────
+    if (
+      autoPartsEnabled &&
+      best &&
+      (best.type === "TRANSMISSION_CODE" || best.type === "OCR_TRANSMISSION_CODE") &&
+      best.score >= 0.70
+    ) {
+      incr("detector.route_price_lookup", { kind: "transmissionCode" });
+      console.log(
+        `[InboundHandler] Transmission code (${best.value} score=${best.score.toFixed(2)}) — enqueueing price lookup for ${result.conversationId}`,
+      );
+      const { enqueuePriceLookup } = await import("./price-lookup-queue");
+      await enqueuePriceLookup({
+        tenantId,
+        conversationId: result.conversationId,
+        transmissionCode: best.value,
+        oem: best.value, // legacy alias for backward compatibility
+      });
+      return;
+    }
+
+    // ── 10. Gearbox type only ────────────────────────────────────────────────
+    if (best?.type === "GEARBOX_TYPE") {
+      incr("detector.route_no_vin");
+      const tenant = await storage.getTenant(tenantId) ?? await storage.getDefaultTenant();
+      if (tenant) {
+        const pendingSuggestion = await storage.getPendingSuggestionByConversation(
+          result.conversationId, tenantId,
         );
-        const { enqueuePriceLookup } = await import("./price-lookup-queue");
-        await enqueuePriceLookup({
-          tenantId,
-          conversationId: result.conversationId,
-          oem: detectedMarking,
-        });
-        return; // price-lookup worker handles the reply
-      }
-    }
-
-    // If no VIN/FRAME detected but customer mentioned a gearbox type, prompt for VIN
-    if (!vehicleDet && text) {
-      const mentionedGearboxType = detectGearboxType(text);
-      if (mentionedGearboxType !== "unknown") {
-        const tenant = await storage.getTenant(tenantId) ?? await storage.getDefaultTenant();
-        if (tenant) {
-          const pendingSuggestion = await storage.getPendingSuggestionByConversation(result.conversationId, tenantId);
-          if (!pendingSuggestion) {
-            const templates = getMergedGearboxTemplates(tenant);
-            const replyText = fillGearboxTemplate(templates.gearboxNoVin, {
-              gearboxType: mentionedGearboxType.toUpperCase(),
-            });
-            const suggestion = await storage.createAiSuggestion({
-              conversationId: result.conversationId,
-              messageId: result.messageId,
-              suggestedReply: replyText,
-              intent: "gearbox_no_vin",
-              confidence: 0.9,
-              needsApproval: true,
-              needsHandoff: false,
-              questionsToAsk: [],
-              usedSources: [],
-              status: "pending",
-              decision: "NEED_APPROVAL",
-              autosendEligible: false,
-            }, tenant.id);
-            realtimeService.broadcastNewSuggestion(tenant.id, result.conversationId, suggestion.id);
-            console.log(`[InboundHandler] Gearbox type "${mentionedGearboxType}" without VIN, created gearbox_no_vin suggestion`);
-          }
+        if (!pendingSuggestion) {
+          const templates = getMergedGearboxTemplates(tenant);
+          const replyText = fillGearboxTemplate(templates.gearboxNoVin, {
+            gearboxType: best.value.toUpperCase(),
+          });
+          const suggestion = await storage.createAiSuggestion({
+            conversationId: result.conversationId,
+            messageId: result.messageId,
+            suggestedReply: replyText,
+            intent: "gearbox_no_vin",
+            confidence: 0.9,
+            needsApproval: true,
+            needsHandoff: false,
+            questionsToAsk: [],
+            usedSources: [],
+            status: "pending",
+            decision: "NEED_APPROVAL",
+            autosendEligible: false,
+          }, tenant.id);
+          realtimeService.broadcastNewSuggestion(tenant.id, result.conversationId, suggestion.id);
+          console.log(`[InboundHandler] Gearbox type "${best.value}" without VIN — created gearbox_no_vin suggestion`);
         }
-        return;
       }
+      return;
     }
 
+    // ── 11. Medium-confidence clarification (0.55..0.69) ────────────────────
+    if (
+      best &&
+      (best.type === "TRANSMISSION_CODE" || best.type === "OCR_TRANSMISSION_CODE") &&
+      best.score >= 0.55
+    ) {
+      incr("detector.weak_tc_clarification");
+      const tenant = await storage.getTenant(tenantId) ?? await storage.getDefaultTenant();
+      if (tenant) {
+        const replyText = buildWeakCodeClarificationText(best.value);
+        const suggestion = await storage.createAiSuggestion({
+          conversationId: result.conversationId,
+          messageId: result.messageId,
+          suggestedReply: replyText,
+          intent: "gearbox_tag_request",
+          confidence: 0.7,
+          needsApproval: true,
+          needsHandoff: false,
+          questionsToAsk: [],
+          usedSources: [],
+          status: "pending",
+          decision: "NEED_APPROVAL",
+          autosendEligible: false,
+        }, tenant.id);
+        realtimeService.broadcastNewSuggestion(tenant.id, result.conversationId, suggestion.id);
+        console.log(
+          `[InboundHandler] Weak code "${best.value}" (score=${best.score.toFixed(2)}) — clarification requested for ${result.conversationId}`,
+        );
+      }
+      return;
+    }
+
+    // ── 12. Fallback ─────────────────────────────────────────────────────────
     await triggerAiSuggestion(result.conversationId, tenantId);
   } catch (error) {
     console.error(`[InboundHandler] Error processing message:`, error);

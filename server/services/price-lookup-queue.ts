@@ -13,11 +13,20 @@ export interface SearchFallback {
 export interface PriceLookupJobData {
   tenantId: string;
   conversationId: string;
+  /**
+   * @deprecated Legacy field — preserved for backward compatibility.
+   * New code should populate transmissionCode or oemPartNumber instead.
+   * Worker normalizes this field at entry if the explicit fields are absent.
+   */
   oem: string | null;
   oemModelHint?: string | null;
   vehicleContext?: VehicleContext;
   searchFallback?: SearchFallback;
   isModelOnly?: boolean;
+  /** Gearbox model code, e.g. JF011E, 6HP19, A245E. Used for market search. */
+  transmissionCode?: string | null;
+  /** Real OEM part number, e.g. 31020-3VX2D. Distinct from model code. */
+  oemPartNumber?: string | null;
 }
 
 const QUEUE_NAME = "price_lookup_queue";

@@ -1,7 +1,7 @@
 # Transmission Lookup Pipeline — File Map
 
 > Справочник для имплементационных промптов. Не модифицировать вручную.
-> Актуально на: 2026-02-26 (обновлено после Step 3 — Unify GearboxType Systems)
+> Актуально на: 2026-02-27 (обновлено после Step 8 — Yandex anchor selection refactor)
 
 ---
 
@@ -47,9 +47,14 @@
 
 ### Transmission Identification
 
-| Function | File | Line |
+| Function | File | Notes |
 |---|---|---|
-| `identifyTransmissionByOem()` | `server/services/transmission-identifier.ts` | 107 |
+| `identifyTransmissionByTransmissionCode()` | `server/services/transmission-identifier.ts` | New (Step 4). For model codes: JF011E, 6HP19 |
+| `identifyTransmissionByOemPartNumber()` | `server/services/transmission-identifier.ts` | New (Step 4). For OEM part numbers: 31020-3VX2D |
+| `identifyTransmissionByOem()` | `server/services/transmission-identifier.ts` | @deprecated. Routes via `classifyOemInput()` heuristic |
+| `classifyOemInput()` | `server/services/transmission-identifier.ts` | Pure. `"oemPartNumber"` if `/\d-\|-\d/`, else `"transmissionCode"` |
+| `normalizeIdentityInput()` | `server/services/transmission-identifier.ts` | New (Step 5). Pure. trim → uppercase → remove spaces; dashes preserved |
+| `buildIdentityCacheKey()` | `server/services/transmission-identifier.ts` | New (Step 5). Pure. `"tc:<N>"` for transmissionCode, `"pn:<N>"` for oemPartNumber |
 
 ### Price Lookup Worker
 
@@ -72,16 +77,18 @@
 
 | Function | File | Line |
 |---|---|---|
-| `searchUsedTransmissionPrice()` | `server/services/price-searcher.ts` | 519 |
-| `searchWithYandex()` | `server/services/price-searcher.ts` | 399 |
-| `buildPrimaryQuery()` | `server/services/price-searcher.ts` | 106 |
-| `buildFallbackQuery()` | `server/services/price-searcher.ts` | 134 |
-| `buildYandexQueries()` | `server/services/price-searcher.ts` | 292 |
-| `parseListingsFromResponse()` | `server/services/price-searcher.ts` | 233 |
-| `parseListingsFromHtml()` | `server/services/price-searcher.ts` | 321 |
-| `filterListingsByTitle()` | `server/services/price-searcher.ts` | 387 |
-| `removeOutliers()` | `server/services/price-searcher.ts` | 199 |
-| `validatePrices()` | `server/services/price-searcher.ts` | 213 |
+| `searchUsedTransmissionPrice()` | `server/services/price-searcher.ts` | 639 |
+| `searchWithYandex()` | `server/services/price-searcher.ts` | 519 |
+| `buildYandexQueries()` | `server/services/price-searcher.ts` | 389 |
+| `isValidMarketModelName()` | `server/services/price-searcher.ts` | 152 |
+| `selectYandexAnchor()` | `server/services/price-searcher.ts` | 173 |
+| `buildPrimaryQuery()` | `server/services/price-searcher.ts` | 186 |
+| `buildFallbackQuery()` | `server/services/price-searcher.ts` | 214 |
+| `parseListingsFromResponse()` | `server/services/price-searcher.ts` | 313 |
+| `parseListingsFromHtml()` | `server/services/price-searcher.ts` | 440 |
+| `filterListingsByTitle()` | `server/services/price-searcher.ts` | 507 |
+| `removeOutliers()` | `server/services/price-searcher.ts` | 269 |
+| `validatePrices()` | `server/services/price-searcher.ts` | 283 |
 
 ### Vehicle Context Extraction
 
@@ -162,9 +169,42 @@
 **Exports:** `createPriceLookupWorker`, `startPriceLookupWorker`
 **Role:** Консьюмер `price_lookup_queue`. Выполняет OEM-поиск или fallback-поиск цены, управляет глобальным кешем price_snapshots, создаёт клиентские price suggestions.
 
+**Step 4 (Identification routing):** `lookupPricesByOem` получила два опциональных параметра — `transmissionCode?` и `oemPartNumber?`. При наличии `transmissionCode` вызывается `identifyTransmissionByTransmissionCode`; при наличии `oemPartNumber` — `identifyTransmissionByOemPartNumber`; иначе — legacy `identifyTransmissionByOem` как fallback. `processPriceLookup` передаёт оба поля из нормализованного job payload.
+
+### `server/services/observability/metrics.ts`
+**Exports:** `MetricTags` (type), `incr`, `timing`
+**Role:** Лёгкий no-op фасад для метрик. Вызовы `incr`/`timing` расставлены по пайплайну (Step 7); реальный бекенд (StatsD/Prometheus/Datadog) подключается заменой тел функций без изменения call-sites.
+
+**API:**
+```typescript
+// Tag map — all values must be low-cardinality enum-like literals.
+// Raw VINs, OEM part numbers, model names, and any user-supplied strings
+// are NEVER allowed as tag values (privacy + cardinality constraint).
+type MetricTags = Record<string, string | number | boolean | null | undefined>;
+
+// Increment a counter metric by 1.
+function incr(name: string, tags?: MetricTags): void
+
+// Record a duration in milliseconds.
+function timing(name: string, ms: number, tags?: MetricTags): void
+```
+
+**Wiring a real backend** (example — StatsD via `hot-shots`):
+```typescript
+import StatsD from "hot-shots";
+const statsd = new StatsD({ host: process.env.STATSD_HOST });
+// replace incr body:
+export function incr(name: string, tags?: MetricTags): void {
+  statsd.increment(name, 1, 1, flattenTags(tags));
+}
+```
+No call-sites need to change — only the function bodies in this file.
+
 ### `server/services/transmission-identifier.ts`
-**Exports:** `VehicleContext` (interface), `TransmissionIdentification` (interface), `identifyTransmissionByOem`
-**Role:** GPT-4.1 + web_search: конвертирует сырой OEM-код в рыночное название КПП (напр. JF011E). Проверяет/пишет DB-кеш `transmission_identity_cache`.
+**Exports:** `VehicleContext` (interface), `TransmissionIdentification` (interface), `TransmissionInputKind` (type), `identifyTransmissionByTransmissionCode`, `identifyTransmissionByOemPartNumber`, `identifyTransmissionByOem` (@deprecated), `classifyOemInput`, `normalizeIdentityInput`, `buildIdentityCacheKey`
+**Role:** GPT-4.1 + web_search: конвертирует код КПП или OEM-номер запчасти в рыночное название (напр. JF011E). Проверяет/пишет DB-кеш `transmission_identity_cache`. Обе публичные функции делегируют к общей внутренней `_identifyTransmissionByInput(inputValue, inputKind, context)` — логика GPT не дублируется.
+
+**Cache key scheme (Step 5):** `normalizedOem` в кеше теперь хранит ключи с префиксом: `tc:<NORMALIZED>` для `transmissionCode`, `pn:<NORMALIZED>` для `oemPartNumber`. Чтение: сначала prefixed ключ, затем fallback на legacy unprefixed ключ. Legacy hit → best-effort soft-migration upsert prefixed строки; legacy строка не удаляется. Новые GPT-результаты всегда пишутся только в prefixed ключ.
 
 ### `server/services/price-searcher.ts`
 **Exports:** `PriceSearchListing` (interface), `PriceSearchResult` (interface), `searchUsedTransmissionPrice`, `searchWithYandex`
@@ -217,7 +257,8 @@ oem: text("oem").notNull()       // ключ кеша
 
 // shared/schema.ts — таблица transmissionIdentityCache
 oem: text("oem").notNull()
-normalizedOem: text("normalized_oem").notNull()  // uppercase, trimmed
+normalizedOem: text("normalized_oem").notNull()  // Step 5: prefixed key — "tc:<UPPER>" or "pn:<UPPER>"
+                                                 // Legacy rows: plain uppercase trimmed value (no prefix)
 
 // shared/schema.ts — таблица internalPrices
 oem: text("oem").notNull()
@@ -256,10 +297,11 @@ enqueuePriceLookup({ tenantId, conversationId, oem: null, searchFallback: { ... 
 if (oem) → lookupPricesByOem(tenantId, oem, conversationId, oemModelHint, vehicleContext)
 else     → lookupPricesByFallback(...)
 
-// price-lookup.worker.ts — ключ кеша:
-buildCacheKey(oem, vehicleContext?.make, vehicleContext?.model)
-// формат: "oem::make::model" (lowercase)
-storage.getGlobalPriceSnapshot(cacheKey)
+// price-lookup.worker.ts — ключ кеша (Step 6):
+// writeKey = buildPriceSnapshotKey(kind, normalize(value), make, model)
+// формат: "tc::<v>::<make>::<model>" | "pn::<v>::<make>::<model>" | legacy "oem::make::model"
+storage.getGlobalPriceSnapshot(prefixedKey)    // try prefixed first
+storage.getGlobalPriceSnapshot(legacyCacheKey) // fallback
 
 // price-lookup.worker.ts — GPT-идентификация:
 identifyTransmissionByOem(oem, vehicleContext)
@@ -351,7 +393,7 @@ export type InsertVehicleLookupCase = typeof vehicleLookupCases.$inferInsert;
 // DB table: "transmission_identity_cache"
 id,
 oem: string,
-normalizedOem: string,    // unique index
+normalizedOem: string,    // unique index; Step 5: "tc:<UPPER>" | "pn:<UPPER>" (legacy: plain UPPER)
 modelName: string | null, // рыночное название, напр. "JF011E"
 manufacturer: string | null,
 origin: string | null,    // "japan" | "europe" | "korea" | "usa" | "unknown"
@@ -378,7 +420,7 @@ minPrice, maxPrice, avgPrice: number | null,
 marketMinPrice, marketMaxPrice, marketAvgPrice: number | null,
 salePrice: number | null,
 marginPct: number,
-searchKey: string | null, // композитный ключ: "oem::make::model" (lowercase)
+searchKey: string | null, // Step 6: prefixed "tc::<v>::<make>::<model>" or "pn::<v>..."; legacy: "oem::make::model"
 modelName: string | null, // напр. "JATCO JF011E"
 manufacturer: string | null,
 origin: string | null,
@@ -546,9 +588,9 @@ export type GearboxKind = "AT" | "MT" | "CVT" | "DCT" | "AMT" | "UNKNOWN";
 ### Следующие шаги (запланировано)
 
 - **Step 3:** ~~Передавать `transmissionCode` внутри воркера в `lookupPricesByOem()` вместо `oem`, когда поле явно задано.~~ → **Выполнено в рамках Step 3 (Unify GearboxType Systems) — см. раздел 8.**
-- **Step 4:** Разделить `identifyTransmissionByOem()` на два метода: один для кода модели КПП, другой для OEM part number.
-- **Step 5:** Обновить cache key с учётом явного разделения полей.
-- **Step 6:** Миграция DB (если потребуется добавить отдельную колонку для part number).
+- **Step 4:** ~~Разделить `identifyTransmissionByOem()` на два метода: один для кода модели КПП, другой для OEM part number.~~ → **Выполнено — см. раздел 9.**
+- **Step 5:** ~~Обновить cache key с учётом явного разделения полей.~~ → **Выполнено — см. раздел 10.**
+- **Step 6:** ~~Price Snapshot Cache Key Isolation.~~ → **Выполнено — см. раздел 11.**
 
 ---
 
@@ -749,3 +791,440 @@ const gearboxType = detectedFromText !== "unknown"
 - **Без изменений DB-схемы** — ни одна таблица не затронута.
 - `price-lookup.worker.ts` и `price-searcher.ts` не изменялись — `pickGearboxLabel` / `resolveGearboxLabel` / `createEscalationSuggestion` корректно читают VehicleContext ("AT"/"MT"/"CVT"); `lookupPricesByFallback` корректно читает `SearchFallback.gearboxType` (`GearboxType`).
 - **`tryFallbackPriceLookup`** не изменена — нет `vehicleContext` в параметрах; ранний возврат при `"unknown"` сохранён.
+
+---
+
+## 9. Step 4 — Split Transmission Identification API (2026-02-26)
+
+### Проблема
+
+`identifyTransmissionByOem()` была семантически перегружена: используется и для кодов моделей КПП (`JF011E`, `6HP19`), и — потенциально — для настоящих OEM-номеров запчастей (`31020-3VX2D`). Разделение делает намерение вызывающего кода явным.
+
+### Что изменилось
+
+| Файл | Изменение |
+|---|---|
+| `server/services/transmission-identifier.ts` | Добавлены `identifyTransmissionByTransmissionCode`, `identifyTransmissionByOemPartNumber`, `classifyOemInput`; тело перенесено в `_identifyTransmissionByInput`; `identifyTransmissionByOem` помечена `@deprecated` |
+| `server/workers/price-lookup.worker.ts` | Импортированы новые функции; `lookupPricesByOem` получила параметры `transmissionCode?` и `oemPartNumber?`; идентификация маршрутизируется через `if(transmissionCode) … else if(oemPartNumber) … else legacy`; `processPriceLookup` передаёт оба поля |
+| `server/services/__tests__/transmission-identifier.test.ts` | **Новый файл.** Unit-тесты для `classifyOemInput` (только чистые функции, без DB/GPT/network) |
+
+### Ключевые принципы Step 4
+
+- **Без изменений DB-схемы** — ни одна таблица не затронута. Ключ кеша (`normalizedOem`) на момент Step 4 по-прежнему `inputValue.trim().toUpperCase()` *(изменено в Step 5 — см. раздел 10)*.
+- ~~**Без изменений cache key format**~~ — `normalizedOem` обновлён в Step 5 до схемы `tc:<UPPER>` / `pn:<UPPER>` с legacy fallback.
+- **Полная обратная совместимость** — `identifyTransmissionByOem` сохранена и делегирует к правильному пути через `classifyOemInput`.
+- **GPT-промпт не дублируется** — одна внутренняя функция `_identifyTransmissionByInput(inputValue, inputKind, context)`.
+- **Маршрутизация воркера** — `lookupPricesByOem` теперь выбирает правильный метод идентификации на основе явных полей job payload; legacy `oem` используется как последний fallback.
+
+### Хьюристика `classifyOemInput`
+
+```
+OEM_PART_NUMBER_RE = /\d-|-\d/   (цифра рядом с дефисом)
+
+if OEM_PART_NUMBER_RE.test(oem):
+  → "oemPartNumber"   // 31020-3VX2D
+else:
+  → "transmissionCode"  // JF011E, 6HP19, A245E
+```
+
+**Известное ограничение:** коды вида `AW55-51SN` (дефис между `5` и `5`) классифицируются как `oemPartNumber` по этой эвристике. Это известный edge-case, задокументированный в тестах.
+
+### Следующие шаги (запланировано)
+
+- **Step 5:** ~~Обновить cache key с учётом явного разделения полей (`transmissionCode::` / `oem::` prefix).~~ → **Выполнено — см. раздел 10.**
+- **Step 6:** ~~Price Snapshot Cache Key Isolation (price_snapshots).~~ → **Выполнено — см. раздел 11.**
+
+---
+
+## 10. Step 5 — Identity Cache Key Prefix (2026-02-26)
+
+### Проблема
+
+До Step 5 оба типа входных данных (`transmissionCode` и `oemPartNumber`) писали в кеш под одним ключом `inputValue.trim().toUpperCase()`. Это могло вызвать коллизию: `JF011E` и теоретически совпадающий part number сохранялись под идентичным ключом.
+
+### Что изменилось
+
+| Файл | Изменение |
+|---|---|
+| `server/services/transmission-identifier.ts` | Добавлены `TransmissionInputKind` (exported type), `normalizeIdentityInput`, `buildIdentityCacheKey`; `_identifyTransmissionByInput` обновлена: prefixed-key read, legacy fallback, soft-migration upsert, prefixed-key write |
+| `server/services/__tests__/transmission-identifier.test.ts` | Добавлены тесты для `normalizeIdentityInput`, `buildIdentityCacheKey` и round-trip (15+ кейсов) |
+
+### Новые экспорты
+
+| Функция / тип | Сигнатура | Описание |
+|---|---|---|
+| `TransmissionInputKind` | `"transmissionCode" \| "oemPartNumber"` | Exported type (ранее только внутренний `InputKind`) |
+| `normalizeIdentityInput(value)` | `string → string` | Trim, uppercase, collapse spaces; dashes preserved |
+| `buildIdentityCacheKey(kind, normalized)` | `(TransmissionInputKind, string) → string` | Returns `"tc:<normalized>"` or `"pn:<normalized>"` |
+
+### Схема ключей
+
+```
+transmissionCode → normalizedOem = "tc:<NORMALIZED>"   // напр. "tc:JF011E"
+oemPartNumber    → normalizedOem = "pn:<NORMALIZED>"   // напр. "pn:31020-3VX2D"
+```
+
+### Порядок чтения кеша
+
+```
+1. primaryKey = buildIdentityCacheKey(kind, normalizeIdentityInput(inputValue))
+2. storage.getTransmissionIdentity(primaryKey)  // ← новый prefixed ключ
+3. Если промах → storage.getTransmissionIdentity(normalized)  // ← legacy ключ (без prefix)
+4. Если legacy hit:
+   a. storage.incrementTransmissionIdentityHit(normalized)
+   b. best-effort upsert: storage.saveTransmissionIdentity({ normalizedOem: primaryKey, ... })
+      // soft-migration — legacy строка НЕ удаляется
+   c. Вернуть результат из legacy строки
+5. Промах обоих → GPT lookup
+```
+
+### Запись в кеш
+
+Новые GPT-результаты всегда записываются под `primaryKey` (prefixed). Устаревший plain-normalized ключ больше не создаётся.
+
+### Ключевые принципы Step 5
+
+- **Без изменений DB-схемы** — колонка `normalizedOem` продолжает хранить строку; unique index не изменён.
+- **Полная обратная совместимость** — существующие legacy строки в кеше продолжают отдавать результаты через fallback lookup.
+- **Soft-migration** — реализована как best-effort upsert на legacy hit; не блокирует основной флоу при ошибке.
+- **`classifyOemInput` не изменена** — routing heuristic Step 4 работает идентично.
+- **`identifyTransmissionByOem`** (deprecated) продолжает работать — делегирует к `_identifyTransmissionByInput` с правильным `kind`.
+- **Scope** — только `transmission-identifier.ts`; `price-lookup.worker.ts` и другие файлы не затронуты.
+
+---
+
+## 11. Step 6 — Price Snapshot Cache Key Isolation (2026-02-26)
+
+### Проблема
+
+До Step 6 `price_snapshots.searchKey` строился как `buildCacheKey(oem, make, model)` → `"oem::make::model"` (lowercase). Поле `oem` не несло информации о том, что именно в нём лежит — код модели КПП (`JF011E`) или OEM-номер запчасти (`31020-3VX2D`). Это могло приводить к некорректному переиспользованию снапшотов.
+
+### Что изменилось
+
+| Файл | Изменение |
+|---|---|
+| `server/workers/price-lookup.worker.ts` | Добавлены `normalizePriceKeyValue`, `buildPriceSnapshotKey`; обновлены read/write пути в `lookupPricesByOem` |
+
+### Новые хелперы
+
+| Функция | Сигнатура | Описание |
+|---|---|---|
+| `normalizePriceKeyValue(value)` | `string → string` | Trim, lowercase, collapse spaces — зеркалит нормализацию legacy `buildCacheKey` |
+| `buildPriceSnapshotKey(kind, normalizedValue, make?, model?)` | `(kind, string, ...) → string` | Возвращает `"tc::<v>::<make>::<model>"` или `"pn::<v>::<make>::<model>"` |
+
+### Схема ключей
+
+```
+transmissionCode → searchKey = "tc::<normalized>::<make>::<model>"   // напр. "tc::jf011e::nissan::x-trail"
+oemPartNumber    → searchKey = "pn::<normalized>::<make>::<model>"   // напр. "pn::31020-3vx2d::nissan::x-trail"
+```
+
+### Порядок чтения снапшота
+
+```
+1. keyKind = transmissionCode ? "transmissionCode" : oemPartNumber ? "oemPartNumber" : null
+2. prefixedKey = keyKind ? buildPriceSnapshotKey(keyKind, normalize(value), make, model) : null
+3. legacyCacheKey = buildCacheKey(oem, make, model)  // старый формат
+4. writeKey = prefixedKey ?? legacyCacheKey
+
+5. Если prefixedKey → storage.getGlobalPriceSnapshot(prefixedKey)
+   - hit → cacheHit="prefixed", вернуть снапшот
+6. Если промах → storage.getGlobalPriceSnapshot(legacyCacheKey)
+   - hit → cacheHit="legacy", вернуть снапшот
+   - Если prefixedKey задан → soft-migrate: createPriceSnapshot({ searchKey: prefixedKey, ...поля из legacy снапшота })
+     - Non-fatal: обёрнуто в try/catch; legacy строка НЕ удаляется
+7. cacheHit="miss" → стандартный поиск + запись под writeKey
+```
+
+### Запись снапшота
+
+Оба пути записи в `lookupPricesByOem` (ai_estimate + основной) используют `searchKey: writeKey` (= prefixed, если вид известен; иначе legacy).
+
+### Ключевые принципы Step 6
+
+- **Без изменений DB-схемы** — колонка `searchKey` продолжает хранить строку; тип не изменён.
+- **Полная обратная совместимость** — legacy строки `"oem::make::model"` продолжают отдаваться через fallback lookup.
+- **Soft-migration** — best-effort upsert prefixed строки на legacy hit; не блокирует основной флоу.
+- **TTL и expiresAt не изменены** — логика истечения срока хранится в поле `expiresAt`; soft-migrate копирует его из оригинального снапшота.
+- **Queue payload не изменён** — `PriceLookupJobData` не затронут.
+- **`lookupPricesByFallback` не изменена** — использует отдельный `buildFallbackSearchKey`, не относящийся к OEM-пути.
+- **Scope** — только `price-lookup.worker.ts`; `transmission-identifier.ts` и другие файлы не затронуты.
+
+---
+
+## 12. Step 7 — Observability & Legacy-hit metrics (2026-02-26)
+
+### Проблема
+
+До Step 7 единственным способом наблюдения за пайплайном были `console.log`. Не было возможности:
+- измерить hit-rate кешей identity и price-snapshot;
+- понять, насколько часто срабатывает legacy-fallback и soft-migration;
+- видеть распределение исходов детекции (VIN vs TC vs GEARBOX_TYPE vs conflict).
+
+### Что изменилось
+
+| Файл | Изменение |
+|---|---|
+| `server/services/observability/metrics.ts` | **Новый файл.** No-op фасад `incr` / `timing` с типом `MetricTags`. Реальный бекенд подключается заменой тел функций без изменения call-sites. |
+| `server/services/inbound-message-handler.ts` | Импорт `incr`; счётчики детекции после `chooseBestCandidate`; branch-счётчики для каждой ветки роутинга |
+| `server/services/transmission-identifier.ts` | Импорт `incr`; счётчики identity cache hit/miss/soft-migration + structured debug logs |
+| `server/workers/price-lookup.worker.ts` | Импорт `incr`; счётчики price cache hit/miss/soft-migration + structured debug logs |
+
+### Metrics helper API
+
+Файл: `server/services/observability/metrics.ts`
+
+```typescript
+// All tag values MUST be low-cardinality enum-like literals.
+// Raw VINs, cache keys, OEM strings, and user-supplied values
+// are NEVER permitted as tag values — see Privacy section below.
+type MetricTags = Record<string, string | number | boolean | null | undefined>;
+
+// Increment a counter by 1.
+// name: dot-namespaced, e.g. "detector.candidates_total"
+function incr(name: string, tags?: MetricTags): void   // default: no-op
+
+// Record a duration in milliseconds.
+function timing(name: string, ms: number, tags?: MetricTags): void  // default: no-op
+```
+
+Реальный бекенд подключается заменой тел `incr` / `timing` — все call-sites остаются неизменными.
+
+### Метрики (полный список)
+
+#### Step 2 Detection (`server/services/inbound-message-handler.ts`)
+
+| Метрика | Теги | Точка эмиссии |
+|---|---|---|
+| `detector.candidates_total` | `count: number` | После `chooseBestCandidate` — всегда |
+| `detector.best` | `type` (CandidateType), `source` (`text`/`ocr`), `score_bucket` (`>=0.8`/`0.55-0.79`/`<0.55`) | После `chooseBestCandidate`, если `best` не null |
+| `detector.ocr_rejected` | — | OCR quality gate failed, нет `best` (ветка 5) |
+| `detector.incomplete_vin` | — | `best.meta.isIncompleteVin === true` (ветка 6) |
+| `detector.conflict` | `kind` (`multiple_vin`/`multiple_frame`/`unknown`) | По одному на каждый элемент `conflicts[]` (ветка 7) |
+| `detector.route_vehicle_lookup` | `idType` (`VIN`/`FRAME`) | Перед `enqueueVehicleLookup` (ветка 8) |
+| `detector.route_price_lookup` | `kind` (`transmissionCode`) | Перед `enqueuePriceLookup` (ветка 9) |
+| `detector.route_no_vin` | — | `best.type === "GEARBOX_TYPE"` (ветка 10) |
+| `detector.weak_tc_clarification` | — | TC score 0.55–0.69, clarification suggestion (ветка 11) |
+
+#### Step 5 Identity Cache (`server/services/transmission-identifier.ts`)
+
+Эмитируется внутри `_identifyTransmissionByInput()`.
+
+| Метрика | Теги | Точка эмиссии |
+|---|---|---|
+| `identity_cache.hit` | `key` (`prefixed`/`legacy`), `kind` (`transmissionCode`/`oemPartNumber`) | Prefixed key hit (шаг 3) / legacy key hit (шаг 4) |
+| `identity_cache.miss` | `kind` | Оба ключа дали промах → вызов GPT (шаг 6) |
+| `identity_cache.soft_migration` | `result` (`success`/`fail`), `kind` | Попытка upsert prefixed строки при legacy hit (шаг 5) |
+
+Рядом с каждым `incr` добавлен `console.log` с JSON `{ kind, cacheHit, keyHint }`, где `keyHint` — только `prefix + "..." + last4` форма ключа (например `"tc:...011E"`).
+
+#### Step 6 Price Snapshot Cache (`server/workers/price-lookup.worker.ts`)
+
+Эмитируется внутри `lookupPricesByOem()`.
+
+| Метрика | Теги | Точка эмиссии |
+|---|---|---|
+| `price_cache.hit` | `key` (`prefixed`/`legacy`), `kind` (`transmissionCode`/`oemPartNumber`/`unknown`) | Prefixed key hit / legacy key hit |
+| `price_cache.miss` | `kind` | Оба ключа дали промах → поиск цены |
+| `price_cache.soft_migration` | `result` (`success`/`fail`), `kind` | Попытка upsert prefixed snapshot при legacy hit |
+
+Аналогично: рядом с каждым `incr` добавлен `console.log` с JSON `{ kind, cacheHit }`.
+
+### Privacy & cardinality rules
+
+| Правило | Детали |
+|---|---|
+| VIN никогда не попадает в теги | VIN маскируется в `console.log` через `maskCandidateValue()` / `maskVin()`; в тегах метрик VIN не используется |
+| Кэш-ключи не попадают в теги | В structured logs показывается только `keyHint` (`prefix + ...lastN`), не полный ключ |
+| Имена моделей не попадают в теги | Теги содержат только enum-подобные значения: `type`, `kind`, `source`, `score_bucket`, `result`, `key` |
+| OEM-строки не попадают в теги | `kind` = `"transmissionCode"` или `"oemPartNumber"` — описание типа, не значение |
+| `MetricTags` — только low-cardinality | Не более ~10 возможных значений на тег; нарушения фиксируются code review |
+
+### Ключевые принципы Step 7
+
+- **Без изменений бизнес-логики** — только наблюдение; никаких изменений условий роутинга, очередей, DB-схемы.
+- **No-op по умолчанию** — новые зависимости от внешних систем не вносятся; production-трафик не затрагивается.
+- **Structured debug logs** — `console.log` с JSON `{ kind, cacheHit[, keyHint] }` для корреляции с application logs без внешней системы.
+- **Scope** — 3 существующих файла + 1 новый; тесты, schema, queue payload не затронуты.
+- **Итого метрик:** 15 (9 detector + 3 identity cache + 3 price cache).
+
+---
+
+## 13. Step 8 — Yandex Anchor Selection Refactor (2026-02-27)
+
+### Проблема
+
+`buildYandexQueries()` всегда использовал `oem` как главный поисковый якорь в Q1/Q2:
+```
+Q1: `${label} ${oem} купить`
+Q2: `${label} ${make} ${model} ${oem} контрактная`
+```
+Для PN-входов (e.g. `31020-3VX2D`) это плохо: маркетплейсы публикуют объявления по рыночным кодам (`JF011E`), поэтому Yandex-стадия часто не давала достаточно листингов и передавала управление GPT. GPT query builders уже использовали `resolveSearchTerm(oem, modelName)` — Yandex не использовал.
+
+### Цель
+
+При включённом feature flag `YANDEX_PREFER_MODELNAME` (default: OFF):
+- Q1 использует `modelName` как якорь, если он является валидным рыночным кодом.
+- Q2 добавляет `oem` (PN) как вторичный токен, чтобы объявления с номером запчасти всё равно находились.
+- Если modelName невалиден или flag выключен — поведение идентично pre-Step-8.
+
+### Что изменилось
+
+| Файл | Изменение |
+|---|---|
+| `shared/schema.ts` | Добавлен `"YANDEX_PREFER_MODELNAME"` в `FEATURE_FLAG_NAMES` |
+| `server/services/feature-flags.ts` | Добавлена запись `YANDEX_PREFER_MODELNAME` в `DEFAULT_FLAGS` (`enabled: false`) |
+| `server/services/price-searcher.ts` | Новые типы, хелперы, обновлены `buildYandexQueries` / `searchWithYandex` / `searchUsedTransmissionPrice` |
+| `server/workers/price-lookup.worker.ts` | Call-site `searchUsedTransmissionPrice` передаёт `opts.inputKind` |
+| `server/services/__tests__/price-searcher-yandex-anchor.test.ts` | **Новый файл.** Unit-тесты (50+ кейсов) |
+
+### Новые типы и интерфейсы (`price-searcher.ts`)
+
+```typescript
+// Вид входного идентификатора — передаётся из воркера в searcher
+export type PriceSearchInputKind = "transmissionCode" | "oemPartNumber" | "legacy";
+
+// Опциональный 7-й аргумент searchUsedTransmissionPrice
+export interface PriceSearchOpts {
+  inputKind?: PriceSearchInputKind;  // default: "legacy"
+  inputValue?: string;               // нормализованное исходное значение (TC или PN)
+}
+```
+
+### Новые helper-функции (`price-searcher.ts`)
+
+| Функция | Сигнатура | Описание |
+|---|---|---|
+| `isValidMarketModelName(modelName)` | `(string \| null \| undefined) → boolean` | Возвращает `true`, если `modelName` является валидным рыночным кодом (не каталожным, не type-label, не длиннее 12 символов, не содержит 4+ цифр подряд). Зеркалит `isValidTransmissionModel` из воркера. |
+| `selectYandexAnchor(oem, modelName, inputKind)` | `(string, string \| null \| undefined, PriceSearchInputKind) → string` | Политика выбора якоря: PN + valid modelName → `modelName`; TC/legacy + valid modelName ≠ oem → `modelName`; иначе → `oem`. |
+
+### Обновлённые сигнатуры
+
+**`buildYandexQueries`** (теперь экспортирован):
+```typescript
+export function buildYandexQueries(
+  oem: string,
+  modelName: string | null,
+  make?: string | null,
+  model?: string | null,
+  gearboxType?: string | null,
+  opts?: { inputKind?: PriceSearchInputKind; flagEnabled?: boolean }  // NEW
+): string[]
+```
+
+**`searchWithYandex`**:
+```typescript
+export async function searchWithYandex(
+  oem, modelName, make?, model?, gearboxType?,
+  opts?: { inputKind?, flagEnabled? }  // NEW
+): Promise<...>
+```
+
+**`searchUsedTransmissionPrice`**:
+```typescript
+export async function searchUsedTransmissionPrice(
+  oem, modelName, origin, make?, vehicleContext?, tenantId?,
+  opts?: PriceSearchOpts  // NEW — 7-й аргумент, опциональный
+): Promise<PriceSearchResult>
+```
+Обратная совместимость: все существующие call-sites, передающие 4–6 аргументов, работают без изменений (`opts` → `undefined` → `inputKind: "legacy"`, flag → `false`).
+
+### Логика генерации запросов
+
+#### Flag OFF (default) — поведение идентично pre-Step-8
+
+```
+Q1: `${label} ${oem} купить`
+Q2: `${label} ${make} ${model} ${oem} контрактная`   (если make+model)
+    `${label} ${make} ${oem} контрактная`             (если только make)
+Q3: `${label} ${modelName} ${make} купить`            (если modelName valid и ≠ oem)
+Q4: `${label} ${modelName} цена`                      (если modelName valid и ≠ oem)
+```
+
+#### Flag ON, PN вход + valid modelName (e.g. oem="31020-3VX2D", modelName="JF011E")
+
+```
+Q1: `${label} JF011E купить`                                          ← якорь = modelName
+Q2: `${label} NISSAN QASHQAI JF011E 31020-3VX2D контрактная`         ← PN добавлен вторичным токеном
+Q3: `${label} JF011E NISSAN купить`                                   (если не совпадает с Q1)
+Q4: `${label} JF011E цена`
+```
+
+#### Правило дедупликации Q3/Q4
+
+Q3 и Q4 исключаются из вывода, если совпадают с уже добавленными Q1/Q2 (применяется строгое сравнение строк). Максимум 4 запроса — slice(0, 4).
+
+### Обновление call-site в воркере
+
+```typescript
+// server/workers/price-lookup.worker.ts  — lookupPricesByOem()
+const searchInputKind =
+  transmissionCode ? "transmissionCode" :
+  oemPartNumber    ? "oemPartNumber"    : "legacy";
+
+await searchUsedTransmissionPrice(oem, identification.modelName, ..., tenantId, {
+  inputKind: searchInputKind,
+  inputValue: transmissionCode ?? oemPartNumber ?? oem,
+});
+```
+
+### Новые метрики (`price-searcher.ts`)
+
+| Метрика | Теги | Точка эмиссии |
+|---|---|---|
+| `price_search.anchor_selected` | `anchor` (`oem`/`modelName`), `kind` (`transmissionCode`/`oemPartNumber`/`legacy`), `stage` (`yandex`) | Перед вызовом `searchWithYandex` в `searchUsedTransmissionPrice` |
+| `price_search.yandex.query_count` | `kind` | После вызова `searchWithYandex` |
+
+**Итого метрик Step 8:** 2 (+ 15 из Step 7 = 17 всего).
+
+### Feature flag: `YANDEX_PREFER_MODELNAME`
+
+| Параметр | Значение |
+|---|---|
+| Имя | `YANDEX_PREFER_MODELNAME` |
+| Default | `false` (OFF) |
+| Scope | Per-tenant через `featureFlagService.isEnabled(name, tenantId)` |
+| Где читается | `searchUsedTransmissionPrice()` — один раз за вызов, до Yandex-стадии |
+| Rollout | Включить на одном тенанте, убедиться в росте Yandex hit-rate, затем глобально |
+
+### Валидационные правила `isValidMarketModelName`
+
+| Правило | Пример отклонения | Пример принятия |
+|---|---|---|
+| `!modelName` → false | `null`, `""` | — |
+| В `GEARBOX_TYPE_STRINGS` → false | `"AT"`, `"CVT"`, `"АКПП"` | — |
+| `length > 12` → false | `"ABCDEFGHIJKLM"` | — |
+| `/\d{4,}/` → false (каталожный код) | `"2500A230"`, `"31020-3VX2D"` | — |
+| Не совпадает `/^[A-Z0-9][A-Z0-9\-()]{1,11}$/` → false | `"кпп"` | — |
+| Проходит все → true | — | `"JF011E"`, `"W5MBB"`, `"AW55-51SN"`, `"FAU(5A)"` |
+
+### Тесты
+
+**Файл:** `server/services/__tests__/price-searcher-yandex-anchor.test.ts`
+
+| Группа | Кейсов | Описание |
+|---|---|---|
+| `isValidMarketModelName` | 16 | Валидные коды, каталожные коды, type-labels, edge cases |
+| `selectYandexAnchor — PN` | 4 | PN + valid, PN + null, PN + catalog, PN + type |
+| `selectYandexAnchor — TC` | 3 | TC + different valid, TC + same, TC + invalid |
+| `selectYandexAnchor — legacy` | 2 | legacy + different valid, legacy + same |
+| `buildYandexQueries — flag OFF` | 7 | Точный snapshot pre-Step-8 поведения |
+| `buildYandexQueries — flag ON, PN` | 5 | Q1 якорь, PN в Q2, PN присутствует, no dup, max 4 |
+| `buildYandexQueries — flag ON, TC` | 3 | oem=modelName, different valid, invalid |
+| `buildYandexQueries — flag ON, invalid modelName` | 3 | null, catalog code, type label |
+| `buildYandexQueries — no duplicates` | 5 | Параметризованный инвариант дедупликации |
+
+**Запуск:**
+```bash
+npx vitest run server/services/__tests__/price-searcher-yandex-anchor.test.ts
+```
+
+### Ключевые принципы Step 8
+
+- **Схемы кэш-ключей не изменены** — `tc::<v>::<make>::<model>` и `pn::<v>::<make>::<model>` для price snapshot; `tc:<V>` и `pn:<V>` для identity cache — без изменений.
+- **TC/PN семантика не смешивается** — `oem` (PN) появляется только как дополнительный токен в Q2, никогда как замена TC.
+- **Полная обратная совместимость** — `opts` опционален везде; flag по умолчанию OFF → вывод идентичен pre-Step-8.
+- **DB-схема не изменена** — нет новых колонок, нет новых миграций.
+- **Архитектура не упрощена** — все слои (Yandex → GPT fallback → escalation → ai_estimate) сохранены.
+- **Feature-flag gated** — новое поведение активируется явно per-tenant через `YANDEX_PREFER_MODELNAME`.
+- **Scope** — 4 файла изменены + 1 новый тестовый файл.

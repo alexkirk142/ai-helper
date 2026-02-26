@@ -3,6 +3,26 @@ import type { VehicleContext } from "./transmission-identifier";
 import { searchYandex, DOMAIN_PRIORITY_SCORES } from "./price-sources/yandex-source";
 import { fetchPageViaPlaywright } from "./playwright-fetcher";
 import { featureFlagService } from "./feature-flags";
+import { incr } from "./observability/metrics";
+
+// ─── Input kind & search opts ─────────────────────────────────────────────────
+
+/**
+ * Distinguishes how the caller supplied the transmission identifier so that
+ * Yandex query builders can choose the most effective search anchor.
+ *
+ *   transmissionCode — market model code (e.g. JF011E, 6HP19)
+ *   oemPartNumber    — OEM catalog part number (e.g. 31020-3VX2D)
+ *   legacy           — caller did not specify; treat as pre-Step-7 behavior
+ */
+export type PriceSearchInputKind = "transmissionCode" | "oemPartNumber" | "legacy";
+
+export interface PriceSearchOpts {
+  /** What kind of identifier the caller passed in `oem`. Default: "legacy". */
+  inputKind?: PriceSearchInputKind;
+  /** The normalized original value (TC or PN) before any substitution. */
+  inputValue?: string;
+}
 
 export interface PriceSearchListing {
   title: string;
@@ -26,9 +46,112 @@ export interface PriceSearchResult {
   listings: PriceSearchListing[];
   searchQuery: string;
   filteredOutCount: number;
+  /** Confidence score (0–1) computed from final filtered listings. Optional for backward compat. */
+  confidenceScore?: number;
+  /** Human-readable confidence tier. Optional for backward compat. */
+  confidenceLevel?: "low" | "medium" | "high";
+  /** Raw signals used to compute confidenceScore. Optional for backward compat. */
+  confidenceSignals?: ConfidenceSignals;
+}
+
+// ─── Price confidence scoring ─────────────────────────────────────────────────
+
+/** Low-cardinality signals used to compute a price confidence score. */
+export interface ConfidenceSignals {
+  sampleSize: number;
+  uniqueDomains: number;
+  spreadRatio: number;
+  ruCount: number;
+  intlCount: number;
+}
+
+/** Result of computePriceConfidence(). */
+export interface PriceConfidenceResult {
+  confidenceScore: number;
+  confidenceLevel: "low" | "medium" | "high";
+  confidenceSignals: ConfidenceSignals;
+}
+
+function computeSpreadRatio(listings: ParsedListing[]): number {
+  if (listings.length < 2) return 1;
+  const prices = listings.map((l) => l.price);
+  const minP = Math.min(...prices);
+  const maxP = Math.max(...prices);
+  if (minP === 0) return 1;
+  return maxP / minP;
+}
+
+/**
+ * Pure, deterministic confidence scorer.
+ *
+ * Operates on the FINAL set of listings — i.e. after intl mixing,
+ * small-sample guard, and removeOutliers have all been applied.
+ *
+ * No randomness. No side effects. Exported for unit testing.
+ */
+export function computePriceConfidence(
+  listings: ParsedListing[],
+  source: "yandex" | "openai_web_search" | "ai_estimate" | "not_found"
+): PriceConfidenceResult {
+  const sampleSize = listings.length;
+  const uniqueDomains = new Set(listings.map((l) => l.site)).size;
+  const spreadRatio = computeSpreadRatio(listings);
+  const ruCount = listings.filter((l) => l.market !== "intl").length;
+  const intlCount = listings.filter((l) => l.market === "intl").length;
+
+  const signals: ConfidenceSignals = { sampleSize, uniqueDomains, spreadRatio, ruCount, intlCount };
+
+  // not_found → always zero confidence
+  if (source === "not_found") {
+    return { confidenceScore: 0, confidenceLevel: "low", confidenceSignals: signals };
+  }
+
+  let score = 0;
+
+  // Sample size
+  if (sampleSize >= 5) score += 0.35;
+  else if (sampleSize >= 3) score += 0.25;
+  else if (sampleSize === 2) score += 0.15;
+
+  // Domain diversity
+  if (uniqueDomains >= 3) score += 0.25;
+  else if (uniqueDomains === 2) score += 0.18;
+  else if (uniqueDomains === 1) score += 0.1;
+
+  // Spread stability
+  if (spreadRatio <= 1.8) score += 0.25;
+  else if (spreadRatio <= 2.5) score += 0.18;
+  else score += 0.05;
+
+  // Market quality
+  if (ruCount > 0 && intlCount === 0) score += 0.1;
+  else if (ruCount > 0 && intlCount > 0) score += 0.05;
+  // intl-only: +0
+
+  // Source adjustment
+  if (source === "ai_estimate") score *= 0.6;
+
+  // Clamp to [0, 1]
+  score = Math.min(1, Math.max(0, score));
+
+  const confidenceLevel: "low" | "medium" | "high" =
+    score >= 0.7 ? "high" : score >= 0.4 ? "medium" : "low";
+
+  return {
+    confidenceScore: Math.round(score * 1e6) / 1e6,
+    confidenceLevel,
+    confidenceSignals: signals,
+  };
 }
 
 type Origin = "japan" | "europe" | "korea" | "usa" | "unknown";
+
+/**
+ * Multiplier applied to intl listing prices when they are the sole source
+ * (INTL_PRICE_DISCOUNT_ENABLED).  Intentionally a named constant so it can be
+ * changed in one place without hunting call-sites.
+ */
+const INTL_DISCOUNT_FACTOR = 0.75;
 
 // Keywords that indicate NEW / rebuilt units — must be excluded
 const EXCLUDE_KEYWORDS = [
@@ -101,6 +224,66 @@ function resolveSearchTerm(oem: string, modelName: string | null): string {
   if (!modelName) return oem;
   if (/\d{4,}/.test(modelName)) return oem; // looks like an OEM/catalog number
   return modelName;
+}
+
+// ─── Anchor selection helpers ─────────────────────────────────────────────────
+
+/**
+ * Generic gearbox type strings that should NEVER be used as a market model
+ * anchor — they are type labels, not model codes.
+ */
+const GEARBOX_TYPE_STRINGS_SEARCHER = new Set([
+  "CVT", "AT", "MT", "DCT", "AMT",
+  "АКПП", "МКПП", "ВАРИАТОР", "АВТОМАТ",
+  "AUTO", "MANUAL", "AUTOMATIC",
+]);
+
+/**
+ * Returns true when `modelName` looks like a real market model code
+ * (e.g. JF011E, W5MBB, AW55-51SN) rather than an internal OEM catalog number
+ * (e.g. 2500A230, 31020-3VX2D) or a generic type label (AT, CVT …).
+ *
+ * Rules (mirrored from isValidTransmissionModel in price-lookup.worker):
+ *   - non-empty
+ *   - not a gearbox type string
+ *   - length ≤ 12 characters
+ *   - must NOT contain 4+ consecutive digits (catalog code guard)
+ *   - must match /^[A-Z0-9][A-Z0-9\-()]{1,11}$/
+ *
+ * Exported so unit tests can cover it independently.
+ */
+export function isValidMarketModelName(modelName: string | null | undefined): boolean {
+  if (!modelName) return false;
+  if (GEARBOX_TYPE_STRINGS_SEARCHER.has(modelName.toUpperCase())) return false;
+  if (modelName.length > 12) return false;
+  if (/\d{4,}/.test(modelName)) return false;
+  return /^[A-Z0-9][A-Z0-9\-()]{1,11}$/.test(modelName);
+}
+
+/**
+ * Selects the primary search anchor for Yandex queries when the
+ * YANDEX_PREFER_MODELNAME feature flag is enabled.
+ *
+ * Policy:
+ *   - PN input + valid modelName               → modelName (marketplace codes win)
+ *   - TC/legacy input + valid modelName ≠ oem  → modelName (GPT-resolved code)
+ *   - anything else                            → oem (safe fallback)
+ *
+ * When flag is OFF this function is never called and oem is used directly.
+ *
+ * Exported so unit tests can cover it independently.
+ */
+export function selectYandexAnchor(
+  oem: string,
+  modelName: string | null | undefined,
+  inputKind: PriceSearchInputKind
+): string {
+  if (!isValidMarketModelName(modelName)) return oem;
+  // PN input: always prefer the identified market code when available
+  if (inputKind === "oemPartNumber") return modelName!;
+  // TC/legacy input: only prefer when modelName actually differs (avoids no-op)
+  if (modelName !== oem) return modelName!;
+  return oem;
 }
 
 function buildPrimaryQuery(
@@ -187,18 +370,66 @@ function extractSiteName(url: string): string {
   }
 }
 
-interface ParsedListing {
+/**
+ * Internal listing type.  Exported so the pure `applyIntlMixing` helper and
+ * its unit tests can reference it directly without duplication.
+ */
+export interface ParsedListing {
   title: string;
   price: number;
   mileage: number | null;
   url: string;
   site: string;
   isUsed: boolean;
+  /** Tagging field: "intl" for listings sourced from runInternationalSearch().
+   *  Absent / undefined means the listing came from a Russian-market search. */
+  market?: "ru" | "intl";
 }
 
-function removeOutliers(prices: number[]): number[] {
-  if (prices.length < 4) return prices;
+/**
+ * Removes statistical outliers from a price array.
+ *
+ * For n >= 4: applies standard IQR filter (unchanged — do not modify).
+ * For n < 4 (small-sample path):
+ *   - When `smallSampleGuardEnabled` is false (default): returns prices unchanged
+ *     (backward-compatible — identical to pre-guard behavior).
+ *   - When `smallSampleGuardEnabled` is true AND 2 <= n < 4:
+ *     Applies a symmetric median guard — removes any price that is more than
+ *     3× the median OR less than 1/3 of the median.
+ *     If the filtered result contains at least 2 prices, returns filtered array
+ *     ("trimmed" or "skipped"). Otherwise falls back to the original array to
+ *     prevent returning a single-item set ("fallback").
+ *   Emits `price_search.small_sample_guard_applied` metric with result tag.
+ *
+ * Exported for unit testing.
+ */
+export function removeOutliers(prices: number[], smallSampleGuardEnabled = false): number[] {
+  if (prices.length < 4) {
+    // Small-sample guard — only runs when flag is enabled and n is 2 or 3.
+    if (smallSampleGuardEnabled && prices.length >= 2) {
+      const sorted = [...prices].sort((a, b) => a - b);
+      // Use index-based median (floor) — consistent with IQR path's percentile logic.
+      const median = sorted[Math.floor(sorted.length / 2)];
 
+      const filtered = prices.filter(p => p <= median * 3 && p >= median / 3);
+
+      if (filtered.length >= 2) {
+        const result: "trimmed" | "skipped" =
+          filtered.length < prices.length ? "trimmed" : "skipped";
+        incr("price_search.small_sample_guard_applied", { result });
+        return filtered;
+      }
+
+      // Fail-safe: guard would remove too many — return original array unchanged.
+      incr("price_search.small_sample_guard_applied", { result: "fallback" });
+      return prices;
+    }
+
+    // Flag disabled or n < 2 — preserve pre-guard behavior exactly.
+    return prices;
+  }
+
+  // ── IQR filter for n >= 4 (DO NOT MODIFY) ────────────────────────────────
   const sorted = [...prices].sort((a, b) => a - b);
   const q1 = sorted[Math.floor(sorted.length * 0.25)];
   const q3 = sorted[Math.floor(sorted.length * 0.75)];
@@ -228,6 +459,75 @@ function validatePrices(listings: ParsedListing[]): ParsedListing[] {
     }
     return true;
   });
+}
+
+/** Result returned by applyIntlMixing — carries side-effect metadata for metrics. */
+export interface IntlMixingResult {
+  listings: ParsedListing[];
+  /** Number of intl listings removed by the 2.5× cap (Case A). Zero when cap not applied. */
+  capRemovedCount: number;
+  /** True when the 0.75× discount was applied to intl prices (Case B). */
+  discountApplied: boolean;
+}
+
+/**
+ * Applies international price mixing control to a combined set of RU + intl
+ * listings.  Pure function — no side effects (metrics are emitted by the caller).
+ *
+ * Case A — RU results exist (ruListings.length >= 2) AND intlCapEnabled:
+ *   Removes intl listings where price > ruMedian * 2.5.
+ *
+ * Case B — No RU results (ruListings.length < 2) AND intlDiscountEnabled:
+ *   Multiplies all intl prices by INTL_DISCOUNT_FACTOR (0.75).
+ *
+ * When both flags are false the input listings are returned unchanged, making
+ * the behavior identical to pre-feature baseline.
+ *
+ * Exported for unit testing.
+ */
+export function applyIntlMixing(
+  listings: ParsedListing[],
+  intlCapEnabled: boolean,
+  intlDiscountEnabled: boolean
+): IntlMixingResult {
+  const ruListings = listings.filter(l => l.market !== "intl");
+  const intlListings = listings.filter(l => l.market === "intl");
+
+  // No intl present → nothing to do
+  if (intlListings.length === 0) {
+    return { listings, capRemovedCount: 0, discountApplied: false };
+  }
+
+  // Case A: RU results exist — cap intl prices above 2.5× RU median
+  if (ruListings.length >= 2 && intlCapEnabled) {
+    const ruPrices = ruListings.map(l => l.price).sort((a, b) => a - b);
+    // Index-based median consistent with removeOutliers IQR path
+    const ruMedian = ruPrices[Math.floor(ruPrices.length / 2)];
+    const cap = ruMedian * 2.5;
+    const cappedIntl = intlListings.filter(l => l.price <= cap);
+    const capRemovedCount = intlListings.length - cappedIntl.length;
+    return {
+      listings: [...ruListings, ...cappedIntl],
+      capRemovedCount,
+      discountApplied: false,
+    };
+  }
+
+  // Case B: Intl-only — apply discount factor
+  if (ruListings.length < 2 && intlDiscountEnabled) {
+    const discounted = intlListings.map(l => ({
+      ...l,
+      price: Math.round(l.price * INTL_DISCOUNT_FACTOR),
+    }));
+    return {
+      listings: [...ruListings, ...discounted],
+      capRemovedCount: 0,
+      discountApplied: true,
+    };
+  }
+
+  // Flags disabled or conditions not met → identical to baseline
+  return { listings, capRemovedCount: 0, discountApplied: false };
 }
 
 function parseListingsFromResponse(content: string): ParsedListing[] {
@@ -289,30 +589,75 @@ function resolveGearboxLabel(gearboxType?: string | null): string {
   return "КПП";
 }
 
-function buildYandexQueries(
+interface YandexQueryOpts {
+  /** Input kind forwarded from the search caller. */
+  inputKind?: PriceSearchInputKind;
+  /**
+   * Whether the YANDEX_PREFER_MODELNAME flag is active for this tenant.
+   * When false (default) the function produces identical output to pre-Step-7.
+   */
+  flagEnabled?: boolean;
+  /**
+   * Whether the OUTLIER_GUARD_SMALL_SAMPLE flag is active for this tenant.
+   * When false (default) small-sample guard is not applied, preserving
+   * pre-guard behavior for the Yandex path.
+   */
+  smallSampleGuardEnabled?: boolean;
+}
+
+/**
+ * Builds the list of Yandex search queries for the price-search stage.
+ *
+ * Flag OFF (default): behavior is IDENTICAL to pre-Step-7 — oem is always Q1 anchor.
+ * Flag ON: anchor is determined by selectYandexAnchor() based on inputKind and
+ *   modelName validity.  The PN is kept as a secondary token when it is not the anchor.
+ */
+export function buildYandexQueries(
   oem: string,
   modelName: string | null,
   make?: string | null,
   model?: string | null,
-  gearboxType?: string | null
+  gearboxType?: string | null,
+  opts?: YandexQueryOpts
 ): string[] {
   const label = resolveGearboxLabel(gearboxType);
+  const flagEnabled = opts?.flagEnabled ?? false;
+  const inputKind: PriceSearchInputKind = opts?.inputKind ?? "legacy";
+
+  // ── Anchor selection ───────────────────────────────────────────────────────
+  // When flag is OFF, anchorTerm === oem unconditionally (no behavior change).
+  const anchorTerm: string = flagEnabled
+    ? selectYandexAnchor(oem, modelName, inputKind)
+    : oem;
+
+  // Is the selected anchor a model name rather than the raw OEM/PN?
+  const anchorIsModelName = anchorTerm !== oem;
+
+  // Secondary PN token: included in Q2 when anchor is modelName and oem is a PN
+  // so that listings containing the part number are still found.
+  const pnSuffix = anchorIsModelName ? ` ${oem}` : "";
+
   const queries: string[] = [];
 
   // Query 1: always — most reliable
-  queries.push(`${label} ${oem} купить`);
+  queries.push(`${label} ${anchorTerm} купить`);
 
   // Query 2: with make+model context
   if (make && model) {
-    queries.push(`${label} ${make} ${model} ${oem} контрактная`);
+    queries.push(`${label} ${make} ${model} ${anchorTerm}${pnSuffix} контрактная`);
   } else if (make) {
-    queries.push(`${label} ${make} ${oem} контрактная`);
+    queries.push(`${label} ${make} ${anchorTerm}${pnSuffix} контрактная`);
   }
 
-  // Queries 3 & 4: with modelName if it differs from OEM and has no 4+ digits
+  // Queries 3 & 4: with modelName if it differs from OEM and has no 4+ digits.
+  // Mirrored from pre-Step-7 logic; deduplicated against Q1 when anchor already
+  // uses modelName so we don't emit two identical queries.
   if (modelName && modelName !== oem && !/\d{4,}/.test(modelName)) {
-    queries.push(`${label} ${modelName} ${make} купить`);
-    queries.push(`${label} ${modelName} цена`);
+    const q3 = `${label} ${modelName} ${make} купить`;
+    const q4 = `${label} ${modelName} цена`;
+    // Avoid exact duplicates with Q1 (happens when anchorTerm === modelName and make is falsy)
+    if (q3 !== queries[0]) queries.push(q3);
+    if (q4 !== queries[0] && q4 !== queries[1]) queries.push(q4);
   }
 
   return queries.slice(0, 4);
@@ -401,9 +746,10 @@ export async function searchWithYandex(
   modelName: string | null,
   make?: string | null,
   model?: string | null,
-  gearboxType?: string | null
+  gearboxType?: string | null,
+  opts?: YandexQueryOpts
 ): Promise<{ listings: ParsedListing[]; urlsChecked: string[] }> {
-  const queries = buildYandexQueries(oem, modelName, make, model, gearboxType);
+  const queries = buildYandexQueries(oem, modelName, make, model, gearboxType, opts);
   console.log(`[PriceSearcher/Yandex] Queries: ${JSON.stringify(queries)}`);
 
   // Run all queries in parallel
@@ -469,8 +815,11 @@ export async function searchWithYandex(
     return true;
   });
 
-  // Remove outliers
-  const validPrices = removeOutliers(dedupedListings.map((l) => l.price));
+  // Remove outliers — small-sample guard forwarded from caller opts when flag is ON.
+  const validPrices = removeOutliers(
+    dedupedListings.map((l) => l.price),
+    opts?.smallSampleGuardEnabled ?? false
+  );
   const validListings = dedupedListings.filter((l) => validPrices.includes(l.price));
 
   console.log(
@@ -522,7 +871,8 @@ export async function searchUsedTransmissionPrice(
   origin: Origin,
   make?: string | null,
   vehicleContext?: VehicleContext | null,
-  tenantId?: string | null
+  tenantId?: string | null,
+  opts?: PriceSearchOpts
 ): Promise<PriceSearchResult> {
   const fxRates = await fetchLiveFxRates();
   console.log("[PriceSearcher] FX rates:", fxRates);
@@ -613,7 +963,9 @@ export async function searchUsedTransmissionPrice(
 
       const content: string = response.output_text ?? "";
       console.log('[PriceSearcher] Raw GPT response (international):', content.substring(0, 2000));
-      const parsed = validatePrices(parseListingsFromResponse(content));
+      const parsed = validatePrices(
+        parseListingsFromResponse(content).map(l => ({ ...l, market: "intl" as const }))
+      );
       console.log('[PriceSearcher] International parsed listings:', parsed.length);
       return parsed;
     } catch (err: any) {
@@ -622,14 +974,61 @@ export async function searchUsedTransmissionPrice(
     }
   };
 
+  // ── Feature flags ─────────────────────────────────────────────────────────
+  const inputKind: PriceSearchInputKind = opts?.inputKind ?? "legacy";
+  const yandexPreferModelName: boolean = tenantId
+    ? await featureFlagService.isEnabled("YANDEX_PREFER_MODELNAME", tenantId)
+    : false;
+
+  // OUTLIER_GUARD_SMALL_SAMPLE: when ON, symmetric median guard is applied to
+  // price arrays of size 2–3 before min/max/avg computation (Yandex + GPT paths).
+  // Default false — no change to existing behavior when flag is absent/disabled.
+  const outlierGuardSmallSample: boolean = tenantId
+    ? await featureFlagService.isEnabled("OUTLIER_GUARD_SMALL_SAMPLE", tenantId)
+    : false;
+
+  // INTL_PRICE_CAP_ENABLED: when ON, intl listings priced above 2.5× RU median
+  // are removed when Russian results exist (prevents inflating maxPrice).
+  // Default false — identical to pre-flag behavior when absent/disabled.
+  const intlCapEnabled: boolean = tenantId
+    ? await featureFlagService.isEnabled("INTL_PRICE_CAP_ENABLED", tenantId)
+    : false;
+
+  // INTL_PRICE_DISCOUNT_ENABLED: when ON, intl listing prices are multiplied by
+  // INTL_DISCOUNT_FACTOR (0.75) when used as the sole price source.
+  // Default false — identical to pre-flag behavior when absent/disabled.
+  const intlDiscountEnabled: boolean = tenantId
+    ? await featureFlagService.isEnabled("INTL_PRICE_DISCOUNT_ENABLED", tenantId)
+    : false;
+
+  // Resolve which anchor will actually be used (for metrics only — query
+  // construction uses the same logic internally via selectYandexAnchor).
+  const effectiveAnchor = yandexPreferModelName
+    ? selectYandexAnchor(oem, modelName, inputKind)
+    : oem;
+  const anchorKind: "modelName" | "oem" = effectiveAnchor !== oem ? "modelName" : "oem";
+
+  incr("price_search.anchor_selected", {
+    anchor: anchorKind,
+    kind: inputKind,
+    stage: "yandex",
+  });
+
   // STAGE 1: Yandex + Playwright
   const yandexResult = await searchWithYandex(
     oem,
     modelName,
     vehicleContext?.make ?? make,
     vehicleContext?.model ?? null,
-    vehicleContext?.gearboxType ?? null
+    vehicleContext?.gearboxType ?? null,
+    {
+      inputKind,
+      flagEnabled: yandexPreferModelName,
+      smallSampleGuardEnabled: outlierGuardSmallSample,
+    }
   );
+
+  incr("price_search.yandex.query_count", { kind: inputKind });
 
   const uniqueDomains = new Set(yandexResult.listings.map((l) => l.site)).size;
   const hasEnoughYandex =
@@ -644,6 +1043,9 @@ export async function searchUsedTransmissionPrice(
       `[PriceSearcher] Yandex success: ${yandexResult.listings.length} listings, ` +
       `range ${minPrice}–${maxPrice} RUB`
     );
+    const { confidenceScore, confidenceLevel, confidenceSignals } =
+      computePriceConfidence(yandexResult.listings, "yandex");
+    incr("price_search.confidence_level", { level: confidenceLevel });
     return {
       source: "yandex",
       minPrice,
@@ -657,6 +1059,9 @@ export async function searchUsedTransmissionPrice(
       filteredOutCount: 0,
       listings: yandexResult.listings,
       urlsChecked: yandexResult.urlsChecked,
+      confidenceScore,
+      confidenceLevel,
+      confidenceSignals,
     };
   }
 
@@ -679,16 +1084,22 @@ export async function searchUsedTransmissionPrice(
   }
 
   // Primary Russian search (GPT web_search fallback — will be replaced by escalation in Phase 3)
-  let rawListings = await runSearch(primaryQuery);
+  const ruRawListings = await runSearch(primaryQuery);
   let usedQuery = primaryQuery;
 
-  // International fallback when primary Russian search returns nothing
-  if (rawListings.length === 0) {
+  // International fallback when primary Russian search returns nothing.
+  // Tracked separately so the mixing logic can distinguish market origin.
+  let intlRawListings: ParsedListing[] = [];
+  if (ruRawListings.length === 0) {
     console.log('[PriceSearcher] No Russian results, trying international search...');
-    const intlResults = await runInternationalSearch();
-    console.log(`[PriceSearcher] International search yielded ${intlResults.length} listings`);
-    rawListings = intlResults;
+    intlRawListings = await runInternationalSearch();
+    console.log(`[PriceSearcher] International search yielded ${intlRawListings.length} listings`);
   }
+
+  // Combine.  With both flags OFF, rawListings is semantically identical to the
+  // pre-feature value (either all-RU or all-intl, never both simultaneously in
+  // the current flow).
+  let rawListings: ParsedListing[] = [...ruRawListings, ...intlRawListings];
 
   // Filter: exclude new/rebuilt and defective/damaged units
   let filteredOut = 0;
@@ -705,6 +1116,36 @@ export async function searchUsedTransmissionPrice(
     return true;
   });
   console.log(`[PriceSearcher] After keyword filter (primary): ${listings.length} kept, ${filteredOut} excluded`);
+
+  // ── Intl mixing logic ────────────────────────────────────────────────────
+  // Runs only when intl listings are present in the combined set.
+  // Both flags default to false → applyIntlMixing returns listings unchanged,
+  // preserving full backward compatibility.
+  {
+    const ruCount = listings.filter(l => l.market !== "intl").length;
+    const intlCount = listings.filter(l => l.market === "intl").length;
+
+    incr("price_search.intl_present", { ruCount, intlCount });
+
+    if (intlCount > 0) {
+      const mixResult = applyIntlMixing(listings, intlCapEnabled, intlDiscountEnabled);
+      listings = mixResult.listings;
+
+      if (mixResult.capRemovedCount > 0) {
+        incr("price_search.intl_cap_applied", { removed: mixResult.capRemovedCount });
+        console.log(
+          `[PriceSearcher] IntlCap: removed ${mixResult.capRemovedCount} intl listing(s) above 2.5× RU median`
+        );
+      }
+      if (mixResult.discountApplied) {
+        incr("price_search.intl_discount_applied");
+        console.log(
+          `[PriceSearcher] IntlDiscount: applied ${INTL_DISCOUNT_FACTOR}× factor to ${intlCount} intl listing(s)`
+        );
+      }
+    }
+  }
+  // ── End intl mixing logic ────────────────────────────────────────────────
 
   // Russian fallback search if still < 2 valid listings
   if (listings.length < 2) {
@@ -732,8 +1173,8 @@ export async function searchUsedTransmissionPrice(
     return { ...notFoundResult, searchQuery: usedQuery, filteredOutCount: filteredOut };
   }
 
-  // Remove outliers > 3x median
-  const validPrices = removeOutliers(listings.map((l) => l.price));
+  // Remove outliers — small-sample guard active when flag is ON.
+  const validPrices = removeOutliers(listings.map((l) => l.price), outlierGuardSmallSample);
   const validListings = listings.filter((l) => validPrices.includes(l.price));
   console.log(`[PriceSearcher] After outlier removal: ${validListings.length} kept (before: ${listings.length})`);
 
@@ -754,6 +1195,10 @@ export async function searchUsedTransmissionPrice(
       `${minPrice}–${maxPrice} RUB, avg ${avgPrice} RUB`
   );
 
+  const { confidenceScore, confidenceLevel, confidenceSignals } =
+    computePriceConfidence(validListings, "openai_web_search");
+  incr("price_search.confidence_level", { level: confidenceLevel });
+
   return {
     minPrice,
     maxPrice,
@@ -766,5 +1211,8 @@ export async function searchUsedTransmissionPrice(
     listings: validListings,
     searchQuery: usedQuery,
     filteredOutCount: filteredOut,
+    confidenceScore,
+    confidenceLevel,
+    confidenceSignals,
   };
 }

@@ -1,6 +1,40 @@
+/**
+ * transmission-identifier.ts
+ *
+ * Terminology used throughout this file and the broader pipeline:
+ *
+ *   transmissionCode — the gearbox market/model code, e.g. JF011E, 6HP19, A245E.
+ *     This is the value that appears on Russian контрактные КПП marketplace listings
+ *     and is used as the primary search term when pricing a gearbox.
+ *
+ *   oemPartNumber — an OEM part number issued by the vehicle manufacturer,
+ *     e.g. 31020-3VX2D.  Part numbers differ from model codes: they identify a
+ *     specific assembly SKU rather than the transmission family.
+ *
+ * Public API (Step 4):
+ *   identifyTransmissionByTransmissionCode — resolves a gearbox model code (JF011E, 6HP19).
+ *   identifyTransmissionByOemPartNumber    — cross-references an OEM part number (31020-3VX2D).
+ *   identifyTransmissionByOem             — @deprecated; routes to one of the above via heuristic.
+ *
+ * Both new functions share the same internal GPT + cache logic (_identifyTransmissionByInput).
+ *
+ * Cache key scheme (Step 5):
+ *   transmissionCode inputs → normalizedOem = "tc:<NORMALIZED>"   e.g. "tc:JF011E"
+ *   oemPartNumber inputs    → normalizedOem = "pn:<NORMALIZED>"   e.g. "pn:31020-3VX2D"
+ *
+ *   Backward compatibility: on cache read, the prefixed key is tried first; if not found,
+ *   the legacy unprefixed key (plain NORMALIZED) is attempted.  A legacy hit triggers a
+ *   best-effort soft-migration: the prefixed key is upserted with the same payload so that
+ *   future lookups land on the correct prefixed entry.  Legacy rows are never deleted.
+ *   New GPT results are always written under the prefixed key only.
+ *
+ * No DB schema changes — normalizedOem column continues to hold the string value.
+ */
+
 import { openai } from "./decision-engine";
 import { sanitizeForLog } from "../utils/sanitizer";
 import { storage } from "../storage";
+import { incr } from "./observability/metrics";
 
 export interface VehicleContext {
   make?: string | null;
@@ -97,30 +131,93 @@ const FALLBACK_RESULT: TransmissionIdentification = {
   notes: "Could not identify transmission from OEM code",
 };
 
+// ─── Routing heuristic ────────────────────────────────────────────────────────
+
 /**
- * Identifies a transmission model from an OEM/part number using GPT-4.1 + web_search.
- * Searches the web to verify the exact market model name used in Russian/Japanese listings.
- * Optionally accepts vehicle context to improve identification accuracy.
- *
- * Returns all nulls with confidence: 'low' on parse failure.
+ * Pattern that distinguishes an OEM part number (e.g. 31020-3VX2D, 310203VX2D-1)
+ * from a transmission model code (e.g. JF011E, 6HP19).
+ * A part number always contains a hyphen directly adjacent to a digit.
  */
-export async function identifyTransmissionByOem(
-  oem: string,
-  context?: VehicleContext
+const OEM_PART_NUMBER_RE = /\d-|-\d/;
+
+/** Semantic kind of a transmission identity input. */
+export type TransmissionInputKind = "transmissionCode" | "oemPartNumber";
+
+// Internal alias kept for function-signature brevity.
+type InputKind = TransmissionInputKind;
+
+/**
+ * Classify a raw OEM string into its semantic kind.
+ * Exported so callers and tests can use the same heuristic without re-implementing it.
+ */
+export function classifyOemInput(oem: string): InputKind {
+  return OEM_PART_NUMBER_RE.test(oem) ? "oemPartNumber" : "transmissionCode";
+}
+
+// ─── Cache key helpers (Step 5) ───────────────────────────────────────────────
+
+/**
+ * Normalise a raw identity input value to a canonical string suitable for use
+ * as part of a cache key.
+ * Rules: trim whitespace, uppercase, collapse/remove internal spaces.
+ * Dashes are preserved — they are significant in OEM part numbers (31020-3VX2D).
+ */
+export function normalizeIdentityInput(value: string): string {
+  return value.trim().toUpperCase().replace(/\s+/g, "");
+}
+
+/**
+ * Build the prefixed cache key for a given input kind and its normalised value.
+ *   transmissionCode → "tc:<normalized>"   e.g. "tc:JF011E"
+ *   oemPartNumber    → "pn:<normalized>"   e.g. "pn:31020-3VX2D"
+ */
+export function buildIdentityCacheKey(kind: TransmissionInputKind, normalized: string): string {
+  return kind === "transmissionCode" ? `tc:${normalized}` : `pn:${normalized}`;
+}
+
+// ─── Shared internal implementation ──────────────────────────────────────────
+
+/**
+ * Core identification logic shared by all public entry points.
+ * Uses GPT-4.1 + web_search and writes/reads the transmission_identity_cache table.
+ *
+ * Cache key scheme (Step 5):
+ *   1. Compute normalized = normalizeIdentityInput(inputValue)
+ *   2. primaryKey = buildIdentityCacheKey(inputKind, normalized)   e.g. "tc:JF011E"
+ *   3. Try primaryKey — if found, use it.
+ *   4. Fall back to legacy key (plain normalized, no prefix) for backward compat.
+ *   5. On legacy hit: soft-migrate by upserting a prefixed entry (best-effort, non-fatal).
+ *   6. New GPT results are always written under primaryKey — never unprefixed.
+ */
+async function _identifyTransmissionByInput(
+  inputValue: string,
+  inputKind: InputKind,
+  context?: VehicleContext | null
 ): Promise<TransmissionIdentification> {
   try {
-    console.log(`[TransmissionIdentifier] vehicleContext received:`, JSON.stringify(sanitizeForLog(context ?? null)));
+    console.log(
+      `[TransmissionIdentifier] Identifying ${inputKind} "${inputValue}", vehicleContext:`,
+      JSON.stringify(sanitizeForLog(context ?? null))
+    );
 
-    // 1. Normalize OEM (uppercase, trim)
-    const normalizedOem = oem.trim().toUpperCase();
+    // 1. Normalize — uppercase, trim, collapse spaces; dashes preserved
+    const normalized = normalizeIdentityInput(inputValue);
 
-    // 2. Check local cache first
-    const cached = await storage.getTransmissionIdentity(normalizedOem);
+    // 2. Build the prefixed primary key
+    const primaryKey = buildIdentityCacheKey(inputKind, normalized);
+
+    // 3. Try primary (prefixed) key first
+    const cached = await storage.getTransmissionIdentity(primaryKey);
     if (cached && cached.modelName) {
+      incr("identity_cache.hit", { key: "prefixed", kind: inputKind });
+      const keyHint = `${primaryKey.slice(0, 3)}...${primaryKey.slice(-4)}`;
       console.log(
-        `[TransmissionIdentifier] Cache hit for ${normalizedOem}: ${cached.modelName}`
+        `[TransmissionIdentifier] Cache hit (primary) for ${primaryKey}: ${cached.modelName}`
       );
-      await storage.incrementTransmissionIdentityHit(normalizedOem);
+      console.log(
+        `[TransmissionIdentifier] CacheOutcome: ${JSON.stringify({ kind: inputKind, cacheHit: "prefixed", keyHint })}`
+      );
+      await storage.incrementTransmissionIdentityHit(primaryKey);
       return {
         modelName: cached.modelName,
         manufacturer: cached.manufacturer ?? null,
@@ -130,8 +227,57 @@ export async function identifyTransmissionByOem(
       };
     }
 
-    // 3. GPT call
-    const lines: string[] = [`OEM code: ${oem}.`];
+    // 4. Fall back to legacy unprefixed key (rows created before Step 5)
+    const legacyCached = await storage.getTransmissionIdentity(normalized);
+    if (legacyCached && legacyCached.modelName) {
+      incr("identity_cache.hit", { key: "legacy", kind: inputKind });
+      const legacyKeyHint = `${normalized.slice(0, 4)}...`;
+      console.log(
+        `[TransmissionIdentifier] Cache hit (legacy) for ${normalized}: ${legacyCached.modelName} — soft-migrating to ${primaryKey}`
+      );
+      console.log(
+        `[TransmissionIdentifier] CacheOutcome: ${JSON.stringify({ kind: inputKind, cacheHit: "legacy", keyHint: legacyKeyHint })}`
+      );
+      await storage.incrementTransmissionIdentityHit(normalized);
+
+      // 5. Soft-migration: upsert a prefixed entry so future lookups use the correct key.
+      //    Best-effort — a failure here must not break the cache-hit return path.
+      try {
+        await storage.saveTransmissionIdentity({
+          oem: legacyCached.oem,
+          normalizedOem: primaryKey,
+          modelName: legacyCached.modelName,
+          manufacturer: legacyCached.manufacturer ?? null,
+          origin: legacyCached.origin as TransmissionIdentification["origin"],
+          confidence: legacyCached.confidence as TransmissionIdentification["confidence"],
+        });
+        incr("identity_cache.soft_migration", { result: "success", kind: inputKind });
+        console.log(
+          `[TransmissionIdentifier] Soft-migrated legacy "${normalized}" → "${primaryKey}"`
+        );
+      } catch (migrateErr) {
+        incr("identity_cache.soft_migration", { result: "fail", kind: inputKind });
+        console.warn(
+          `[TransmissionIdentifier] Soft-migration upsert failed (non-fatal):`,
+          migrateErr
+        );
+      }
+
+      return {
+        modelName: legacyCached.modelName,
+        manufacturer: legacyCached.manufacturer ?? null,
+        origin: (legacyCached.origin as TransmissionIdentification["origin"]) ?? "unknown",
+        confidence: (legacyCached.confidence as TransmissionIdentification["confidence"]) ?? "high",
+        notes: "Returned from local identity cache (legacy key; migrated to prefixed)",
+      };
+    }
+
+    // 6. Build GPT prompt (cache miss on both primary and legacy keys)
+    incr("identity_cache.miss", { kind: inputKind });
+    console.log(
+      `[TransmissionIdentifier] CacheOutcome: ${JSON.stringify({ kind: inputKind, cacheHit: "miss" })}`
+    );
+    const lines: string[] = [`OEM code: ${inputValue}.`];
 
     if (context?.partsApiRawData) {
       lines.push(`Full vehicle data from OEM catalog:`);
@@ -217,16 +363,17 @@ export async function identifyTransmissionByOem(
       (result.confidence === "high" || result.confidence === "medium")
     ) {
       try {
+        // Always write under the prefixed primary key — never the legacy unprefixed form.
         await storage.saveTransmissionIdentity({
-          oem: oem.trim(),
-          normalizedOem,
+          oem: inputValue.trim(),
+          normalizedOem: primaryKey,
           modelName: result.modelName,
           manufacturer: result.manufacturer ?? null,
           origin: result.origin,
           confidence: result.confidence,
         });
         console.log(
-          `[TransmissionIdentifier] Saved to cache: ${normalizedOem} → ${result.modelName}`
+          `[TransmissionIdentifier] Saved to cache: ${primaryKey} → ${result.modelName}`
         );
       } catch (err) {
         // Cache save failure must never break the main flow
@@ -236,7 +383,53 @@ export async function identifyTransmissionByOem(
 
     return result;
   } catch (err: any) {
-    console.warn(`[TransmissionIdentifier] Failed to identify OEM "${oem}": ${err.message}`);
+    console.warn(
+      `[TransmissionIdentifier] Failed to identify ${inputKind} "${inputValue}": ${err.message}`
+    );
     return FALLBACK_RESULT;
   }
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Identifies the transmission from a gearbox model/market code (e.g. JF011E, 6HP19, A245E).
+ * This is the value that appears in Russian контрактные КПП marketplace listings.
+ */
+export async function identifyTransmissionByTransmissionCode(
+  transmissionCode: string,
+  vehicleContext?: VehicleContext | null
+): Promise<TransmissionIdentification> {
+  return _identifyTransmissionByInput(transmissionCode, "transmissionCode", vehicleContext);
+}
+
+/**
+ * Identifies the transmission from an OEM part number (e.g. 31020-3VX2D).
+ * Part numbers are issued by the vehicle manufacturer and identify a specific assembly SKU.
+ * GPT will cross-reference the part number to find the corresponding market model code.
+ */
+export async function identifyTransmissionByOemPartNumber(
+  oemPartNumber: string,
+  vehicleContext?: VehicleContext | null
+): Promise<TransmissionIdentification> {
+  return _identifyTransmissionByInput(oemPartNumber, "oemPartNumber", vehicleContext);
+}
+
+/**
+ * @deprecated Use {@link identifyTransmissionByTransmissionCode} or
+ * {@link identifyTransmissionByOemPartNumber} instead.
+ *
+ * Routing heuristic: if the input contains a digit adjacent to a hyphen
+ * (e.g. "31020-3VX2D") it is treated as an OEM part number; otherwise it is
+ * treated as a transmission model code (e.g. "JF011E", "6HP19").
+ *
+ * Preserved for backward compatibility — existing callers that pass only `oem`
+ * continue to work without modification.
+ */
+export async function identifyTransmissionByOem(
+  oem: string,
+  context?: VehicleContext | null
+): Promise<TransmissionIdentification> {
+  const kind = classifyOemInput(oem);
+  return _identifyTransmissionByInput(oem, kind, context);
 }
