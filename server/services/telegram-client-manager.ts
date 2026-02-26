@@ -160,6 +160,11 @@ class TelegramClientManager {
 
         // Remove from map so heartbeat won't fire on the same broken client again
         this.connections.delete(key);
+        // Stop gramJS internal auto-reconnect before calling disconnect() — otherwise
+        // autoReconnect:true would immediately retry after our intentional disconnect,
+        // causing an AUTH_KEY_DUPLICATED storm. Setting _autoReconnect:false on the
+        // underlying sender is the surgical way to prevent it for this specific client.
+        try { (connection.client as any)._sender._autoReconnect = false; } catch {}
         try { await connection.client.disconnect(); } catch {}
 
         this.scheduleReconnect(key, connection, msg);
@@ -222,12 +227,12 @@ class TelegramClientManager {
       const { apiId, apiHash } = credentials;
       const session = new StringSession(sessionString);
       const client = new TelegramClient(session, apiId, apiHash, {
-        // 1 internal retry — gramJS connectionRetries:5 causes 5x InvokeWithLayer attempts on
-        // AUTH_KEY_DUPLICATED, each starting a brief _updateLoop that then floods logs with
-        // TIMEOUT errors. We handle all retry scheduling ourselves via scheduleReconnect.
         connectionRetries: 1,
-        // Disable gramJS auto-reconnect — we manage reconnects ourselves via scheduleReconnect.
-        autoReconnect: false,
+        // autoReconnect handles TCP-level drops (network blips) — gramJS reconnects in ~1s.
+        // We prevent the AUTH_KEY_DUPLICATED storm separately by zeroing _sender._autoReconnect
+        // before calling disconnect() so this specific client won't auto-reconnect after we
+        // intentionally tear it down.
+        autoReconnect: true,
       });
 
       console.log(`[TelegramClientManager] Connecting account ${connectionKey}...`);
@@ -286,8 +291,7 @@ class TelegramClientManager {
       return true;
     } catch (error: any) {
       console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
-      // Kill the gramJS client immediately so its internal reconnect loop doesn't flood logs
-      // during the 90s wait period for AUTH_KEY_DUPLICATED / transient errors.
+      try { (client as any)._sender._autoReconnect = false; } catch {}
       try { await client.disconnect(); } catch {}
       const conn: ActiveConnection = {
         tenantId, accountId, channelId,
@@ -334,7 +338,7 @@ class TelegramClientManager {
       const session = new StringSession(sessionString);
       const client = new TelegramClient(session, apiId, apiHash, {
         connectionRetries: 1,
-        autoReconnect: false,
+        autoReconnect: true,
       });
 
       console.log(`[TelegramClientManager] Connecting client for ${connectionKey}...`);
@@ -379,8 +383,7 @@ class TelegramClientManager {
       return true;
     } catch (error: any) {
       console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
-      // Kill the gramJS client immediately so its internal reconnect loop doesn't flood logs
-      // during the 90s wait period for AUTH_KEY_DUPLICATED / transient errors.
+      try { (client as any)._sender._autoReconnect = false; } catch {}
       try { await client.disconnect(); } catch {}
       const conn: ActiveConnection = {
         tenantId, accountId: legacyAccountId, channelId,
@@ -757,12 +760,14 @@ class TelegramClientManager {
 
     // AUTH_KEY_DUPLICATED after restart is temporary — Telegram releases old key after ~60s.
     // Use a fixed 90s delay for transient errors so the old connection expires on Telegram's side.
+    // For network drops (non-transient), start with a 5s delay so messages resume quickly;
+    // exponential backoff caps at 5 min for persistent failures.
     const isTransient = errorMessage
       ? TelegramClientManager.TRANSIENT_ERRORS.some((e) => errorMessage.includes(e))
       : false;
     const delay = isTransient
       ? 90000
-      : Math.min(30000 * Math.pow(2, attempts - 1), 300000);
+      : Math.min(5000 * Math.pow(2, attempts - 1), 300000);
 
     console.log(
       `[TelegramClientManager] Scheduling reconnect #${attempts} ` +
