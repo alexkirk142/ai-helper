@@ -222,10 +222,11 @@ class TelegramClientManager {
       const { apiId, apiHash } = credentials;
       const session = new StringSession(sessionString);
       const client = new TelegramClient(session, apiId, apiHash, {
-        connectionRetries: 5,
+        // 1 internal retry — gramJS connectionRetries:5 causes 5x InvokeWithLayer attempts on
+        // AUTH_KEY_DUPLICATED, each starting a brief _updateLoop that then floods logs with
+        // TIMEOUT errors. We handle all retry scheduling ourselves via scheduleReconnect.
+        connectionRetries: 1,
         // Disable gramJS auto-reconnect — we manage reconnects ourselves via scheduleReconnect.
-        // With autoReconnect: true (default), gramJS floods logs with its own retry loop every
-        // 1-8s while our 90s timer waits, generating hundreds of spurious "Not connected" entries.
         autoReconnect: false,
       });
 
@@ -332,7 +333,7 @@ class TelegramClientManager {
       const { apiId, apiHash } = credentials;
       const session = new StringSession(sessionString);
       const client = new TelegramClient(session, apiId, apiHash, {
-        connectionRetries: 5,
+        connectionRetries: 1,
         autoReconnect: false,
       });
 
