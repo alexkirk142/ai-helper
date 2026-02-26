@@ -223,6 +223,10 @@ class TelegramClientManager {
       const session = new StringSession(sessionString);
       const client = new TelegramClient(session, apiId, apiHash, {
         connectionRetries: 5,
+        // Disable gramJS auto-reconnect — we manage reconnects ourselves via scheduleReconnect.
+        // With autoReconnect: true (default), gramJS floods logs with its own retry loop every
+        // 1-8s while our 90s timer waits, generating hundreds of spurious "Not connected" entries.
+        autoReconnect: false,
       });
 
       console.log(`[TelegramClientManager] Connecting account ${connectionKey}...`);
@@ -329,6 +333,7 @@ class TelegramClientManager {
       const session = new StringSession(sessionString);
       const client = new TelegramClient(session, apiId, apiHash, {
         connectionRetries: 5,
+        autoReconnect: false,
       });
 
       console.log(`[TelegramClientManager] Connecting client for ${connectionKey}...`);
