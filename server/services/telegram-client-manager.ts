@@ -281,6 +281,9 @@ class TelegramClientManager {
       return true;
     } catch (error: any) {
       console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
+      // Kill the gramJS client immediately so its internal reconnect loop doesn't flood logs
+      // during the 90s wait period for AUTH_KEY_DUPLICATED / transient errors.
+      try { await client.disconnect(); } catch {}
       const conn: ActiveConnection = {
         tenantId, accountId, channelId,
         client: null as any, sessionString,
@@ -370,6 +373,9 @@ class TelegramClientManager {
       return true;
     } catch (error: any) {
       console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
+      // Kill the gramJS client immediately so its internal reconnect loop doesn't flood logs
+      // during the 90s wait period for AUTH_KEY_DUPLICATED / transient errors.
+      try { await client.disconnect(); } catch {}
       const conn: ActiveConnection = {
         tenantId, accountId: legacyAccountId, channelId,
         client: null as any, sessionString,
