@@ -10,6 +10,10 @@ import {
 import type { GearboxInfo } from "../services/podzamenu-lookup-client";
 import { fillGearboxTemplate } from "../services/gearbox-templates";
 import { detectGearboxType } from "../services/price-sources/types";
+import {
+  fromVehicleContextGearboxType,
+  toPriceSearchGearboxType,
+} from "../services/gearbox/gearbox-kind";
 import { storage } from "../storage";
 import { identifyTransmissionByOem, type VehicleContext } from "../services/transmission-identifier";
 import { getSecret } from "../services/secret-resolver";
@@ -494,7 +498,14 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
 
     if (isModelOnly) {
       const lastMessage = await getLastCustomerMessageText(conversationId, tenantId);
-      const gearboxType = lastMessage ? detectGearboxType(lastMessage) : "unknown" as const;
+      const detectedFromText = lastMessage ? detectGearboxType(lastMessage) : "unknown" as const;
+      // When text detection is inconclusive, fall back to the structured
+      // vehicleContext.gearboxType ("AT"|"MT"|"CVT") and convert it to the
+      // price-search GearboxType ("акпп"|"мкпп"|"вариатор"|...) so that
+      // SearchFallback always receives the correct representation.
+      const gearboxType = detectedFromText !== "unknown"
+        ? detectedFromText
+        : toPriceSearchGearboxType(fromVehicleContextGearboxType(vehicleContext.gearboxType));
 
       const { enqueuePriceLookup } = await import("../services/price-lookup-queue");
       await enqueuePriceLookup({
@@ -515,7 +526,9 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
       await enqueuePriceLookup({
         tenantId,
         conversationId,
-        oem: gearbox.oem,
+        oem: gearbox.oem, // keep for compatibility
+        oemPartNumber: gearbox.oem,
+        transmissionCode: gearboxModelHint ?? null,
         oemModelHint: gearboxModelHint,
         vehicleContext,
       });
