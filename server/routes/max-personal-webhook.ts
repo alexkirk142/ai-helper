@@ -95,50 +95,36 @@ router.post("/:tenantId/:accountId", async (req, res) => {
     // Capture the numeric chatId and update the customer record so that future inbound
     // webhooks (which always carry the numeric chatId) match the right customer.
     if (payload.typeWebhook === "outgoingAPIMessageReceived") {
-      console.log("[MaxPersonal Migration DEBUG]", JSON.stringify({
-        typeWebhook: payload.typeWebhook,
-        senderData: payload.senderData,
-        idMessage: payload.idMessage,
-        fullPayload: JSON.stringify(payload).slice(0, 500),
-      }));
-
       const numericChatId = payload.senderData?.chatId;
       const idMessage = payload.idMessage;
 
-      if (!numericChatId || !idMessage) {
-        console.log(`[MaxPersonal Migration DEBUG] SKIP — missing field: numericChatId=${numericChatId ?? "null"} idMessage=${idMessage ?? "null"}`);
-      } else {
+      if (numericChatId && idMessage) {
         const normalized = numericChatId.includes("@") ? numericChatId : `${numericChatId}@c.us`;
         const localPart = normalized.split("@")[0];
-        const isNumericId = /^\d+$/.test(localPart) && localPart.length <= 11;
-        console.log(`[MaxPersonal Migration DEBUG] normalized=${normalized} localPart=${localPart} isNumericId=${isNumericId}`);
+        // A numeric MAX ID is all-digits and shorter than a phone number.
+        // Phone numbers in @c.us format are always >= 10 digits (RU: 11, others: 10-15).
+        // MAX internal user IDs are typically 7-9 digits.
+        // We treat chatId as a numeric MAX ID only when it is all-digits AND has fewer digits
+        // than the customer's existing phone-based externalId (phone > numeric by definition).
+        const isAllDigits = /^\d+$/.test(localPart);
 
-        if (!isNumericId) {
-          console.log(`[MaxPersonal Migration DEBUG] SKIP — chatId looks like a phone number, not a numeric MAX ID`);
-        } else {
+        if (isAllDigits) {
           try {
             const customer = await storage.getCustomerByOutboundMessageId(tenantId, "max_personal", idMessage);
-            console.log(`[MaxPersonal Migration DEBUG] customer lookup by idMessage=${idMessage}: ${customer ? `found id=${customer.id} externalId=${customer.externalId}` : "NOT FOUND"}`);
 
-            if (!customer) {
-              console.log(`[MaxPersonal Migration DEBUG] SKIP — no customer found for outbound message id=${idMessage}`);
-            } else if (customer.externalId === normalized) {
-              console.log(`[MaxPersonal Migration DEBUG] SKIP — customer ${customer.id} externalId already matches ${normalized}`);
-            } else {
-              const oldId = customer.externalId;
-              const oldLocal = (oldId ?? "").split("@")[0];
-              const isPhoneBased = /^\d{12,}$/.test(oldLocal);
-              console.log(`[MaxPersonal Migration DEBUG] oldId=${oldId} oldLocal=${oldLocal} isPhoneBased=${isPhoneBased}`);
+            if (customer && customer.externalId !== normalized) {
+              const oldLocal = (customer.externalId ?? "").split("@")[0];
+              // Migrate only when the old ID is longer (phone) and the new ID is shorter (numeric MAX ID).
+              // This correctly handles all phone lengths (RU=11, others=10-15) without magic numbers.
+              const isPhoneBased = /^\d+$/.test(oldLocal) && oldLocal.length > localPart.length;
 
-              if (!isPhoneBased) {
-                console.log(`[MaxPersonal Migration DEBUG] SKIP — oldLocal="${oldLocal}" does not match phone pattern /^\\d{12,}$/`);
-              } else {
+              if (isPhoneBased) {
                 await storage.updateCustomer(customer.id, tenantId, { externalId: normalized });
-                console.log(`[MaxPersonal Migration DEBUG] SUCCESS — updated customer ${customer.id} externalId: ${oldId} → ${normalized}`);
+                console.log(`[MaxPersonalWebhook] Migrated customer ${customer.id} externalId: ${customer.externalId} → ${normalized}`);
               }
             }
           } catch (err: any) {
-            console.error(`[MaxPersonal Migration DEBUG] ERROR during remap for idMessage=${idMessage}:`, err.message);
+            console.error(`[MaxPersonalWebhook] Failed to remap chatId for idMessage=${idMessage}:`, err.message);
           }
         }
       }
