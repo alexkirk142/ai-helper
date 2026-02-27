@@ -236,6 +236,11 @@ const GEARBOX_TYPE_STRINGS_SEARCHER = new Set([
   "CVT", "AT", "MT", "DCT", "AMT",
   "АКПП", "МКПП", "ВАРИАТОР", "АВТОМАТ",
   "AUTO", "MANUAL", "AUTOMATIC",
+  // Numeric-prefixed type labels (mirrored from price-lookup.worker.ts)
+  "4AT", "5AT", "6AT", "7AT", "8AT", "9AT", "10AT",
+  "4MT", "5MT", "6MT", "7MT",
+  "7DCT", "8DCT", "6DCT",
+  "4WD", "2WD", "AWD", "FWD", "RWD",
 ]);
 
 /**
@@ -255,6 +260,8 @@ const GEARBOX_TYPE_STRINGS_SEARCHER = new Set([
 export function isValidMarketModelName(modelName: string | null | undefined): boolean {
   if (!modelName) return false;
   if (GEARBOX_TYPE_STRINGS_SEARCHER.has(modelName.toUpperCase())) return false;
+  // Reject numeric-prefixed type labels not covered by the set: 4AT, 5MT, 7DCT, etc.
+  if (/^\d+[A-Z]{2,3}$/.test(modelName.toUpperCase())) return false;
   if (modelName.length > 12) return false;
   if (/\d{4,}/.test(modelName)) return false;
   return /^[A-Z0-9][A-Z0-9\-()]{1,11}$/.test(modelName);

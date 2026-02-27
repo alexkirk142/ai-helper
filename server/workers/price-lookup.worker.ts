@@ -481,12 +481,30 @@ const GEARBOX_TYPE_STRINGS = new Set([
   "CVT", "AT", "MT", "DCT", "AMT",
   "АКПП", "МКПП", "ВАРИАТОР", "АВТОМАТ",
   "AUTO", "MANUAL", "AUTOMATIC",
+  // Numeric-prefixed type labels: 4AT, 5AT, 6AT, 4MT, 5MT, 6MT, 7DCT, etc.
+  // These are speed-count + type strings, not market model codes.
+  "4AT", "5AT", "6AT", "7AT", "8AT", "9AT", "10AT",
+  "4MT", "5MT", "6MT", "7MT",
+  "7DCT", "8DCT", "6DCT",
+  "4WD", "2WD", "AWD", "FWD", "RWD",
 ]);
+
+/**
+ * Returns true when `model` looks like a gearbox type label (NxAT, NxMT, etc.)
+ * rather than a real market code. Catches patterns like "4AT", "5MT", "6DCT".
+ */
+function isGearboxTypeLabel(model: string): boolean {
+  return /^\d+[A-Z]{2,3}$/.test(model.toUpperCase());
+}
 
 function isValidTransmissionModel(model: string | null): boolean {
   if (!model) return false;
   if (GEARBOX_TYPE_STRINGS.has(model.toUpperCase())) {
     console.log(`[PriceLookupWorker] oemModelHint '${model}' is a type not a model — running GPT`);
+    return false;
+  }
+  if (isGearboxTypeLabel(model)) {
+    console.log(`[PriceLookupWorker] oemModelHint '${model}' matches type-label pattern (NxAT/NxMT) — running GPT`);
     return false;
   }
   if (model.length > 12) return false;
@@ -1196,6 +1214,24 @@ async function processPriceLookup(job: Job<PriceLookupJobData>): Promise<void> {
     } else {
       transmissionCode = oem;
     }
+  }
+
+  // ── Demote type-label transmissionCode when oemPartNumber is present ──────
+  // If transmissionCode is a generic type label (e.g. "4AT", "5MT") rather than
+  // a real market model code, AND an OEM part number is also available,
+  // clear transmissionCode so the oemPartNumber is used as the primary cache key
+  // and search anchor.  This prevents "tc::4at::honda::cr-v" cache keys and
+  // "АКПП 4AT купить" Yandex queries that return completely wrong results.
+  if (
+    transmissionCode &&
+    oemPartNumber &&
+    isGearboxTypeLabel(transmissionCode)
+  ) {
+    console.log(
+      `[PriceLookupWorker] transmissionCode "${transmissionCode}" is a type label — ` +
+      `demoting in favour of oemPartNumber "${oemPartNumber}"`
+    );
+    transmissionCode = undefined;
   }
 
   console.log(
