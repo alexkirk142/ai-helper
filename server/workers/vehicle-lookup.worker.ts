@@ -546,13 +546,21 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
       });
     }
   } catch (error) {
-    if (error instanceof PodzamenuLookupError && error.code === PODZAMENU_NOT_FOUND) {
-      // Strategy 3: partsApiPromise already settled (it has its own .catch),
-      // re-awaiting it is instant and never throws.
+    // Treat PARSE_FAILED (podzamenu scraped page but couldn't extract data, HTTP 500)
+    // the same as NOT_FOUND for purposes of PartsAPI fallback: if PartsAPI decoded the VIN
+    // successfully we can still run a fallback price search using vehicle make/model.
+    const isParseFailed =
+      error instanceof PodzamenuLookupError &&
+      error.code === "LOOKUP_ERROR" &&
+      error.statusCode === 500;
+
+    if (error instanceof PodzamenuLookupError && (error.code === PODZAMENU_NOT_FOUND || isParseFailed)) {
+      // partsApiPromise already settled (it has its own .catch), re-awaiting is instant and never throws.
       const partsApi = await partsApiPromise;
       if (partsApi?.make) {
+        const reason = isParseFailed ? "PARSE_FAILED" : "NOT_FOUND";
         console.log(
-          `[VehicleLookupWorker] Podzamenu NOT_FOUND but PartsAPI decoded VIN — running fallback for ${normalizedValue}`
+          `[VehicleLookupWorker] Podzamenu ${reason} but PartsAPI decoded VIN — running fallback for ${normalizedValue}`
         );
         const partsApiKppHint =
           partsApi.kpp && isValidTransmissionModel(partsApi.kpp) ? partsApi.kpp : null;
@@ -581,11 +589,12 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
         return;
       }
 
-      // Both APIs failed — genuine invalid / not-found VIN
-      console.log(`[VehicleLookupWorker] Case not found (Podzamenu NOT_FOUND, PartsAPI empty): ${caseId}`);
+      // Both APIs failed
+      const failReason = isParseFailed ? "PARSE_FAILED" : "NOT_FOUND";
+      console.log(`[VehicleLookupWorker] Case not found (Podzamenu ${failReason}, PartsAPI empty): ${caseId}`);
       await storage.updateVehicleLookupCaseStatus(caseId, tenantId, {
         status: "FAILED",
-        error: "NOT_FOUND",
+        error: failReason,
       });
       return;
     }

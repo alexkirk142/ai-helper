@@ -836,14 +836,38 @@ async def _navigate_to_gearbox_detail(page, selectors_used: list[str]) -> bool:
     # ---- Path C: Universal 'СХЕМЫ УЗЛОВ' tab navigation (JS evaluate) ----
     try:
         tab_clicked = await page.evaluate("""() => {
+            function muiClick(el) {
+                el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            }
+
+            // Strategy 1: leaf element with exact text (most common: MUI Tab inner span)
             const all = document.querySelectorAll('*');
             for (const el of all) {
                 const text = el.textContent.trim().toUpperCase();
                 if (text === 'СХЕМЫ УЗЛОВ' && el.children.length === 0) {
-                    el.click();
+                    muiClick(el);
                     return true;
                 }
             }
+
+            // Strategy 2: [role="tab"] containing the text (MUI Tab root button)
+            for (const tab of document.querySelectorAll('[role="tab"]')) {
+                const text = tab.textContent.trim().toUpperCase();
+                if (text.includes('СХЕМ') || text.includes('УЗЛОВ')) {
+                    muiClick(tab);
+                    return true;
+                }
+            }
+
+            // Strategy 3: any button / link-styled element containing "СХЕМ"
+            for (const el of document.querySelectorAll('button, a, [class*="Tab"], [class*="tab"]')) {
+                const text = el.textContent.trim().toUpperCase();
+                if (text.includes('СХЕМ') && text.length < 30) {
+                    muiClick(el);
+                    return true;
+                }
+            }
+
             return false;
         }""")
 
@@ -853,6 +877,9 @@ async def _navigate_to_gearbox_detail(page, selectors_used: list[str]) -> bool:
 
             # Step 2: Find transmission section in left menu by keywords
             found_section = await page.evaluate("""(keywords) => {
+                function muiClick(el) {
+                    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                }
                 const links = document.querySelectorAll(
                     'a, button, [class*="selectorLink"], [class*="menuItem"], ' +
                     '[class*="categoryLink"], [class*="navLink"], ' +
@@ -865,7 +892,7 @@ async def _navigate_to_gearbox_detail(page, selectors_used: list[str]) -> bool:
                 for (const link of links) {
                     const text = link.textContent.trim().toLowerCase();
                     if (lowerKeywords.includes(text)) {
-                        link.click();
+                        muiClick(link);
                         return { found: true, text: link.textContent.trim(), priority: 'exact' };
                     }
                 }
@@ -874,8 +901,8 @@ async def _navigate_to_gearbox_detail(page, selectors_used: list[str]) -> bool:
                 for (const keyword of lowerKeywords) {
                     for (const link of links) {
                         const text = link.textContent.trim().toLowerCase();
-                        if (text.includes(keyword) && link.offsetParent !== null) {
-                            link.click();
+                        if (text.includes(keyword) && link.offsetParent !== null && text.length < 120) {
+                            muiClick(link);
                             return { found: true, text: link.textContent.trim(), priority: 'contains', keyword };
                         }
                     }
@@ -902,19 +929,22 @@ async def _navigate_to_gearbox_detail(page, selectors_used: list[str]) -> bool:
                     const lowerKeywords = keywords.map(k => k.toLowerCase());
 
                     // --- Priority 0: MUI Card-root elements (СХЕМЫ УЗЛОВ view) ---
-                    // These are the actual scheme cards with MuiCardActionArea buttons.
+                    // These are the actual scheme cards with MuiCardActionArea buttons or <a> links.
                     // Must be checked BEFORE selectorPaperContentLink to avoid clicking
                     // the section nav link (which also matches gearbox keywords).
                     const muiCards = document.querySelectorAll('[class*="Card-root"]');
                     if (muiCards.length > 0) {
-                        // Prefer "сборка" / "assembly" / "assy" / "part 1" cards
-                        const assemblyKw = ['сборка', 'assembly', 'assy', 'в сборе', 'part 1'];
+                        // Prefer "сборка" / "assembly" / "assy" / "part 1" / "m/t" cards
+                        const assemblyKw = ['сборка', 'assembly', 'assy', 'в сборе', 'part 1', 'm/t', 'a/t', 'cvt'];
                         for (const card of muiCards) {
                             const text = card.textContent.trim();
                             const lower = text.toLowerCase();
                             if (lowerKeywords.some(kw => lower.includes(kw))
                                 && assemblyKw.some(ak => lower.includes(ak))) {
-                                const btn = card.querySelector('button.MuiCardActionArea-root');
+                                // Try MuiCardActionArea button first, then any <a> or button (e.g. "ПОСМОТРЕТЬ СХЕМУ")
+                                const btn = card.querySelector('button.MuiCardActionArea-root')
+                                    || card.querySelector('a[href]')
+                                    || card.querySelector('button');
                                 if (btn) { muiClick(btn); return { found: true, text: text.substring(0, 80), priority: 'muiCard_assembly' }; }
                             }
                         }
@@ -923,7 +953,9 @@ async def _navigate_to_gearbox_detail(page, selectors_used: list[str]) -> bool:
                             const text = card.textContent.trim();
                             const lower = text.toLowerCase();
                             if (lowerKeywords.some(kw => lower.includes(kw))) {
-                                const btn = card.querySelector('button.MuiCardActionArea-root');
+                                const btn = card.querySelector('button.MuiCardActionArea-root')
+                                    || card.querySelector('a[href]')
+                                    || card.querySelector('button');
                                 if (btn) { muiClick(btn); return { found: true, text: text.substring(0, 80), priority: 'muiCard' }; }
                             }
                         }
