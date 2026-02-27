@@ -85,6 +85,10 @@ const DEFAULT_FLAGS: Record<FeatureFlagName, { description: string; enabled: boo
     description: "Apply 0.75× discount to intl listing prices when used as the sole price source (intl-only fallback)",
     enabled: false,
   },
+  GEARBOX_TAG_MINLEN_4: {
+    description: "Allow 4-character gearbox tag OCR codes (e.g. S4TA, A131, K312) through the quality gate. Routes to clarification flow only — never to direct price lookup. Disabled by default.",
+    enabled: false,
+  },
 };
 
 class FeatureFlagService {

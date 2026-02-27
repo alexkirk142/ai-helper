@@ -580,24 +580,71 @@ function validateOcrAlnum(value: string, minLength: number): boolean {
 }
 
 /**
+ * Strict 4-char gearbox tag pattern: VIN-safe charset (excludes I, O, Q which
+ * are forbidden in VINs and likely OCR noise for 0/1).
+ * Only used when the GEARBOX_TAG_MINLEN_4 feature flag is enabled.
+ */
+const GEARBOX_TAG_4CHAR_RE = /^[A-HJ-NPR-Z0-9]{4}$/;
+
+/** Options for extractCandidatesFromOcr — all flags default to false/off. */
+export interface ExtractFromOcrOptions {
+  /**
+   * When true, allows exactly-4-character gearbox_tag codes that match
+   * the strict VIN-safe alphanumeric pattern (/^[A-HJ-NPR-Z0-9]{4}$/).
+   * These codes receive a fixed baseScore of 0.60 so they route to the
+   * weak-code clarification flow (>= 0.55) and never directly to price
+   * lookup (< 0.70).
+   * Default: false — 4-char codes are rejected by the quality gate.
+   */
+  allowGearboxTagMinLen4?: boolean;
+}
+
+/**
  * Converts a structured OCR analysis result into scored DetectionCandidates.
  * Applies quality gates: rejects codes that are too short or have too many
  * garbage characters.
+ *
+ * @param opts - Optional feature-flag overrides. Pass `{ allowGearboxTagMinLen4: true }`
+ *   (read from featureFlagService by the caller) to allow strict 4-char gearbox codes.
+ *   When opts is absent or allowGearboxTagMinLen4 is false, behavior is identical to
+ *   the original implementation.
  */
-export function extractCandidatesFromOcr(ocrResult: OcrAnalysisResult): DetectionCandidate[] {
+export function extractCandidatesFromOcr(
+  ocrResult: OcrAnalysisResult,
+  opts?: ExtractFromOcrOptions,
+): DetectionCandidate[] {
   const candidates: DetectionCandidate[] = [];
   const ocrConf = ocrResult.confidence ?? 0.80;
 
   if (ocrResult.type === "gearbox_tag" && ocrResult.code) {
     const code = normalizeTransmissionCode(ocrResult.code);
 
-    // Quality gate: min 5 chars, at least 70% alphanumeric
-    if (!validateOcrAlnum(code, 5)) {
+    // Determine whether this is an exactly-4-char code allowed by the flag.
+    // The regex uses the VIN-safe charset (excludes I, O, Q) to reduce OCR noise.
+    const isFourChar = code.length === 4;
+    const allowedBy4CharFlag =
+      isFourChar &&
+      opts?.allowGearboxTagMinLen4 === true &&
+      GEARBOX_TAG_4CHAR_RE.test(code);
+
+    // Quality gate — two paths:
+    //   • 4-char codes: pass only when allowedBy4CharFlag is true (strict regex match).
+    //   • All other lengths: apply existing validateOcrAlnum(code, 5) check
+    //     (length >= 5 AND alnum ratio >= 70%).
+    if (!allowedBy4CharFlag && !validateOcrAlnum(code, 5)) {
       return []; // Caller should ask for a clearer photo
     }
 
     const strength = classifyTransmissionStrength(code);
-    const baseScore = strength === "strong" ? 0.75 : (code.length >= 5 ? 0.65 : 0.50);
+
+    // Scoring:
+    //   • 4-char allowed by flag → fixed baseScore 0.60:
+    //       - above clarification threshold (0.55) → routes to weak_tc_clarification
+    //       - below direct-lookup threshold (0.70) → never auto-routes to price lookup
+    //   • All other codes → existing logic unchanged.
+    const baseScore = allowedBy4CharFlag
+      ? 0.60
+      : (strength === "strong" ? 0.75 : (code.length >= 5 ? 0.65 : 0.50));
     const score = Math.min(baseScore, ocrConf);
 
     candidates.push({
@@ -605,7 +652,11 @@ export function extractCandidatesFromOcr(ocrResult: OcrAnalysisResult): Detectio
       value: code,
       raw: ocrResult.code,
       score,
-      reasons: ["ocr_gearbox_tag", `strength:${strength ?? "unknown"}`],
+      reasons: [
+        "ocr_gearbox_tag",
+        `strength:${strength ?? "unknown"}`,
+        ...(allowedBy4CharFlag ? ["gearbox_tag_4char_allowed"] : []),
+      ],
       source: "ocr",
       meta: { ocrConfidence: ocrConf },
     });

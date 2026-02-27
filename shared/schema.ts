@@ -833,6 +833,7 @@ export const FEATURE_FLAG_NAMES = [
   "OUTLIER_GUARD_SMALL_SAMPLE",
   "INTL_PRICE_CAP_ENABLED",
   "INTL_PRICE_DISCOUNT_ENABLED",
+  "GEARBOX_TAG_MINLEN_4",
 ] as const;
 
 // ============ Channel Types ============

@@ -455,10 +455,39 @@ export async function processIncomingMessageFull(
           frame: (imageResult as any).frame,
         };
 
-        const ocrCandidates = extractCandidatesFromOcr(ocrInput);
+        // Read per-tenant flag before extracting so the detector stays pure.
+        const allow4CharGearboxTag = await featureFlagService.isEnabled(
+          "GEARBOX_TAG_MINLEN_4",
+          tenantId,
+        );
+
+        // 4-char gearbox_tag metrics (emitted before extraction, no PII in tags).
+        const rawOcrCode = (imageResult as any).code as string | undefined;
+        const is4CharGearboxCode =
+          imageResult.type === "gearbox_tag" &&
+          typeof rawOcrCode === "string" &&
+          rawOcrCode.length === 4;
+        if (is4CharGearboxCode) {
+          incr("detector.gearbox_tag_4char_seen");
+        }
+
+        const ocrCandidates = extractCandidatesFromOcr(ocrInput, {
+          allowGearboxTagMinLen4: allow4CharGearboxTag,
+        });
+
+        // Post-extraction 4-char metrics: allowed/rejected + score bucket.
+        if (is4CharGearboxCode) {
+          const allowed = ocrCandidates.length > 0;
+          incr("detector.gearbox_tag_4char_allowed", { allowed: allowed ? "true" : "false" });
+          if (allowed) {
+            const s = ocrCandidates[0].score;
+            const bucket = s >= 0.70 ? "ge070" : s >= 0.55 ? "055_069" : "lt055";
+            incr("detector.gearbox_tag_4char_score_bucket", { bucket });
+          }
+        }
 
         // Detect quality gate failure: gearbox_tag returned a code but it failed
-        // the OCR quality checks (no candidates produced)
+        // the OCR quality checks (no candidates produced).
         if (
           imageResult.type === "gearbox_tag" &&
           (imageResult as any).code &&

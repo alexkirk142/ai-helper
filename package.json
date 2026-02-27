@@ -11,7 +11,9 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "worker:vehicle-lookup": "tsx server/workers/vehicle-lookup.worker.ts",
-    "worker:price-lookup": "tsx server/workers/price-lookup.worker.ts"
+    "worker:price-lookup": "tsx server/workers/price-lookup.worker.ts",
+    "test:server": "vitest run --config vitest.config.server.ts",
+    "test:server:watch": "vitest --config vitest.config.server.ts"
   },
   "dependencies": {
     "@foile/crypto-pay-api": "^1.0.4",
