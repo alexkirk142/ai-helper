@@ -1,3 +1,19 @@
+// Suppress gramJS internal _updateLoop TIMEOUT spam — these are normal long-poll
+// timeouts that gramJS catches and re-logs via console.error on every cycle (~15s).
+// They are not real errors; the loop always retries successfully.
+const _origConsoleError = console.error;
+console.error = (...args: unknown[]) => {
+  if (
+    args[0] instanceof Error &&
+    args[0].message === "TIMEOUT" &&
+    typeof args[0].stack === "string" &&
+    args[0].stack.includes("updates.js")
+  ) {
+    return;
+  }
+  _origConsoleError.apply(console, args);
+};
+
 import express from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";

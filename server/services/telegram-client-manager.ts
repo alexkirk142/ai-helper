@@ -160,11 +160,6 @@ class TelegramClientManager {
 
         // Remove from map so heartbeat won't fire on the same broken client again
         this.connections.delete(key);
-        // Stop gramJS internal auto-reconnect before calling disconnect() — otherwise
-        // autoReconnect:true would immediately retry after our intentional disconnect,
-        // causing an AUTH_KEY_DUPLICATED storm. Setting _autoReconnect:false on the
-        // underlying sender is the surgical way to prevent it for this specific client.
-        try { (connection.client as any)._sender._autoReconnect = false; } catch {}
         try { await connection.client.disconnect(); } catch {}
 
         this.scheduleReconnect(key, connection, msg);
@@ -227,12 +222,12 @@ class TelegramClientManager {
       const { apiId, apiHash } = credentials;
       const session = new StringSession(sessionString);
       const client = new TelegramClient(session, apiId, apiHash, {
-        connectionRetries: 1,
-        // autoReconnect handles TCP-level drops (network blips) — gramJS reconnects in ~1s.
-        // We prevent the AUTH_KEY_DUPLICATED storm separately by zeroing _sender._autoReconnect
-        // before calling disconnect() so this specific client won't auto-reconnect after we
-        // intentionally tear it down.
-        autoReconnect: true,
+        connectionRetries: 0,
+        // autoReconnect: false — all reconnection is handled by our scheduleReconnect logic.
+        // gramJS's internal autoReconnect races with our reconnect on AUTH_KEY_DUPLICATED:
+        // gramJS queues its own retry before our catch block can stop it, causing two
+        // simultaneous connections with the same auth key → infinite AUTH_KEY_DUPLICATED loop.
+        autoReconnect: false,
       });
 
       console.log(`[TelegramClientManager] Connecting account ${connectionKey}...`);
@@ -291,7 +286,6 @@ class TelegramClientManager {
       return true;
     } catch (error: any) {
       console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
-      try { (client as any)._sender._autoReconnect = false; } catch {}
       try { await client.disconnect(); } catch {}
       const conn: ActiveConnection = {
         tenantId, accountId, channelId,
@@ -337,8 +331,8 @@ class TelegramClientManager {
       const { apiId, apiHash } = credentials;
       const session = new StringSession(sessionString);
       const client = new TelegramClient(session, apiId, apiHash, {
-        connectionRetries: 1,
-        autoReconnect: true,
+        connectionRetries: 0,
+        autoReconnect: false,
       });
 
       console.log(`[TelegramClientManager] Connecting client for ${connectionKey}...`);
@@ -383,7 +377,6 @@ class TelegramClientManager {
       return true;
     } catch (error: any) {
       console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
-      try { (client as any)._sender._autoReconnect = false; } catch {}
       try { await client.disconnect(); } catch {}
       const conn: ActiveConnection = {
         tenantId, accountId: legacyAccountId, channelId,
