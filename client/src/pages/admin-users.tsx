@@ -188,22 +188,43 @@ export default function AdminUsers() {
     enabled: !!tenantId,
   });
 
-  const autoPartsFlag = tenantFlags?.find((f) => f.name === "AUTO_PARTS_ENABLED");
+  const getFlag = (name: string) => tenantFlags?.find((f) => f.name === name);
+
+  // Tracks which flag name is currently being toggled so individual rows
+  // can show a spinner without blocking the entire list.
+  const [pendingFlagName, setPendingFlagName] = useState<string | null>(null);
+
+  const TOGGLE_LABELS: Record<string, [string, string]> = {
+    AUTO_PARTS_ENABLED:       ["Автозапчасти включены",               "Автозапчасти отключены"],
+    GEARBOX_TAG_MINLEN_4:     ["4-символьные коды КПП включены",      "4-символьные коды КПП отключены"],
+    YANDEX_PREFER_MODELNAME:  ["Приоритет модели в Яндексе включён",  "Приоритет модели в Яндексе отключён"],
+    OUTLIER_GUARD_SMALL_SAMPLE: ["Защита от выбросов включена",       "Защита от выбросов отключена"],
+    INTL_PRICE_CAP_ENABLED:   ["Ограничение зарубежных цен включено", "Ограничение зарубежных цен отключено"],
+    INTL_PRICE_DISCOUNT_ENABLED: ["Скидка на зарубежные цены включена", "Скидка на зарубежные цены отключена"],
+    AI_PRICE_ESTIMATE_ENABLED: ["AI оценка цены включена",            "AI оценка цены отключена"],
+    PRICE_ESCALATION_ENABLED: ["Эскалация при нехватке цен включена", "Эскалация при нехватке цен отключена"],
+    GPT_WEB_SEARCH_ENABLED:   ["GPT web search включён",              "GPT web search отключён"],
+  };
 
   const toggleFlagMutation = useMutation({
-    mutationFn: async ({ enabled }: { enabled: boolean }) => {
-      const res = await apiRequest("POST", "/api/admin/feature-flags/AUTO_PARTS_ENABLED/toggle", {
+    mutationFn: async ({ flagName, enabled }: { flagName: string; enabled: boolean }) => {
+      setPendingFlagName(flagName);
+      const res = await apiRequest("POST", `/api/admin/feature-flags/${flagName}/toggle`, {
         enabled,
         tenantId,
       });
       return res.json();
     },
-    onSuccess: (_data, { enabled }) => {
-      toast({ title: enabled ? "Автозапчасти включены" : "Автозапчасти отключены" });
+    onSuccess: (_data, { flagName, enabled }) => {
+      const [on, off] = TOGGLE_LABELS[flagName] ?? ["Функция включена", "Функция отключена"];
+      toast({ title: enabled ? on : off });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/feature-flags/tenant", tenantId] });
     },
     onError: (error: Error) => {
       toast({ title: "Ошибка", description: error.message, variant: "destructive" });
+    },
+    onSettled: () => {
+      setPendingFlagName(null);
     },
   });
 
@@ -664,25 +685,120 @@ export default function AdminUsers() {
                               </CardTitle>
                               <CardDescription>Дополнительные модули для тенанта</CardDescription>
                             </CardHeader>
-                            <CardContent className="space-y-3">
-                              <div className="flex items-center justify-between gap-4">
-                                <div className="space-y-0.5">
-                                  <p className="text-sm font-medium">Автозапчасти</p>
-                                  <p className="text-xs text-muted-foreground">
-                                    Включить модуль подбора запчастей по VIN
-                                  </p>
-                                </div>
-                                {flagsLoading ? (
-                                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                                ) : (
-                                  <Switch
-                                    checked={autoPartsFlag?.enabled ?? false}
-                                    onCheckedChange={(enabled) => toggleFlagMutation.mutate({ enabled })}
-                                    disabled={toggleFlagMutation.isPending}
-                                    data-testid="switch-auto-parts-enabled"
-                                  />
-                                )}
+                            <CardContent className="space-y-4">
+
+                              {/* ── Модуль автозапчастей ── */}
+                              <div className="space-y-2">
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                                  Модуль автозапчастей
+                                </p>
+                                {[
+                                  {
+                                    name: "AUTO_PARTS_ENABLED",
+                                    label: "Автозапчасти",
+                                    description: "Включить модуль подбора запчастей по VIN",
+                                    testId: "switch-auto-parts-enabled",
+                                  },
+                                  {
+                                    name: "GEARBOX_TAG_MINLEN_4",
+                                    label: "4-символьные коды КПП",
+                                    description: "Распознавать короткие 4-символьные коды с таблички КПП (S4TA, A131, K312)",
+                                    testId: "switch-gearbox-tag-minlen4",
+                                  },
+                                ].map(({ name, label, description, testId }) => (
+                                  <div key={name} className="flex items-center justify-between gap-4">
+                                    <div className="space-y-0.5">
+                                      <p className="text-sm font-medium">{label}</p>
+                                      <p className="text-xs text-muted-foreground">{description}</p>
+                                    </div>
+                                    {flagsLoading ? (
+                                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />
+                                    ) : (
+                                      <Switch
+                                        checked={getFlag(name)?.enabled ?? false}
+                                        onCheckedChange={(enabled) =>
+                                          toggleFlagMutation.mutate({ flagName: name, enabled })
+                                        }
+                                        disabled={pendingFlagName === name && toggleFlagMutation.isPending}
+                                        data-testid={testId}
+                                      />
+                                    )}
+                                  </div>
+                                ))}
                               </div>
+
+                              <div className="border-t" />
+
+                              {/* ── Поиск и расчёт цен ── */}
+                              <div className="space-y-2">
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                                  Поиск и расчёт цен
+                                </p>
+                                {[
+                                  {
+                                    name: "YANDEX_PREFER_MODELNAME",
+                                    label: "Приоритет модели в Яндексе",
+                                    description: "Использовать рыночное название КПП вместо кода OEM как якорь поиска Яндекса",
+                                    testId: "switch-yandex-prefer-modelname",
+                                  },
+                                  {
+                                    name: "OUTLIER_GUARD_SMALL_SAMPLE",
+                                    label: "Защита от выбросов цен",
+                                    description: "Отсекать экстремальные цены при малой выборке (2–3 источника)",
+                                    testId: "switch-outlier-guard-small-sample",
+                                  },
+                                  {
+                                    name: "INTL_PRICE_CAP_ENABLED",
+                                    label: "Ограничение зарубежных цен",
+                                    description: "Убирать зарубежные предложения дороже 2.5× медианы по РФ",
+                                    testId: "switch-intl-price-cap",
+                                  },
+                                  {
+                                    name: "INTL_PRICE_DISCOUNT_ENABLED",
+                                    label: "Скидка на зарубежные цены",
+                                    description: "Применять коэффициент 0.75× к зарубежным ценам при отсутствии российских",
+                                    testId: "switch-intl-price-discount",
+                                  },
+                                  {
+                                    name: "AI_PRICE_ESTIMATE_ENABLED",
+                                    label: "AI оценка цены",
+                                    description: "Использовать AI для оценки цены, если веб-поиск не дал результатов",
+                                    testId: "switch-ai-price-estimate",
+                                  },
+                                  {
+                                    name: "PRICE_ESCALATION_ENABLED",
+                                    label: "Эскалация при нехватке цен",
+                                    description: "Передавать оператору запросы, для которых не удалось найти цену в Яндексе",
+                                    testId: "switch-price-escalation",
+                                  },
+                                  {
+                                    name: "GPT_WEB_SEARCH_ENABLED",
+                                    label: "GPT web search для цен",
+                                    description: "Использовать GPT с поиском в интернете как запасной вариант поиска цены",
+                                    testId: "switch-gpt-web-search",
+                                  },
+                                ].map(({ name, label, description, testId }) => (
+                                  <div key={name} className="flex items-center justify-between gap-4">
+                                    <div className="space-y-0.5">
+                                      <p className="text-sm font-medium">{label}</p>
+                                      <p className="text-xs text-muted-foreground">{description}</p>
+                                    </div>
+                                    {flagsLoading ? (
+                                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />
+                                    ) : (
+                                      <Switch
+                                        checked={getFlag(name)?.enabled ?? false}
+                                        onCheckedChange={(enabled) =>
+                                          toggleFlagMutation.mutate({ flagName: name, enabled })
+                                        }
+                                        disabled={pendingFlagName === name && toggleFlagMutation.isPending}
+                                        data-testid={testId}
+                                      />
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+
                             </CardContent>
                           </Card>
                         )}
