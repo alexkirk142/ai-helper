@@ -643,7 +643,7 @@ export function extractCandidatesFromOcr(
     //       - below direct-lookup threshold (0.70) → never auto-routes to price lookup
     //   • All other codes → existing logic unchanged.
     const baseScore = allowedBy4CharFlag
-      ? 0.60
+      ? 0.72
       : (strength === "strong" ? 0.75 : (code.length >= 5 ? 0.65 : 0.50));
     const score = Math.min(baseScore, ocrConf);
 

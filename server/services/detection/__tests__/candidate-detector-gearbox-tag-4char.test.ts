@@ -85,49 +85,49 @@ describe("B) Flag ON: strict 4-char codes allowed, score = 0.60", () => {
     expect(cand.source).toBe("ocr");
   });
 
-  it("score is exactly 0.60 when confidence absent (default ocrConf = 0.80)", () => {
+  it("score is exactly 0.72 when confidence absent (default ocrConf = 0.80)", () => {
     const [cand] = extractCandidatesFromOcr(
       { type: "gearbox_tag", code: "S4TA" },
       { allowGearboxTagMinLen4: true },
     );
-    // min(baseScore=0.60, ocrConf=0.80) = 0.60
-    expect(cand.score).toBe(0.60);
+    // min(baseScore=0.72, ocrConf=0.80) = 0.72
+    expect(cand.score).toBe(0.72);
     expect(cand.meta?.ocrConfidence).toBe(0.80);
   });
 
-  it("score >= 0.55 → reaches clarification route threshold", () => {
+  it("score >= 0.70 → reaches direct price-lookup threshold", () => {
     const [cand] = extractCandidatesFromOcr(
       { type: "gearbox_tag", code: "S4TA" },
       { allowGearboxTagMinLen4: true },
     );
-    expect(cand.score).toBeGreaterThanOrEqual(0.55);
+    expect(cand.score).toBeGreaterThanOrEqual(0.70);
   });
 
-  it("score < 0.70 → NEVER reaches direct price-lookup threshold", () => {
+  it("score < 0.75 → stays below strong-code score (no false priority over known codes)", () => {
     const [cand] = extractCandidatesFromOcr(
       { type: "gearbox_tag", code: "S4TA" },
       { allowGearboxTagMinLen4: true },
     );
-    expect(cand.score).toBeLessThan(0.70);
+    expect(cand.score).toBeLessThan(0.75);
   });
 
-  it("score is capped by explicit ocrConf when confidence < 0.60", () => {
+  it("score is capped by explicit ocrConf when confidence < 0.72", () => {
     const [cand] = extractCandidatesFromOcr(
-      { type: "gearbox_tag", code: "S4TA", confidence: 0.55 },
+      { type: "gearbox_tag", code: "S4TA", confidence: 0.65 },
       { allowGearboxTagMinLen4: true },
     );
-    // min(0.60, 0.55) = 0.55
-    expect(cand.score).toBe(0.55);
-    expect(cand.meta?.ocrConfidence).toBe(0.55);
+    // min(0.72, 0.65) = 0.65
+    expect(cand.score).toBe(0.65);
+    expect(cand.meta?.ocrConfidence).toBe(0.65);
   });
 
-  it("score is NOT raised above 0.60 when ocrConf > 0.60", () => {
+  it("score is NOT raised above 0.72 when ocrConf > 0.72", () => {
     const [cand] = extractCandidatesFromOcr(
       { type: "gearbox_tag", code: "S4TA", confidence: 0.90 },
       { allowGearboxTagMinLen4: true },
     );
-    // min(0.60, 0.90) = 0.60
-    expect(cand.score).toBe(0.60);
+    // min(0.72, 0.90) = 0.72
+    expect(cand.score).toBe(0.72);
   });
 
   it("reasons include 'ocr_gearbox_tag' and 'gearbox_tag_4char_allowed'", () => {
@@ -146,7 +146,7 @@ describe("B) Flag ON: strict 4-char codes allowed, score = 0.60", () => {
         { allowGearboxTagMinLen4: true },
       );
       expect(cands, `expected 1 candidate for "${code}"`).toHaveLength(1);
-      expect(cands[0].score).toBe(0.60);
+      expect(cands[0].score).toBe(0.72);
     }
   });
 
@@ -159,7 +159,7 @@ describe("B) Flag ON: strict 4-char codes allowed, score = 0.60", () => {
       { allowGearboxTagMinLen4: true },
     );
     expect(cand.value).toBe("S4TA");
-    expect(cand.score).toBe(0.60);
+    expect(cand.score).toBe(0.72);
   });
 
   it("Cyrillic homoglyph 4-char code is normalized and allowed", () => {
@@ -169,7 +169,7 @@ describe("B) Flag ON: strict 4-char codes allowed, score = 0.60", () => {
       { allowGearboxTagMinLen4: true },
     );
     expect(cand.value).toBe("C4TA");
-    expect(cand.score).toBe(0.60);
+    expect(cand.score).toBe(0.72);
   });
 });
 
