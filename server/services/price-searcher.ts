@@ -686,6 +686,36 @@ function parseListingsFromHtml(
     const bodyText = $("body").text();
     const matches = [...bodyText.matchAll(pricePattern)];
 
+    // Structured selectors for avito.ru
+    // Avito renders via React — prices are in data-marker attributes and itemprop.
+    // Fallback to body-text price scan when no structured items found.
+    if (domain.includes("avito.ru")) {
+      // Primary: item cards with data-marker="item"
+      $("[data-marker='item']").each((_i: number, el: any) => {
+        const title = $(el).find("[itemprop='name'], [data-marker='item-title']").first().text().trim()
+          || $(el).find("h3, h2, a").first().text().trim();
+        const priceEl = $(el).find("[data-marker='item-price'], [itemprop='price'], [class*='price']").first();
+        const priceText = priceEl.attr("content") || priceEl.text().trim();
+        const price = parsePriceFromText(priceText);
+        const href = $(el).find("a[data-marker='item-title'], a").first().attr("href");
+        const url = href ? (href.startsWith("http") ? href : `https://www.avito.ru${href}`) : sourceUrl;
+        if (price && title) {
+          listings.push({ title, price, url, site: domain, mileage: null, isUsed: true });
+        }
+      });
+      // Secondary: meta itemprop price on the page (listing detail page)
+      if (listings.length === 0) {
+        $("[itemprop='price']").each((_i: number, el: any) => {
+          const priceText = $(el).attr("content") || $(el).text().trim();
+          const price = parsePriceFromText(priceText + " ₽");
+          const title = $("[itemprop='name']").first().text().trim() || "АКПП б/у (avito.ru)";
+          if (price) {
+            listings.push({ title, price, url: sourceUrl, site: domain, mileage: null, isUsed: true });
+          }
+        });
+      }
+    }
+
     // Structured selectors for drom.ru
     if (domain.includes("drom.ru")) {
       $("[data-bull-item], .bull-item, .listing-item").each((_i: number, el: any) => {

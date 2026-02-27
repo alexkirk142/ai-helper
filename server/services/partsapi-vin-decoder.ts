@@ -32,10 +32,16 @@ async function decodeVinPartsApiOnce(vin: string, apiKey: string): Promise<Parts
   const engMatch = engRaw.match(/\b([A-Z]{2,5}\d{0,4}[A-Z]{0,3})\b/);
   if (engMatch) engineCode = engMatch[1];
 
-  // Clean model name: "Jetta 1,4 (TRENDLINE)" → "Jetta", "Santa Fe" → "Santa Fe"
+  // Clean model name: "X3 3.0i" → "X3", "Jetta 1,4 (TRENDLINE)" → "Jetta", "Santa Fe" → "Santa Fe"
+  // Previous regex /[\d,\(].*$/ stripped from the FIRST digit — "X3 3.0i" → "X" (bug).
+  // New approach: only strip displacement suffixes (space + digit + decimal: "3.0i", "2.0 TDI", "1,4")
+  // and parenthetical variants "(TRENDLINE)", preserving model codes that contain digits (X3, A4, Q7).
   const rawName: string | null = d.naimenovanie ?? null;
   const modelName = rawName
-    ? rawName.replace(/[\d,\(].*$/, "").trim() || rawName
+    ? rawName
+        .replace(/\s+\d+[.,]\d.*$/, "")  // strip displacement: " 3.0i", " 2.0 TDI", " 1,4 (X)"
+        .replace(/\(.*$/, "")             // strip remaining parenthetical: "(TRENDLINE)"
+        .trim() || rawName
     : null;
 
   return {
