@@ -744,6 +744,30 @@ function parseListingsFromHtml(
       });
     }
 
+    // Structured selectors for japancar.ru / dvsavto.ru / kor-motor.ru / similar RU parts sites
+    if (
+      listings.length === 0 &&
+      (domain.includes("japancar.ru") ||
+        domain.includes("dvsavto.ru") ||
+        domain.includes("kor-motor.ru") ||
+        domain.includes("avtgr.ru") ||
+        domain.includes("qx9.ru") ||
+        domain.includes("bibika.ru"))
+    ) {
+      $(".product-card, .product-item, .item-card, [class*='product'], [class*='catalog-item']").each(
+        (_i: number, el: any) => {
+          const title = $(el).find("h2, h3, .title, .name, a").first().text().trim();
+          const priceText = $(el).find("[class*='price'], .price, .cost").first().text().trim();
+          const price = parsePriceFromText(priceText);
+          const href = $(el).find("a").first().attr("href");
+          const url = href ? (href.startsWith("http") ? href : `https://${domain}${href}`) : sourceUrl;
+          if (price && title) {
+            listings.push({ title, price, url, site: domain, mileage: null, isUsed: true });
+          }
+        }
+      );
+    }
+
     // Universal fallback: extract prices from page text
     if (listings.length === 0 && matches.length > 0) {
       for (const match of matches.slice(0, 5)) {

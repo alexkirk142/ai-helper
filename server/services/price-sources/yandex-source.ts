@@ -1,13 +1,21 @@
 const YANDEX_SEARCH_URL = "https://searchapi.api.cloud.yandex.net/v2/web/search";
 
 export const DOMAIN_PRIORITY_SCORES: Record<string, number> = {
+  // Tier 1 — Playwright works reliably, high listing density
   "baza.drom.ru": 10,
   "farpost.ru": 10,
-  "avito.ru": 10,
-  "japancar.ru": 8,
+  "japancar.ru": 9,
+  "dvsavto.ru": 9,
   "qx9.ru": 8,
-  "exist.ru": 6,
-  "emex.ru": 6,
+  "kor-motor.ru": 8,
+  "avtgr.ru": 8,
+  // Tier 2 — good source but Playwright has occasional issues
+  "exist.ru": 7,
+  "emex.ru": 7,
+  "abcp.ru": 7,
+  "bibika.ru": 6,
+  // Avito: strong anti-bot, Playwright always returns 0 — GPT web_search handles it instead
+  "avito.ru": 1,
 };
 
 const EXCLUDED_DOMAINS = [
