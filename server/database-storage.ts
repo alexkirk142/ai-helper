@@ -364,7 +364,7 @@ export class DatabaseStorage implements IStorage {
                 array[${intent}],
                 to_jsonb((${customerMemory.frequentTopics} ->> ${intent})::int + 1)
               )
-              ELSE ${customerMemory.frequentTopics} || jsonb_build_object(${intent}, 1)
+              ELSE ${customerMemory.frequentTopics} || jsonb_build_object(${intent}::text, 1)
             END
           `,
           updatedAt: new Date(),
