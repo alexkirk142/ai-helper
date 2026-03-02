@@ -267,6 +267,7 @@ export class TelegramPersonalAdapter implements ChannelAdapter {
 
       const sessionString = state.client.session.save() as unknown as string;
       authStates.delete(sessionId);
+      try { await state.client.disconnect(); } catch {}
 
       const user = (result as any).user;
       console.log(`[TelegramPersonal] Auth successful for ${phoneNumber}`);
@@ -323,6 +324,7 @@ export class TelegramPersonalAdapter implements ChannelAdapter {
 
       const sessionString = state.client.session.save() as unknown as string;
       authStates.delete(sessionId);
+      try { await state.client.disconnect(); } catch {}
 
       const user = (result as any).user;
       console.log("[TelegramPersonal] 2FA verification successful");
