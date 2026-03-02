@@ -635,14 +635,20 @@ export async function registerRoutes(
     await storage.updateChannel(channelId, { isActive: true });
 
     const { telegramClientManager } = await import("./services/telegram-client-manager");
-    await telegramClientManager.connectAccount(tenantId, accountId, channelId, sessionString);
 
-    telegramClientManager.syncDialogs(tenantId, channelId, { limit: 5, messageLimit: 20 })
+    telegramClientManager.connectAccount(tenantId, accountId, channelId, sessionString)
+      .then(connected => {
+        if (connected) {
+          return telegramClientManager.syncDialogs(tenantId, channelId, { limit: 5, messageLimit: 20 });
+        }
+      })
       .then(syncResult => {
-        console.log(`[TelegramPersonal] Sync complete: ${syncResult.dialogsImported} dialogs, ${syncResult.messagesImported} messages`);
+        if (syncResult) {
+          console.log(`[TelegramPersonal] Sync complete: ${syncResult.dialogsImported} dialogs, ${syncResult.messagesImported} messages`);
+        }
       })
       .catch(err => {
-        console.error(`[TelegramPersonal] Sync error:`, err.message);
+        console.error(`[TelegramPersonal] Background connect/sync error:`, err.message);
       });
   }
 

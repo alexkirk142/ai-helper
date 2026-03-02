@@ -231,7 +231,12 @@ class TelegramClientManager {
       });
 
       console.log(`[TelegramClientManager] Connecting account ${connectionKey}...`);
-      await client.connect();
+      await Promise.race([
+        client.connect(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("client.connect() timed out after 30s")), 30000)
+        ),
+      ]);
 
       const isAuthorized = await client.isUserAuthorized();
       if (!isAuthorized) {
