@@ -124,7 +124,8 @@ export class MaxGreenApiAdapter {
       throw err;
     }
     if (!res.ok) {
-      throw new Error(`GREEN-API sendMessage failed: ${res.status} ${res.statusText}`);
+      const errBody = await res.text().catch(() => "");
+      throw new Error(`GREEN-API sendMessage failed: ${res.status} ${res.statusText} | chatId=${chatId} | body=${errBody}`);
     }
     return res.json();
   }
@@ -154,7 +155,8 @@ export class MaxGreenApiAdapter {
       throw err;
     }
     if (!res.ok) {
-      throw new Error(`GREEN-API sendFile failed: ${res.status} ${res.statusText}`);
+      const errBody = await res.text().catch(() => "");
+      throw new Error(`GREEN-API sendFile failed: ${res.status} ${res.statusText} | chatId=${chatId} | body=${errBody}`);
     }
     return res.json();
   }
