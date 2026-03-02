@@ -19,6 +19,13 @@ interface ActiveConnection {
   reconnectAttempts: number;
 }
 
+interface PendingOutboundMessage {
+  externalConversationId: string;
+  text: string;
+  options?: { replyToMessageId?: string };
+  addedAt: Date;
+}
+
 class TelegramClientManager {
   private connections = new Map<string, ActiveConnection>();
   private reconnectTimers = new Map<string, NodeJS.Timeout>();
@@ -26,6 +33,10 @@ class TelegramClientManager {
   private healthCheckTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private isInitialized = false;
+  // Queue of outbound messages that arrived while a channel was reconnecting.
+  // Key: "tenantId:channelId". Flushed automatically when the connection is restored.
+  private pendingOutbound = new Map<string, PendingOutboundMessage[]>();
+  private static readonly PENDING_MESSAGE_TTL_MS = 10 * 60 * 1000; // 10 min
 
   private async getCredentials(): Promise<{ apiId: number; apiHash: string } | null> {
     const [dbApiId, dbApiHash] = await Promise.all([
@@ -146,9 +157,7 @@ class TelegramClientManager {
   }
 
   private async heartbeatCheck(): Promise<void> {
-    const activeCount = this.connections.size;
-    if (activeCount === 0) return;
-
+    // Part 1: ping existing connections and reconnect broken ones
     for (const [key, connection] of Array.from(this.connections.entries())) {
       try {
         await connection.client.getMe();
@@ -164,6 +173,31 @@ class TelegramClientManager {
 
         this.scheduleReconnect(key, connection, msg);
       }
+    }
+
+    // Part 2: detect orphaned accounts — active in DB but absent from connections
+    // map AND not already scheduled for reconnect. This handles the case where the
+    // process restarted without initialize() completing (e.g. migration error on the
+    // previous boot) or where all reconnect attempts silently gave up.
+    try {
+      const isEnabled = await featureFlagService.isEnabled("TELEGRAM_PERSONAL_CHANNEL_ENABLED");
+      if (!isEnabled) return;
+
+      const accounts = await storage.getActiveTelegramAccounts();
+      for (const account of accounts) {
+        if (!account.sessionString) continue;
+        const connectionKey = `${account.tenantId}:${account.id}`;
+        const alreadyConnected = this.connections.has(connectionKey);
+        const hasPendingTimer = this.reconnectTimers.has(connectionKey);
+        if (!alreadyConnected && !hasPendingTimer) {
+          console.log(`[TelegramClientManager] Heartbeat detected orphaned account ${connectionKey} — triggering reconnect`);
+          // Fire-and-forget; errors are handled inside connectAccount via scheduleReconnect
+          this.connectAccount(account.tenantId, account.id, account.channelId, account.sessionString)
+            .catch((err: any) => console.error(`[TelegramClientManager] Heartbeat reconnect failed for ${connectionKey}:`, err.message));
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[TelegramClientManager] Heartbeat orphan check error: ${err.message}`);
     }
   }
 
@@ -298,6 +332,13 @@ class TelegramClientManager {
         console.warn(`[TelegramClientManager] Could not persist updated session for ${connectionKey}: ${saveErr.message}`);
       }
 
+      // Flush any messages that were queued while this channel was reconnecting
+      if (channelId) {
+        this.flushPendingMessages(tenantId, channelId).catch((err: any) =>
+          console.error(`[TelegramClientManager] flushPendingMessages error for ${connectionKey}: ${err.message}`)
+        );
+      }
+
       return true;
     } catch (error: any) {
       console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
@@ -389,6 +430,12 @@ class TelegramClientManager {
 
       console.log(`[TelegramClientManager] Connected: ${connectionKey}, total connections: ${this.connections.size}`);
       this.reconnectCounts.delete(connectionKey); // reset on success
+
+      // Flush any messages queued while this legacy channel was reconnecting
+      this.flushPendingMessages(tenantId, channelId).catch((err: any) =>
+        console.error(`[TelegramClientManager] flushPendingMessages error for ${connectionKey}: ${err.message}`)
+      );
+
       return true;
     } catch (error: any) {
       console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
@@ -766,15 +813,17 @@ class TelegramClientManager {
       clearTimeout(existingTimer);
     }
 
-    // AUTH_KEY_DUPLICATED after restart is temporary — Telegram releases old key after ~60s.
-    // Use a fixed 90s delay for transient errors so the old connection expires on Telegram's side.
-    // For network drops (non-transient), start with a 5s delay so messages resume quickly;
-    // exponential backoff caps at 5 min for persistent failures.
+    // AUTH_KEY_DUPLICATED after restart is temporary — Telegram releases old key after ~30–60s
+    // once the old container stops. Use an escalating delay: 30s → 60s → 90s → 90s so the first
+    // retry is fast (old container usually stops within 30s on Railway) but subsequent retries
+    // back off without hammering Telegram. For network drops (non-transient), start with 5s and
+    // apply exponential backoff capped at 5 min.
     const isTransient = errorMessage
       ? TelegramClientManager.TRANSIENT_ERRORS.some((e) => errorMessage.includes(e))
       : false;
+    const transientDelay = Math.min(30000 * attempts, 90000); // 30s, 60s, 90s, 90s, ...
     const delay = isTransient
-      ? 90000
+      ? transientDelay
       : Math.min(5000 * Math.pow(2, attempts - 1), 300000);
 
     console.log(
@@ -833,6 +882,45 @@ class TelegramClientManager {
     }
   }
 
+  /** Enqueue an outbound message to be delivered once the channel reconnects. */
+  private enqueuePendingMessage(
+    tenantId: string,
+    channelId: string,
+    externalConversationId: string,
+    text: string,
+    options?: { replyToMessageId?: string },
+  ): void {
+    const queueKey = `${tenantId}:${channelId}`;
+    const queue = this.pendingOutbound.get(queueKey) ?? [];
+    queue.push({ externalConversationId, text, options, addedAt: new Date() });
+    this.pendingOutbound.set(queueKey, queue);
+    console.log(`[TelegramClientManager] Queued message for ${queueKey} (queue size: ${queue.length})`);
+  }
+
+  /** Deliver all queued messages for a channel now that it is connected. */
+  private async flushPendingMessages(tenantId: string, channelId: string | null): Promise<void> {
+    if (!channelId) return;
+    const queueKey = `${tenantId}:${channelId}`;
+    const queue = this.pendingOutbound.get(queueKey);
+    if (!queue || queue.length === 0) return;
+
+    this.pendingOutbound.delete(queueKey);
+    const now = Date.now();
+    const alive = queue.filter(m => now - m.addedAt.getTime() < TelegramClientManager.PENDING_MESSAGE_TTL_MS);
+    const expired = queue.length - alive.length;
+    if (expired > 0) {
+      console.log(`[TelegramClientManager] Dropped ${expired} expired queued message(s) for ${queueKey}`);
+    }
+
+    console.log(`[TelegramClientManager] Flushing ${alive.length} queued message(s) for ${queueKey}`);
+    for (const msg of alive) {
+      const result = await this.sendMessage(tenantId, channelId, msg.externalConversationId, msg.text, msg.options);
+      if (!result.success) {
+        console.error(`[TelegramClientManager] Queued message delivery failed for ${queueKey}: ${result.error}`);
+      }
+    }
+  }
+
   async sendMessage(
     tenantId: string,
     channelId: string,
@@ -842,6 +930,13 @@ class TelegramClientManager {
   ): Promise<{ success: boolean; externalMessageId?: string; error?: string }> {
     const connection = this.findConnection(tenantId, channelId);
     if (!connection?.connected) {
+      // If there is a reconnect in progress, queue the message for delivery on restore.
+      // Check whether any connection key for this channel has a pending timer.
+      const hasPendingReconnect = Array.from(this.reconnectTimers.keys()).some(key => key.startsWith(tenantId));
+      if (hasPendingReconnect) {
+        this.enqueuePendingMessage(tenantId, channelId, externalConversationId, text, options);
+        return { success: false, error: "Not connected — message queued for delivery on reconnect" };
+      }
       return { success: false, error: "Not connected" };
     }
 
@@ -1359,6 +1454,7 @@ class TelegramClientManager {
       } catch {}
     }
     this.connections.clear();
+    this.pendingOutbound.clear();
     this.isInitialized = false;
 
     console.log("[TelegramClientManager] Shutdown complete");

@@ -13,4 +13,4 @@ cmds = [
 cmds = ["npm run build"]
 
 [start]
-cmd = "npx drizzle-kit push --force && npm run start"
+cmd = "sh scripts/start.sh"
