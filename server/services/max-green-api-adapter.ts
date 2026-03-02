@@ -6,6 +6,23 @@ function getApiHost(idInstance: string): string {
   return `https://${cluster}.api.green-api.com`;
 }
 
+/**
+ * GREEN-API MAX accepts exactly three chatId formats:
+ *   1. "79991234567@c.us"  — phone number (10+ digits) + @c.us
+ *   2. "41837581"          — MAX internal user_id (plain digits, NO suffix)
+ *   3. "-1001234567890"    — group_id (negative number)
+ *
+ * Short numeric IDs (< 10 digits) are MAX internal user IDs, NOT phone numbers.
+ * If they arrive with an @c.us suffix (legacy bad data), strip it so GREEN-API accepts them.
+ */
+function sanitizeMaxChatId(chatId: string): string {
+  const match = chatId.match(/^(\d+)@c\.us$/);
+  if (match && match[1].length < 10) {
+    return match[1];
+  }
+  return chatId;
+}
+
 const BASE_URL = (idInstance: string) =>
   `${getApiHost(idInstance)}/v3/waInstance${idInstance}`;
 
@@ -110,12 +127,16 @@ export class MaxGreenApiAdapter {
     text: string
   ): Promise<{ idMessage: string }> {
     const url = `${BASE_URL(idInstance)}/sendMessage/${token}`;
+    const sanitizedChatId = sanitizeMaxChatId(chatId);
+    if (sanitizedChatId !== chatId) {
+      console.log(`[MaxGreenApi] chatId sanitized for send: "${chatId}" → "${sanitizedChatId}"`);
+    }
     let res: Response;
     try {
       res = await fetchWithTimeout(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId, message: text }),
+        body: JSON.stringify({ chatId: sanitizedChatId, message: text }),
       });
     } catch (err: any) {
       if (err.name === "AbortError") {
@@ -125,7 +146,7 @@ export class MaxGreenApiAdapter {
     }
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
-      throw new Error(`GREEN-API sendMessage failed: ${res.status} ${res.statusText} | chatId=${chatId} | body=${errBody}`);
+      throw new Error(`GREEN-API sendMessage failed: ${res.status} ${res.statusText} | chatId=${sanitizedChatId} | body=${errBody}`);
     }
     return res.json();
   }
@@ -140,8 +161,9 @@ export class MaxGreenApiAdapter {
     caption?: string
   ): Promise<{ idMessage: string }> {
     const url = `${BASE_URL(idInstance)}/sendFileByUpload/${token}`;
+    const sanitizedChatId = sanitizeMaxChatId(chatId);
     const form = new FormData();
-    form.append("chatId", chatId);
+    form.append("chatId", sanitizedChatId);
     form.append("file", new Blob([buffer], { type: mimeType }), fileName);
     if (caption) form.append("caption", caption);
 
@@ -156,7 +178,7 @@ export class MaxGreenApiAdapter {
     }
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
-      throw new Error(`GREEN-API sendFile failed: ${res.status} ${res.statusText} | chatId=${chatId} | body=${errBody}`);
+      throw new Error(`GREEN-API sendFile failed: ${res.status} ${res.statusText} | chatId=${sanitizedChatId} | body=${errBody}`);
     }
     return res.json();
   }

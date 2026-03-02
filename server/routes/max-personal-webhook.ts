@@ -174,34 +174,58 @@ router.post("/:tenantId/:accountId", async (req, res) => {
       }
     }
 
-    // Normalize chatId to always include the "@c.us" suffix.
-    // GREEN-API sometimes sends chatId without the suffix (e.g. "205361510" instead of
-    // "205361510@c.us"), which would break the lookup against customers created by
-    // start-conversation (which always appends "@c.us").
-    // Rule: if chatId already contains "@" leave it untouched (covers @c.us and @g.us),
-    // otherwise append "@c.us".
-    let normalizedChatId = sender.chatId.includes("@")
-      ? sender.chatId
-      : `${sender.chatId}@c.us`;
+    // Normalize chatId for storage.
+    //
+    // GREEN-API MAX uses three chatId formats:
+    //   1. "79991234567@c.us"  — phone number (always 10+ digits before @c.us)
+    //   2. "41837581"          — MAX internal user_id (short numeric, NO suffix)
+    //   3. "-1001234567890"    — group_id (negative number, may carry @g.us)
+    //
+    // For phone-length numbers (10+ digits) without "@" we add the @c.us suffix so they
+    // match customers created by start-conversation.
+    // For short numeric IDs (< 10 digits) we keep them as-is — adding @c.us would produce
+    // an invalid chatId that GREEN-API rejects with 400 on the next send.
+    let normalizedChatId: string;
+    if (sender.chatId.includes("@")) {
+      normalizedChatId = sender.chatId;
+    } else if (/^\d{10,}$/.test(sender.chatId)) {
+      // Phone-length number — add @c.us to match the format used by start-conversation.
+      normalizedChatId = `${sender.chatId}@c.us`;
+    } else {
+      // Short numeric MAX internal user_id or group_id — keep as-is.
+      normalizedChatId = sender.chatId;
+    }
 
-    // If chatId is a numeric MAX internal ID, try to resolve it to the phone-based externalId.
-    // sendMessage only works with phone-based chatIds, so we must keep externalId as phone.
-    // The numeric ID is stored in customer.metadata.maxInternalId by outgoingAPIMessageReceived.
-    const incomingLocalPart = normalizedChatId.split("@")[0];
+    // If chatId is a pure-numeric value (either short MAX ID or a phone without @c.us),
+    // try to resolve it to an existing customer.
+    const incomingLocalPart = normalizedChatId.includes("@")
+      ? normalizedChatId.split("@")[0]
+      : normalizedChatId;
     if (/^\d+$/.test(incomingLocalPart)) {
+      // 1. Exact match on the normalised form.
       const existsByExternalId = await storage.getCustomerByExternalId(tenantId, "max_personal", normalizedChatId);
       if (!existsByExternalId) {
-        // Look for a customer who has this numeric ID as metadata.maxInternalId
-        const byInternalId = await db.query.customers.findFirst({
-          where: and(
-            eq(customers.tenantId, tenantId),
-            eq(customers.channel, "max_personal"),
-            sql`${customers.metadata}->>'maxInternalId' = ${incomingLocalPart}`
-          ),
-        });
-        if (byInternalId) {
-          console.log(`[MaxPersonalWebhook] Resolved MAX internal ID ${incomingLocalPart} → phone externalId: ${byInternalId.externalId}`);
-          normalizedChatId = byInternalId.externalId;
+        // 2. Legacy: some customers were stored with the wrong "shortId@c.us" format.
+        //    Try that variant before falling back to metadata lookup.
+        const legacyId = `${incomingLocalPart}@c.us`;
+        const existsByLegacyId = await storage.getCustomerByExternalId(tenantId, "max_personal", legacyId);
+        if (existsByLegacyId) {
+          console.log(`[MaxPersonalWebhook] Matched legacy chatId format ${legacyId} → using as normalizedChatId`);
+          normalizedChatId = legacyId;
+        } else {
+          // 3. Look for a customer who has this numeric ID as metadata.maxInternalId
+          //    (set by outgoingAPIMessageReceived after we sent to them by phone number).
+          const byInternalId = await db.query.customers.findFirst({
+            where: and(
+              eq(customers.tenantId, tenantId),
+              eq(customers.channel, "max_personal"),
+              sql`${customers.metadata}->>'maxInternalId' = ${incomingLocalPart}`
+            ),
+          });
+          if (byInternalId) {
+            console.log(`[MaxPersonalWebhook] Resolved MAX internal ID ${incomingLocalPart} → phone externalId: ${byInternalId.externalId}`);
+            normalizedChatId = byInternalId.externalId;
+          }
         }
       }
     }
