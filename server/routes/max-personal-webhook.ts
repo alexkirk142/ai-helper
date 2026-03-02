@@ -95,12 +95,21 @@ router.post("/:tenantId/:accountId", async (req, res) => {
     // Capture the numeric chatId and update the customer record so that future inbound
     // webhooks (which always carry the numeric chatId) match the right customer.
     if (payload.typeWebhook === "outgoingAPIMessageReceived") {
+      console.log(`[MaxPersonalWebhook] outgoingAPIMessageReceived full senderData:`, JSON.stringify(payload.senderData));
       const numericChatId = payload.senderData?.chatId;
+      const senderSelf = payload.senderData?.sender;
       const idMessage = payload.idMessage;
 
       if (numericChatId && idMessage) {
         const normalized = numericChatId.includes("@") ? numericChatId : `${numericChatId}@c.us`;
         const localPart = normalized.split("@")[0];
+
+        // Safety guard: if chatId == sender (our own account echoed back), skip migration.
+        // This prevents overwriting the customer's externalId with our own account's internal ID.
+        if (senderSelf && (numericChatId === senderSelf || normalized === senderSelf || localPart === senderSelf?.split("@")[0])) {
+          console.warn(`[MaxPersonalWebhook] Skipping chatId migration — chatId matches sender (our own account): chatId=${normalized} sender=${senderSelf}`);
+          return res.json({ ok: true });
+        }
         // A numeric MAX ID is all-digits and shorter than a phone number.
         // Phone numbers in @c.us format are always >= 10 digits (RU: 11, others: 10-15).
         // MAX internal user IDs are typically 7-9 digits.
