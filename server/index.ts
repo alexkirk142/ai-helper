@@ -221,27 +221,24 @@ app.use((req, res, next) => {
       // Pass the real tenant UUID to map file system "default" folder to database UUID
       await restoreWhatsAppSessions(tenant.id);
       
-      // Auto-restore Telegram Personal sessions on startup
-      try {
-        await telegramClientManager.initialize();
-        log("Telegram Personal sessions initialized", "startup");
-      } catch (err: any) {
-        log(`Telegram Personal initialization failed: ${err.message}`, "startup");
-      }
-      
       // Auto-start Podzamenu lookup service
       startPodzamenuService();
 
-      // Wait for Podzamenu (Playwright) to finish initializing before workers start
+      // Start BullMQ workers immediately — they must not wait on Telegram init
+      // (Telegram connect can block up to 30s per account on AUTH_KEY_DUPLICATED)
       log("Waiting 15s for Podzamenu service to initialize...", "startup");
       await new Promise((resolve) => setTimeout(resolve, 15_000));
       log("Podzamenu startup delay elapsed, starting BullMQ workers", "startup");
 
-      // Start BullMQ workers
       vehicleLookupWorker = await startVehicleLookupWorker();
       priceLookupWorker = await startPriceLookupWorker();
       messageSendWorker = await startMessageSendWorker();
       log("BullMQ workers started", "startup");
+
+      // Auto-restore Telegram Personal sessions in background — must not block worker startup
+      telegramClientManager.initialize()
+        .then(() => log("Telegram Personal sessions initialized", "startup"))
+        .catch((err: any) => log(`Telegram Personal initialization failed: ${err.message}`, "startup"));
     },
   );
 })();
