@@ -204,6 +204,7 @@ export class TelegramPersonalAdapter implements ChannelAdapter {
       const session = new StringSession("");
       const client = new TelegramClient(session, apiId, apiHash, {
         connectionRetries: 5,
+        autoReconnect: false,
       });
 
       await client.connect();
@@ -250,7 +251,7 @@ export class TelegramPersonalAdapter implements ChannelAdapter {
     sessionId: string,
     phoneNumber: string,
     code: string
-  ): Promise<{ success: boolean; sessionString?: string; user?: any; needs2FA?: boolean; error?: string }> {
+  ): Promise<{ success: boolean; sessionString?: string; client?: TelegramClient; user?: any; needs2FA?: boolean; error?: string }> {
     const state = authStates.get(sessionId);
     if (!state || !state.client || !state.phoneCodeHash) {
       return { success: false, error: "Auth session not found. Please start over" };
@@ -266,8 +267,8 @@ export class TelegramPersonalAdapter implements ChannelAdapter {
       );
 
       const sessionString = state.client.session.save() as unknown as string;
+      const connectedClient = state.client;
       authStates.delete(sessionId);
-      try { await state.client.disconnect(); } catch {}
 
       const user = (result as any).user;
       console.log(`[TelegramPersonal] Auth successful for ${phoneNumber}`);
@@ -275,6 +276,7 @@ export class TelegramPersonalAdapter implements ChannelAdapter {
       return {
         success: true,
         sessionString,
+        client: connectedClient,
         user: user ? {
           id: user.id?.toString(),
           firstName: user.firstName,
@@ -305,7 +307,7 @@ export class TelegramPersonalAdapter implements ChannelAdapter {
   static async verify2FA(
     sessionId: string,
     password: string
-  ): Promise<{ success: boolean; sessionString?: string; user?: any; error?: string }> {
+  ): Promise<{ success: boolean; sessionString?: string; client?: TelegramClient; user?: any; error?: string }> {
     const state = authStates.get(sessionId);
     if (!state || !state.client) {
       return { success: false, error: "Auth session not found. Please start over" };
@@ -323,8 +325,8 @@ export class TelegramPersonalAdapter implements ChannelAdapter {
       );
 
       const sessionString = state.client.session.save() as unknown as string;
+      const connectedClient = state.client;
       authStates.delete(sessionId);
-      try { await state.client.disconnect(); } catch {}
 
       const user = (result as any).user;
       console.log("[TelegramPersonal] 2FA verification successful");
@@ -332,6 +334,7 @@ export class TelegramPersonalAdapter implements ChannelAdapter {
       return {
         success: true,
         sessionString,
+        client: connectedClient,
         user: user ? {
           id: user.id?.toString(),
           firstName: user.firstName,

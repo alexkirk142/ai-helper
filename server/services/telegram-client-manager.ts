@@ -191,7 +191,7 @@ class TelegramClientManager {
   }
 
   /** Connect a multi-account session (from telegramSessions table) */
-  async connectAccount(tenantId: string, accountId: string, channelId: string | null, sessionString: string): Promise<boolean> {
+  async connectAccount(tenantId: string, accountId: string, channelId: string | null, sessionString: string, existingClient?: TelegramClient): Promise<boolean> {
     const connectionKey = `${tenantId}:${accountId}`;
 
     const existing = this.connections.get(connectionKey);
@@ -219,24 +219,34 @@ class TelegramClientManager {
     }
 
     try {
-      const { apiId, apiHash } = credentials;
-      const session = new StringSession(sessionString);
-      const client = new TelegramClient(session, apiId, apiHash, {
-        connectionRetries: 0,
-        // autoReconnect: false — all reconnection is handled by our scheduleReconnect logic.
-        // gramJS's internal autoReconnect races with our reconnect on AUTH_KEY_DUPLICATED:
-        // gramJS queues its own retry before our catch block can stop it, causing two
-        // simultaneous connections with the same auth key → infinite AUTH_KEY_DUPLICATED loop.
-        autoReconnect: false,
-      });
+      let client: TelegramClient;
 
-      console.log(`[TelegramClientManager] Connecting account ${connectionKey}...`);
-      await Promise.race([
-        client.connect(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("client.connect() timed out after 30s")), 30000)
-        ),
-      ]);
+      if (existingClient) {
+        // Reuse the already-connected auth client — no disconnect/reconnect needed.
+        // This avoids AUTH_KEY_DUPLICATED that would occur if we disconnected and
+        // immediately reconnected with the same session/auth key.
+        console.log(`[TelegramClientManager] Adopting existing auth client for ${connectionKey}`);
+        client = existingClient;
+      } else {
+        const { apiId, apiHash } = credentials;
+        const session = new StringSession(sessionString);
+        client = new TelegramClient(session, apiId, apiHash, {
+          connectionRetries: 0,
+          // autoReconnect: false — all reconnection is handled by our scheduleReconnect logic.
+          // gramJS's internal autoReconnect races with our reconnect on AUTH_KEY_DUPLICATED:
+          // gramJS queues its own retry before our catch block can stop it, causing two
+          // simultaneous connections with the same auth key → infinite AUTH_KEY_DUPLICATED loop.
+          autoReconnect: false,
+        });
+
+        console.log(`[TelegramClientManager] Connecting account ${connectionKey}...`);
+        await Promise.race([
+          client.connect(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("client.connect() timed out after 30s")), 30000)
+          ),
+        ]);
+      }
 
       const isAuthorized = await client.isUserAuthorized();
       if (!isAuthorized) {
@@ -278,7 +288,7 @@ class TelegramClientManager {
       // (e.g. after AUTH_KEY_DUPLICATED recovery). Without this, the next restart re-reads the
       // stale key from DB and immediately hits AUTH_KEY_DUPLICATED or AUTH_KEY_INVALID again.
       try {
-        const savedSession = session.save() as unknown as string;
+        const savedSession = client.session.save() as unknown as string;
         if (savedSession && savedSession !== sessionString) {
           console.log(`[TelegramClientManager] Auth key rotated for ${connectionKey} — persisting updated session to DB`);
           await storage.updateTelegramAccount(accountId, { sessionString: savedSession });

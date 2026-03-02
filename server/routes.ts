@@ -615,7 +615,8 @@ export async function registerRoutes(
     accountId: string,
     sessionString: string,
     user: any,
-    authMethod: "qr" | "phone"
+    authMethod: "qr" | "phone",
+    existingClient?: any
   ): Promise<void> {
     const channelId = await ensureTelegramChannel(tenantId);
 
@@ -636,7 +637,7 @@ export async function registerRoutes(
 
     const { telegramClientManager } = await import("./services/telegram-client-manager");
 
-    telegramClientManager.connectAccount(tenantId, accountId, channelId, sessionString)
+    telegramClientManager.connectAccount(tenantId, accountId, channelId, sessionString, existingClient)
       .then(connected => {
         if (connected) {
           return telegramClientManager.syncDialogs(tenantId, channelId, { limit: 5, messageLimit: 20 });
@@ -748,7 +749,7 @@ export async function registerRoutes(
       const result = await TelegramPersonalAdapter.verifyCode(sessionId, phoneNumber, code);
 
       if (result.success && result.sessionString) {
-        await finalizeAccountAuth(tenantId, accountId, result.sessionString, result.user, "phone");
+        await finalizeAccountAuth(tenantId, accountId, result.sessionString, result.user, "phone", result.client);
         res.json({ success: true, user: result.user });
       } else if (result.needs2FA) {
         await storage.updateTelegramAccount(accountId, { status: "awaiting_2fa" });
@@ -783,7 +784,7 @@ export async function registerRoutes(
       const result = await TelegramPersonalAdapter.verify2FA(sessionId, password);
 
       if (result.success && result.sessionString) {
-        await finalizeAccountAuth(tenantId, accountId, result.sessionString, result.user, "phone");
+        await finalizeAccountAuth(tenantId, accountId, result.sessionString, result.user, "phone", result.client);
         res.json({ success: true, user: result.user });
       } else {
         await storage.updateTelegramAccount(accountId, { lastError: result.error });
