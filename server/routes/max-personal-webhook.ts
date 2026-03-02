@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "../db";
-import { maxPersonalAccounts } from "@shared/schema";
-import { and, eq } from "drizzle-orm";
+import { maxPersonalAccounts, customers } from "@shared/schema";
+import { and, eq, sql } from "drizzle-orm";
 import type { ParsedIncomingMessage, ParsedAttachment } from "../services/channel-adapter";
 import { processIncomingMessageFull } from "../services/inbound-message-handler";
 import { storage } from "../storage";
@@ -121,19 +121,26 @@ router.post("/:tenantId/:accountId", async (req, res) => {
           try {
             const customer = await storage.getCustomerByOutboundMessageId(tenantId, "max_personal", idMessage);
 
-            if (customer && customer.externalId !== normalized) {
+            if (customer) {
               const oldLocal = (customer.externalId ?? "").split("@")[0];
-              // Migrate only when the old ID is longer (phone) and the new ID is shorter (numeric MAX ID).
-              // This correctly handles all phone lengths (RU=11, others=10-15) without magic numbers.
+              // Only save the numeric MAX internal ID when the existing externalId is phone-based
+              // (phone is longer than MAX internal ID by definition).
               const isPhoneBased = /^\d+$/.test(oldLocal) && oldLocal.length > localPart.length;
 
               if (isPhoneBased) {
-                await storage.updateCustomer(customer.id, tenantId, { externalId: normalized });
-                console.log(`[MaxPersonalWebhook] Migrated customer ${customer.id} externalId: ${customer.externalId} → ${normalized}`);
+                // Save the numeric MAX internal ID in metadata for inbound message matching.
+                // Do NOT replace externalId — the phone-based chatId is required for sendMessage.
+                const existingMeta = (customer.metadata as Record<string, unknown>) ?? {};
+                if (existingMeta.maxInternalId !== localPart) {
+                  await storage.updateCustomer(customer.id, tenantId, {
+                    metadata: { ...existingMeta, maxInternalId: localPart },
+                  });
+                  console.log(`[MaxPersonalWebhook] Saved MAX internal ID for customer ${customer.id}: maxInternalId=${localPart} (externalId kept as ${customer.externalId})`);
+                }
               }
             }
           } catch (err: any) {
-            console.error(`[MaxPersonalWebhook] Failed to remap chatId for idMessage=${idMessage}:`, err.message);
+            console.error(`[MaxPersonalWebhook] Failed to save maxInternalId for idMessage=${idMessage}:`, err.message);
           }
         }
       }
@@ -173,9 +180,31 @@ router.post("/:tenantId/:accountId", async (req, res) => {
     // start-conversation (which always appends "@c.us").
     // Rule: if chatId already contains "@" leave it untouched (covers @c.us and @g.us),
     // otherwise append "@c.us".
-    const normalizedChatId = sender.chatId.includes("@")
+    let normalizedChatId = sender.chatId.includes("@")
       ? sender.chatId
       : `${sender.chatId}@c.us`;
+
+    // If chatId is a numeric MAX internal ID, try to resolve it to the phone-based externalId.
+    // sendMessage only works with phone-based chatIds, so we must keep externalId as phone.
+    // The numeric ID is stored in customer.metadata.maxInternalId by outgoingAPIMessageReceived.
+    const incomingLocalPart = normalizedChatId.split("@")[0];
+    if (/^\d+$/.test(incomingLocalPart)) {
+      const existsByExternalId = await storage.getCustomerByExternalId(tenantId, "max_personal", normalizedChatId);
+      if (!existsByExternalId) {
+        // Look for a customer who has this numeric ID as metadata.maxInternalId
+        const byInternalId = await db.query.customers.findFirst({
+          where: and(
+            eq(customers.tenantId, tenantId),
+            eq(customers.channel, "max_personal"),
+            sql`${customers.metadata}->>'maxInternalId' = ${incomingLocalPart}`
+          ),
+        });
+        if (byInternalId) {
+          console.log(`[MaxPersonalWebhook] Resolved MAX internal ID ${incomingLocalPart} → phone externalId: ${byInternalId.externalId}`);
+          normalizedChatId = byInternalId.externalId;
+        }
+      }
+    }
 
     const parsed: ParsedIncomingMessage = {
       externalMessageId: payload.idMessage || `mp_${Date.now()}`,
