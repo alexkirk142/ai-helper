@@ -26,11 +26,15 @@ export class MaxPersonalAdapter implements ChannelAdapter {
       return { success: false, error: "No MAX Personal account connected for this tenant" };
     }
 
+    // externalConversationId may be encoded as "tenantId::chatId" — extract only the chatId part.
+    const parts = externalConversationId.split("::");
+    const chatId = parts.length === 2 ? parts[1] : externalConversationId;
+
     try {
       const result = await maxGreenApiAdapter.sendMessage(
         account.idInstance,
         account.apiTokenInstance,
-        externalConversationId,
+        chatId,
         text
       );
       return {

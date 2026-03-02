@@ -871,7 +871,9 @@ router.post("/api/suggestions/:id/approve", requireAuth, requirePermission("MANA
       sentImmediately = true;
     }
 
-    const channelSendResult = await sendToChannel(suggestion.conversationId, messageToSend, tenant.id);
+    const channelSendResult = sentImmediately
+      ? await sendToChannel(suggestion.conversationId, messageToSend, tenant.id)
+      : null;
 
     await auditLog.logSuggestionApproved(suggestion.id, "operator");
     await auditLog.logMessageSent(message.id, suggestion.conversationId, "ai", "ai");
@@ -998,7 +1000,9 @@ router.post("/api/suggestions/:id/edit", requireAuth, requirePermission("MANAGE_
       sentImmediately = true;
     }
 
-    const channelSendResult = await sendToChannel(suggestion.conversationId, editedText, tenant.id);
+    const channelSendResult = sentImmediately
+      ? await sendToChannel(suggestion.conversationId, editedText, tenant.id)
+      : null;
 
     await auditLog.logSuggestionEdited(suggestion.id, "operator", suggestion.suggestedReply, editedText);
     await auditLog.logMessageSent(message.id, suggestion.conversationId, "operator", "user");

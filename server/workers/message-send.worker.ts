@@ -80,7 +80,7 @@ async function markMessageAsFailed(
 }
 
 async function processDelayedMessage(job: Job<DelayedMessageJobData>): Promise<void> {
-  const { tenantId, messageId, conversationId, suggestionId, channel, text, typingEnabled, createdAt, delayMs } = job.data;
+  const { tenantId, messageId, conversationId, suggestionId, channel, text, typingEnabled, createdAt, delayMs, jobId } = job.data;
 
   const jobStartTime = Date.now();
   const actualDelayMs = jobStartTime - new Date(createdAt).getTime();
@@ -99,6 +99,45 @@ async function processDelayedMessage(job: Job<DelayedMessageJobData>): Promise<v
       "system",
       { reason: validity.reason, jobId: job.id }
     );
+    return;
+  }
+
+  // MAX Personal requires knowing the customer's phone-based chatId and the accountId —
+  // neither of which can be derived from the DB conversation UUID alone.
+  // Look up the conversation so we can call sendMessageForTenant directly.
+  if (channel === "max_personal") {
+    const { maxPersonalAdapter } = await import("../services/max-personal-adapter");
+    const conversation = await storage.getConversationDetail(conversationId, tenantId);
+    if (!conversation?.customer?.externalId) {
+      throw new Error(`[Worker] MAX Personal: customer externalId not found for conversation ${conversationId}`);
+    }
+    const chatId = conversation.customer.externalId;
+    const msgs = conversation.messages ?? [];
+    const effectiveAccountId: string | undefined =
+      (msgs.find((m: any) => (m.metadata as any)?.accountId)?.metadata as any)?.accountId;
+
+    const result = await maxPersonalAdapter.sendMessageForTenant(tenantId, chatId, text, undefined, effectiveAccountId);
+    if (result.success) {
+      await markMessageAsSent(messageId, tenantId, result.externalMessageId || "");
+      recordJobCompleted(Date.now() - new Date(createdAt).getTime());
+      await auditLog.log(
+        "message_sent_delayed" as any,
+        "message",
+        messageId,
+        "worker",
+        "system",
+        {
+          jobId,
+          scheduledDelayMs: delayMs,
+          actualDelayMs: Date.now() - new Date(createdAt).getTime(),
+          externalMessageId: result.externalMessageId,
+          channel,
+        }
+      );
+      console.log(`[Worker] MAX Personal message sent: ${messageId}`);
+    } else {
+      throw new Error(result.error || "MAX Personal send failed");
+    }
     return;
   }
 
