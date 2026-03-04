@@ -38,6 +38,12 @@ class TelegramClientManager {
   private pendingOutbound = new Map<string, PendingOutboundMessage[]>();
   private static readonly PENDING_MESSAGE_TTL_MS = 10 * 60 * 1000; // 10 min
 
+  // access_hash cache: `tenantId:userId` → BigInt accessHash.
+  // Populated on every inbound message.  Telegram MTProto requires the
+  // access_hash to send to a user; gramjs caches it in memory but loses it
+  // on server restart if the entity was not in the preloaded dialogs.
+  private accessHashCache = new Map<string, bigint>();
+
   private async getCredentials(): Promise<{ apiId: number; apiHash: string } | null> {
     const [dbApiId, dbApiHash] = await Promise.all([
       getSecret({ scope: "global", keyName: "TELEGRAM_API_ID" }),
@@ -521,6 +527,12 @@ class TelegramClientManager {
             [sender.firstName, sender.lastName].filter(Boolean).join(" ") ||
             "Unknown";
         }
+        // Cache the access_hash so we can send back without needing getEntity().
+        // For a private chat chatId === the peer user ID, so we key by chatId.
+        const hash = (sender as any)?.accessHash;
+        if (hash != null) {
+          this.accessHashCache.set(`${tenantId}:${chatId}`, BigInt(hash));
+        }
       } catch {}
 
       // Extract media attachments using on-demand proxy URLs (no download at receive time)
@@ -948,8 +960,27 @@ class TelegramClientManager {
         entity = await connection.client.getEntity(peerId);
         console.log(`[TelegramClientManager] Resolved entity for ${externalConversationId}: ${entity.className}`);
       } catch (entityError: any) {
-        console.log(`[TelegramClientManager] Could not resolve entity, trying direct send: ${entityError.message}`);
-        entity = peerId;
+        // 1. Check in-memory access_hash cache (populated on every inbound message).
+        const cachedHash = this.accessHashCache.get(`${tenantId}:${externalConversationId}`);
+        if (cachedHash !== undefined) {
+          console.log(`[TelegramClientManager] Using cached access_hash for ${externalConversationId}`);
+          entity = new Api.InputPeerUser({ userId: peerId, accessHash: cachedHash });
+        } else {
+          // 2. Cache miss (e.g. after server restart): load recent dialogs to repopulate
+          //    gramjs entity cache, then retry getEntity.
+          console.log(`[TelegramClientManager] No access_hash cached for ${externalConversationId}, loading dialogs...`);
+          try {
+            await connection.client.getDialogs({ limit: 100 });
+            entity = await connection.client.getEntity(peerId);
+            console.log(`[TelegramClientManager] Resolved entity after dialog refresh: ${externalConversationId}`);
+          } catch {
+            // 3. Last resort — raw BigInt.  Will still fail if the user has never
+            //    messaged this account, but surfacing the real error is more useful
+            //    than silently swallowing it.
+            console.log(`[TelegramClientManager] Could not resolve entity even after dialog refresh, trying raw peer: ${entityError.message}`);
+            entity = peerId;
+          }
+        }
       }
 
       const result = await connection.client.sendMessage(entity, {
@@ -1000,7 +1031,17 @@ class TelegramClientManager {
       try {
         entity = await connection.client.getEntity(peerId);
       } catch {
-        entity = peerId;
+        const cachedHash = this.accessHashCache.get(`${tenantId}:${externalConversationId}`);
+        if (cachedHash !== undefined) {
+          entity = new Api.InputPeerUser({ userId: peerId, accessHash: cachedHash });
+        } else {
+          try {
+            await connection.client.getDialogs({ limit: 100 });
+            entity = await connection.client.getEntity(peerId);
+          } catch {
+            entity = peerId;
+          }
+        }
       }
 
       const forceDocument = !mimeType.startsWith("image/") && !mimeType.startsWith("video/");
