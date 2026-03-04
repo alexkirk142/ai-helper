@@ -14,7 +14,7 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 let csrfToken: string | null = null;
 
 async function fetchCsrfToken(): Promise<string> {
-  const res = await fetch("/api/csrf-token", { credentials: "include" });
+  const res = await fetch("/api/csrf-token", { credentials: "include", cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch CSRF token");
   const data = (await res.json()) as { token: string };
   csrfToken = data.token;

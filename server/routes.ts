@@ -52,7 +52,11 @@ export async function registerRoutes(
   // can fetch a fresh token without a prior token.  The endpoint is a GET
   // (safe method) so it is automatically exempt from CSRF validation.
   app.get("/api/csrf-token", (req: Request, res: Response) => {
-    const token = generateCsrfToken(req, res);
+    // overwrite: true — always generate a fresh token so that the client-side
+    // retry logic (invalidateCsrfToken → fetchCsrfToken → retry POST) actually
+    // receives a new token + cookie instead of the existing (already-invalid) one.
+    const token = generateCsrfToken(req, res, true);
+    res.set("Cache-Control", "no-store");
     res.json({ token });
   });
   app.use(csrfProtection);

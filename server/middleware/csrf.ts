@@ -20,10 +20,18 @@
  *
  * SESSION IDENTIFIER
  * ──────────────────
- * We use the client IP (req.ip) rather than the session ID so that the CSRF
- * token remains valid across the login request itself (login creates a new
- * session, which would otherwise invalidate the pre-login token).
- * Combined with `sameSite: lax` + `httpOnly: true` this remains secure.
+ * We use the Express session ID (req.session.id) as the per-user binding for
+ * the HMAC.  express-session always assigns a session ID on the first request
+ * even before the session is persisted, so this is always non-empty.  Using
+ * the session ID is safer than req.ip because reverse-proxy setups can expose
+ * the same client as both IPv4 and IPv6 addresses on different requests,
+ * making the IP-based token permanently invalid.
+ *
+ * The login flow is unaffected: CSRF validation runs before the login handler
+ * mutates the session, so the pre-login token (bound to session S1) is still
+ * valid at CSRF-check time.  After login, session.regenerate() creates S2;
+ * subsequent POST requests get a fresh CSRF token via the auto-retry logic in
+ * queryClient.ts.
  */
 import { doubleCsrf } from "csrf-csrf";
 import type { Request, Response, NextFunction } from "express";
@@ -42,7 +50,7 @@ const { generateCsrfToken, doubleCsrfProtection } = doubleCsrf({
       return DEV_FALLBACK_SECRET;
     }
   },
-  getSessionIdentifier: (req: Request) => req.ip ?? "",
+  getSessionIdentifier: (req: Request) => req.session?.id ?? req.ip ?? "",
   cookieName: "x-csrf-token",
   cookieOptions: {
     httpOnly: true,
