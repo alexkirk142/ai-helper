@@ -457,6 +457,19 @@ function extractTransmissionCodeCandidates(
   let m: RegExpExecArray | null;
   while ((m = STRONG_OEM_RE.exec(upper)) !== null) {
     const code = m[1];
+
+    // JavaScript's \b treats non-ASCII chars (Cyrillic) as non-word chars,
+    // so a Cyrillic letter directly adjacent to a Latin sequence creates a
+    // false word boundary. Example: "фокус3" → normalised "фOKYC3" → \b
+    // fires between "ф" and "O", matching "OKYC3" as if it were a TC code.
+    // Fix: reject any match that is directly preceded or followed by a
+    // non-ASCII Unicode letter (i.e. still embedded inside a Cyrillic word).
+    const charBefore = m.index > 0 ? upper[m.index - 1] : "";
+    const charAfter = upper[m.index + m[0].length] ?? "";
+    if (/[^\x00-\x7F]/.test(charBefore) || /[^\x00-\x7F]/.test(charAfter)) {
+      continue;
+    }
+
     if (!seen.has(code)) {
       const strength = classifyTransmissionStrength(code);
       if (strength === "strong") {
@@ -484,6 +497,12 @@ function extractTransmissionCodeCandidates(
       ([s, e]) => m!.index >= s && m!.index < e,
     );
     if (alreadyCovered) continue;
+    // Same non-ASCII adjacency guard as the strong pass above
+    const charBeforeW = m.index > 0 ? upper[m.index - 1] : "";
+    const charAfterW = upper[m.index + m[0].length] ?? "";
+    if (/[^\x00-\x7F]/.test(charBeforeW) || /[^\x00-\x7F]/.test(charAfterW)) {
+      continue;
+    }
     const strength = classifyTransmissionStrength(code);
     if (strength === "weak") {
       seen.add(code);

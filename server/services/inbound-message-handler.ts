@@ -250,6 +250,22 @@ export async function triggerAiSuggestion(conversationId: string, tenantId: stri
       return;
     }
 
+    // Do not run the Decision Engine while a vehicle lookup is active for this
+    // conversation. The lookup pipeline (vehicle-lookup → price-lookup workers)
+    // will create the appropriate suggestion when it completes. Running the
+    // Decision Engine in parallel risks generating irrelevant product suggestions
+    // from the catalog that do not match the customer's vehicle (e.g. suggesting
+    // a Nissan АКПП to someone who asked for a VW Jetta МКПП).
+    const activeLookupCase = await storage.getLatestVehicleLookupCaseByConversation(tenantId, conversationId);
+    if (activeLookupCase && (activeLookupCase.status === "PENDING" || activeLookupCase.status === "RUNNING" || activeLookupCase.status === "COMPLETED")) {
+      const cutoffMs = 30 * 60 * 1000; // 30 minutes
+      const caseAge = Date.now() - new Date(activeLookupCase.updatedAt ?? activeLookupCase.createdAt).getTime();
+      if (caseAge < cutoffMs) {
+        console.log(`[InboundHandler] Skipping Decision Engine — active vehicle lookup case ${activeLookupCase.id} (status: ${activeLookupCase.status}, age: ${Math.round(caseAge / 1000)}s) for ${conversationId}`);
+        return;
+      }
+    }
+
     const relevantDocs = await storage.searchKnowledgeDocs(tenant.id, lastCustomerMessage.content);
     const relevantProducts = await storage.searchProducts(tenant.id, lastCustomerMessage.content);
 
