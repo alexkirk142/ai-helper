@@ -120,6 +120,8 @@ const DEFAULT_SETTINGS: DecisionSettings = {
     "photo_request",     // always escalate — needs warehouse photo
     "needs_manual_quote",// always escalate — no price found
     "want_visit",        // always escalate — needs warehouse address
+    "callback_request",       // always escalate — client requests a phone call
+    "contract_data_provided", // always escalate — client sent personal data for contract
   ],
   updatedAt: new Date(),
 };
@@ -154,6 +156,8 @@ const TOPIC_LABELS: Record<string, string> = {
   want_visit: "Хочет приехать",
   what_included: "Что в комплекте",
   mileage_preference: "Выбор по пробегу/цене",
+  callback_request: "Запрос звонка",
+  contract_data_provided: "Данные для договора",
 };
 
 // Intent classification guide appended to every system prompt.
@@ -185,7 +189,9 @@ const INTENT_GUIDE = `КЛАССИФИКАЦИЯ ИНТЕНТОВ (выбира�
 - warranty_question   — вопрос об условиях гарантии
 - want_visit          — клиент хочет приехать на склад лично (ВСЕГДА ESCALATE)
 - what_included       — вопрос о комплектации ("ЭБУ", "навесное", "гидротрансформатор", "с косой")
-- mileage_preference  — клиент выбирает вариант по цене или пробегу. Триггеры: "дешевле", "поменьше пробег", "эконом", "оптимум", "лучший вариант", "бюджет", ответ на вопрос о выборе варианта. Действие: NEED_APPROVAL — агент предлагает конкретный вариант.`;
+- mileage_preference  — клиент выбирает вариант по цене или пробегу. Триггеры: "дешевле", "поменьше пробег", "эконом", "оптимум", "лучший вариант", "бюджет", ответ на вопрос о выборе варианта. Действие: NEED_APPROVAL — агент предлагает конкретный вариант.
+- callback_request    — клиент просит позвонить или перезвонить. Триггеры: "позвоните", "перезвоните", "прошу позвонить", "хочу поговорить", "свяжитесь", "можете позвонить", отправил контакт/номер телефона для связи. (ВСЕГДА ESCALATE — оператор должен позвонить лично).
+- contract_data_provided — клиент отправил личные данные для оформления договора/заказа: ФИО, номер телефона, email, адрес (прописка/фактический), вариант/способ оплаты. Данные могут быть в любом формате: нумерованный список, свободный текст, отдельными строками. Ключевые сигналы: номер телефона (+7/8-9xx), email (@mail.ru, @gmail), адрес (ул., кв., г. Город), "вариант оплаты N", ФИО тремя словами. Достаточно 2–3 таких сигналов в одном сообщении. Ответь коротко: подтверди получение данных и сообщи что передаёшь менеджеру. (ВСЕГДА ESCALATE — оператор должен вручную оформить договор и выставить счёт).`;
 
 export function buildCustomerContextBlock(memory: CustomerMemory | null | undefined): string | null {
   if (!memory) return null;
@@ -566,6 +572,46 @@ Rules:
   }
 }
 
+/**
+ * Fast keyword-based intent hint from the current customer message.
+ * Used to bias few-shot example selection toward relevant examples
+ * without an extra LLM call.
+ * Returns null when no clear signal is found.
+ */
+function detectIntentHintFromMessage(message: string): string | undefined {
+  const m = message.toLowerCase();
+  if (/позвон|перезвон|хочу поговорить|свяжитесь|call me/.test(m)) return "callback_request";
+  if (/скидк|дешевле|скинь|уступ/.test(m)) return "discount";
+  if (/жалоб|претензи|плохо|не работает|сломал|брак/.test(m)) return "complaint";
+  if (/фото|фотограф|видео|покажите/.test(m)) return "photo_request";
+  if (/гарантия|гарантийн/.test(m)) return "warranty_question";
+  if (/цена|стоит|сколько|почём|прайс/.test(m)) return "price";
+  if (/есть в наличии|есть ли|есть такая/.test(m)) return "availability";
+  if (/доставк|привезти|отправ|сдэк|транспорт/.test(m)) return "shipping";
+  if (/оформляем|беру|заказываем|куплю|как оплатить|реквизиты/.test(m)) return "ready_to_buy";
+  if (/приехать|приеду|посмотреть лично|склад/.test(m)) return "want_visit";
+  if (/дорого|видел дешевле|много просите/.test(m)) return "price_objection";
+  if (/в комплект|эбу|навесн|гидротранс|с косой/.test(m)) return "what_included";
+  if (/пробег|эконом|бюджет|оптимальн|лучший вариант/.test(m)) return "mileage_preference";
+  // Detect contract/order data submission: count how many personal-data signals are present.
+  // Fire when 2+ distinct signals found — format-agnostic (numbered list, free text, labeled fields).
+  {
+    let contractSignals = 0;
+    // Phone number (+7 or 8-9xx)
+    if (/(\+7|8)[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}/.test(message)) contractSignals++;
+    // Email address
+    if (/@[a-z0-9\-]+\.[a-z]{2,}/i.test(message)) contractSignals++;
+    // Street address (ул., кв., пр-т, г. Город)
+    if (/\bул\.|кв\.\s*\d|\bпр-т\b|г\.\s*[А-ЯЁ]/.test(message)) contractSignals++;
+    // Explicit keywords
+    if (/вариант оплаты|способ оплаты|для договора|оформления договора|прописк/.test(m)) contractSignals++;
+    // ФИО pattern: three Cyrillic words starting with uppercase (Фамилия Имя Отчество)
+    if (/[А-ЯЁ][а-яё]+ [А-ЯЁ][а-яё]+ [А-ЯЁ][а-яё]+/.test(message)) contractSignals++;
+    if (contractSignals >= 2) return "contract_data_provided";
+  }
+  return undefined;
+}
+
 export async function generateWithDecisionEngine(
   context: GenerationContext
 ): Promise<DecisionResult> {
@@ -665,23 +711,25 @@ export async function generateWithDecisionEngine(
 
   let fewShotBlock = "";
   try {
-    // Derive a preferredIntent hint from the customer's most frequent topic so the
-    // +0.5 relevance boost in scoreExample fires for topic-matching examples.
-    // Falls back to undefined for first-time customers (no history yet).
-    const frequentTopics = context.customerMemory?.frequentTopics as Record<string, number> | null | undefined;
-    const preferredIntent = frequentTopics && Object.keys(frequentTopics).length > 0
-      ? Object.entries(frequentTopics).sort(([, a], [, b]) => b - a)[0][0]
-      : undefined;
+    // Detect preferred intent from the CURRENT message first (fast keyword heuristic),
+    // then fall back to the customer's most frequent historical topic.
+    const preferredIntent = detectIntentHintFromMessage(context.customerMessage)
+      ?? (() => {
+        const frequentTopics = context.customerMemory?.frequentTopics as Record<string, number> | null | undefined;
+        return frequentTopics && Object.keys(frequentTopics).length > 0
+          ? Object.entries(frequentTopics).sort(([, a], [, b]) => b - a)[0][0]
+          : undefined;
+      })();
 
     const fewShotConfig: Partial<FewShotConfig> = {
-      maxExamples: 5,
-      maxTokens: 1500,
+      maxExamples: 8,
+      maxTokens: 2000,
       minConfidence: 0.7,
       preferredIntent,
     };
     const examples = await selectFewShotExamples(context.tenantId, fewShotConfig);
     if (examples.length > 0) {
-      const { promptBlock } = buildFewShotPromptBlock(examples, fewShotConfig.maxTokens || 1500);
+      const { promptBlock } = buildFewShotPromptBlock(examples, fewShotConfig.maxTokens || 2000);
       fewShotBlock = promptBlock;
     }
   } catch (error) {
@@ -701,7 +749,7 @@ export async function generateWithDecisionEngine(
     `Respond ONLY with a JSON object in this exact format:
 {
   "reply_text": "Your response to the customer",
-  "intent": "price|availability|shipping|return|discount|complaint|other|vehicle_id_request|gearbox_tag_request|gearbox_tag_retry|photo_request|price_objection|ready_to_buy|needs_manual_quote|invalid_vin|marking_provided|payment_blocked|warranty_question|want_visit|what_included|mileage_preference",
+  "intent": "price|availability|shipping|return|discount|complaint|other|vehicle_id_request|gearbox_tag_request|gearbox_tag_retry|photo_request|price_objection|ready_to_buy|needs_manual_quote|invalid_vin|marking_provided|payment_blocked|warranty_question|want_visit|what_included|mileage_preference|callback_request|contract_data_provided",
   "intent_probability": 0.0-1.0,
   "questions_to_ask": ["optional questions if info is missing"]
 }`,

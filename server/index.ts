@@ -224,11 +224,9 @@ app.use((req, res, next) => {
       // Auto-start Podzamenu lookup service
       startPodzamenuService();
 
-      // Start BullMQ workers immediately — they must not wait on Telegram init
-      // (Telegram connect can block up to 30s per account on AUTH_KEY_DUPLICATED)
-      log("Waiting 15s for Podzamenu service to initialize...", "startup");
-      await new Promise((resolve) => setTimeout(resolve, 15_000));
-      log("Podzamenu startup delay elapsed, starting BullMQ workers", "startup");
+      // Wait for Podzamenu service to be ready (poll port 8200) — max 20s
+      await waitForPodzamenu(20_000);
+      log("Podzamenu ready, starting BullMQ workers", "startup");
 
       vehicleLookupWorker = await startVehicleLookupWorker();
       priceLookupWorker = await startPriceLookupWorker();
@@ -242,6 +240,24 @@ app.use((req, res, next) => {
     },
   );
 })();
+
+// Poll Podzamenu FastAPI service on port 8200 until it responds or timeout expires
+async function waitForPodzamenu(timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch("http://127.0.0.1:8200/health", { signal: AbortSignal.timeout(1_000) });
+      if (res.ok) {
+        log("Podzamenu service is ready", "startup");
+        return;
+      }
+    } catch {
+      // not ready yet
+    }
+    await new Promise((r) => setTimeout(r, 1_000));
+  }
+  log("Podzamenu did not respond within timeout, proceeding anyway", "startup");
+}
 
 // Restore saved WhatsApp Personal sessions on server start
 // Maps file system folder "default" to the actual database tenant UUID

@@ -235,8 +235,22 @@ export async function selectFewShotExamples(
   }));
   
   scoredSamples.sort((a, b) => b.score - a.score);
-  
-  const selected = scoredSamples.slice(0, fullConfig.maxExamples);
+
+  // Per-intent cap: max 2 examples per intent to ensure diversity across topics.
+  // Examples matching preferredIntent are exempt from this cap (they are the most
+  // relevant to the current message and always appear first due to the +0.5 boost).
+  const intentCounts = new Map<string, number>();
+  const MAX_PER_INTENT = 2;
+  const filteredSamples = scoredSamples.filter(({ sample }) => {
+    const intentKey = sample.intent ?? "other";
+    const isPreferred = fullConfig.preferredIntent && intentKey === fullConfig.preferredIntent;
+    const count = intentCounts.get(intentKey) ?? 0;
+    if (!isPreferred && count >= MAX_PER_INTENT) return false;
+    intentCounts.set(intentKey, count + 1);
+    return true;
+  });
+
+  const selected = filteredSamples.slice(0, fullConfig.maxExamples);
   
   const dbExamples: FewShotExample[] = selected.map(({ sample, score }) => ({
     userMessage: sample.userMessage,

@@ -16,20 +16,27 @@ export type ImageAnalysisResult =
   | { type: "registration_doc"; vin: string | null; frame: string | null; make: string | null; model: string | null }
   | { type: "unknown" };
 
-const IMAGE_ANALYSIS_PROMPT = `Analyze this image and determine what it shows.
+const IMAGE_ANALYSIS_PROMPT = `Analyze this image and determine what it shows. Read carefully before deciding the type.
 
-TYPE 1 — Gearbox tag/label (шильдик КПП):
-A metal or plastic label attached to a transmission with alphanumeric codes.
-→ Extract the transmission model code (e.g. W5MBB, F4A42, RE4F03B)
-→ Return: { "type": "gearbox_tag", "code": "<extracted code>" }
+TYPE 1 — Gearbox/transmission tag or label (шильдик КПП):
+A small metal or plastic sticker/plate physically attached TO the transmission unit itself.
+Key features: short alphanumeric model code (4-10 chars like W5MBB, F4A42, JF011E, RE4F03B, CD4E, F4A51), often on a greasy or dirty metal surface.
+IMPORTANT: The photo may be taken upside-down, at an angle, or mirrored (reflected). Rotate and mirror the text mentally to read it correctly. Common codes: F4A51, A4CF1, JF011E, RE0F11A, U660E, CD4E, etc.
+→ Extract ONLY the transmission model code (ignore serial numbers with 5+ consecutive digits).
+→ Return: { "type": "gearbox_tag", "code": "<transmission model code only>" }
 
-TYPE 2 — Vehicle registration document (свидетельство о регистрации ТС):
-A Russian vehicle registration certificate showing VIN, Frame/Кузов number, make, model.
-→ Extract VIN (17 chars) if present, OR Frame/Кузов number if VIN is absent/ОТСУТСТВУЕТ
-→ Return: { "type": "registration_doc", "vin": "<VIN or null>", "frame": "<frame number or null>", "make": "<make or null>", "model": "<model or null>" }
+TYPE 2 — Vehicle registration document (СТС / ПТС / свидетельство о регистрации ТС):
+A Russian government-issued paper document with printed fields: ВИН/VIN, Кузов, Марка, Модель, etc.
+Key features: official document layout with labeled fields, Russian text headers, stamp/seal marks, printed on white/pink paper.
+If you see the words "Свидетельство о регистрации", "Идентификационный номер (VIN)", "Марка", "Модель", "Категория ТС" — this is TYPE 2.
+→ Extract VIN (17 alphanumeric chars, no I/O/Q) from the "Идентификационный номер (VIN)" or "ВИН" field.
+→ If VIN field says "ОТСУТСТВУЕТ" or is blank, extract the Кузов/Frame number instead.
+→ Return: { "type": "registration_doc", "vin": "<17-char VIN or null>", "frame": "<frame number or null>", "make": "<make or null>", "model": "<model or null>" }
 
 TYPE 3 — Other / unclear:
 → Return: { "type": "unknown" }
+
+IMPORTANT: Registration documents (TYPE 2) are the most common attachment. Only use TYPE 1 (gearbox_tag) when you are certain the image shows the transmission unit itself with its label, NOT a paper document.
 
 Respond ONLY with a valid JSON object, no extra text, no markdown code fences.`;
 

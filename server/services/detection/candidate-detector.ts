@@ -134,10 +134,19 @@ const VIN_REGEX = new RegExp(`[${VIN_CHARS}]{17}`, "gi");
 const VIN_INCOMPLETE_REGEX = new RegExp(`[${VIN_CHARS}]{16}(?![${VIN_CHARS}])`, "gi");
 
 /**
- * ISO 3779 check-digit occupies position 9 (index 8) for North American VINs.
- * European/Asian VINs often have a letter there — skip checksum for them.
+ * ISO 3779 check-digit at position 9 (index 8) is only mandated for
+ * North American VINs (WMI starting with 1–5).
+ * European (S,V,W,Y,Z,A-H range), Asian (J,K,L,M,N,P,R) and other
+ * non-NA manufacturers do not use a standardised check digit —
+ * applying the NA formula to them produces false negatives.
  */
+function isNorthAmericanVin(vin: string): boolean {
+  const firstChar = (vin[0] ?? "").toUpperCase();
+  return firstChar >= "1" && firstChar <= "5";
+}
+
 function isChecksumApplicable(vin: string): boolean {
+  if (!isNorthAmericanVin(vin)) return false;
   return /[0-9X]/i.test(vin[8] ?? "");
 }
 
@@ -375,15 +384,31 @@ function extractFrameCandidates(
 /**
  * Strong: the existing well-known OEM pattern (Japanese/Korean/European AT models).
  * Covers: A245E, U150E, JF010E, JF011E, U660E, RE4F04A, NAG1, A6MF1, 6HP19 etc.
+ * Also covers Ford/GM-style codes: CD4E, AX4N, AX4S (2-3 letters + 1 digit + 1-2 letters).
  */
 const STRONG_OEM_RE =
-  /\b((?:[A-Z]{1,3}[0-9]{2,4}[A-Z][A-Z0-9]{0,4}|[A-Z0-9]{2,4}[A-Z][0-9]{1,4}[A-Z0-9]{0,4})(?:-[A-Z0-9]{2,5})?)\b/g;
+  /\b((?:[A-Z]{1,3}[0-9]{2,4}[A-Z][A-Z0-9]{0,4}|[A-Z0-9]{2,4}[A-Z][0-9]{1,4}[A-Z0-9]{0,4}|[A-Z]{2,3}[0-9]{1}[A-Z]{1,2})(?:-[A-Z0-9]{2,5})?)\b/g;
 
 /**
  * Weak: short or digit-first codes that need gearbox context to be trusted.
  * Covers: 01M, 09G, 0AM, 0AT, DP0, DQ250 (DQ → [A-Z]{2}[0-9]{3} gets caught by strong for 5-char)
  */
 const WEAK_OEM_RE = /\b([0-9]{1,2}[A-Z]{1,3}[0-9]{0,4}|[A-Z]{2,4}[0-9]{1,2})\b/g;
+
+/**
+ * Monetary context keywords — when a matched code token appears within a short
+ * window of these patterns, it is almost certainly NOT a transmission code
+ * (e.g. "От25т.р." → OT25T matched as TC, but the window contains "т.р").
+ */
+const PRICE_CONTEXT_RE = /(?:т\.р|тыс\.?\s*руб|руб|₽|тысяч|\bk\b|тыс\b)/i;
+
+function hasPriceContext(text: string, index: number, length: number): boolean {
+  const start = Math.max(0, index - 20);
+  const end = Math.min(text.length, index + length + 20);
+  const window = text.substring(start, end);
+  PRICE_CONTEXT_RE.lastIndex = 0;
+  return PRICE_CONTEXT_RE.test(window);
+}
 
 export function normalizeTransmissionCode(code: string): string {
   return normalizeCyrillicHomoglyphs(code).toUpperCase();
@@ -477,6 +502,10 @@ function extractTransmissionCodeCandidates(
     if (code.length === 17) continue;
     if (/^\d+$/.test(code)) continue;
     if (/^[A-Z]{1,2}\d{6,}$/.test(code)) continue; // frame-like
+
+    // Suppress codes that appear inside a monetary/price context
+    // (e.g. "От25т.р." → OT25T, "30т.р." → surroundings contain "т.р")
+    if (hasPriceContext(text, index, rawSlice.length)) continue;
 
     const contextHits = findContextHits(
       lowerOrig, index, rawSlice.length, 50, GEARBOX_CONTEXT_KEYWORDS,

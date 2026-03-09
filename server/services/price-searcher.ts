@@ -344,6 +344,10 @@ function isExcluded(text: string): boolean {
 
 function isDefective(text: string): boolean {
   const lower = text.toLowerCase();
+  // "с разборки" is a standard used-parts term and must NOT be treated as defective.
+  // Whitelist it before substring matching because "разбор" ⊂ "с разборки".
+  // Only "с разборки под запчасти" (damaged donor) remains defective.
+  if (/с разборки(?!\s+под\s+запчасти)/.test(lower)) return false;
   return DEFECT_KEYWORDS.some((kw) => lower.includes(kw.toLowerCase()));
 }
 
@@ -448,15 +452,33 @@ export function removeOutliers(prices: number[], smallSampleGuardEnabled = false
   return prices.filter(p => p >= lowerBound && p <= upperBound);
 }
 
-function validatePrices(listings: ParsedListing[]): ParsedListing[] {
-  if (listings.length < 2) return listings;
+/**
+ * Absolute minimum price for a used transmission assembly (in RUB).
+ * Listings below this threshold are almost certainly accessories, small parts,
+ * or parsing artefacts — not a complete КПП unit.
+ */
+const MIN_TRANSMISSION_PRICE_RUB = 3_000;
 
-  const prices = listings.map(l => l.price).sort((a, b) => a - b);
+function validatePrices(listings: ParsedListing[]): ParsedListing[] {
+  // Step 1: absolute minimum — remove obvious non-KPP results (accessories, sensors, etc.)
+  const absFiltered = listings.filter(l => {
+    if (l.price < MIN_TRANSMISSION_PRICE_RUB) {
+      console.warn(
+        `[PriceSearcher] Price ${l.price} RUB from ${l.site} below absolute minimum ` +
+        `(${MIN_TRANSMISSION_PRICE_RUB} RUB) — excluded`
+      );
+      return false;
+    }
+    return true;
+  });
+
+  if (absFiltered.length < 2) return absFiltered;
+
+  // Step 2: relative median filter — catches unconverted USD/JPY values (< 1% of median)
+  const prices = absFiltered.map(l => l.price).sort((a, b) => a - b);
   const median = prices[Math.floor(prices.length / 2)];
 
-  // Filter out any listing where price < 1% of median
-  // e.g. median=180000, threshold=1800 — catches unconverted USD/JPY
-  return listings.filter(l => {
+  return absFiltered.filter(l => {
     if (l.price < median * 0.01) {
       console.warn(
         `[PriceSearcher] Suspicious price ${l.price} RUB from ${l.site} ` +
@@ -843,9 +865,9 @@ export async function searchWithYandex(
 
   console.log(`[PriceSearcher/Yandex] Opening ${sortedUrls.length} URLs via Playwright`);
 
-  // Open pages concurrently (max 5 parallel)
+  // Open all candidate URLs concurrently. Promise.allSettled handles individual failures gracefully.
   const pageResults = await Promise.allSettled(
-    sortedUrls.slice(0, 5).map(async (url) => {
+    sortedUrls.map(async (url) => {
       const html = await fetchPageViaPlaywright(url);
       return { url, html };
     })
@@ -969,25 +991,34 @@ export async function searchUsedTransmissionPrice(
     filteredOutCount: 0,
   };
 
-  // Russian market search — flexible price extraction, any Russian auto parts source
-  const runSearch = async (query: string): Promise<ParsedListing[]> => {
+  // Shared system-level instructions for GPT web_search calls.
+  // Kept separate from the search query (input) so the model executes the query
+  // verbatim rather than treating the instructions as part of the search string.
+  const RU_SEARCH_INSTRUCTIONS =
+    "Ты — агент поиска цен на б/у автозапчасти на российском рынке. " +
+    "Выполни веб-поиск по запросу пользователя и найди ЛЮБЫЕ упоминания цен " +
+    "на маркетплейсах, сайтах дилеров, агрегаторах, форумах и других российских сайтах автозапчастей. " +
+    "Для каждой найденной цены верни объект JSON: " +
+    "{\"price\": <целое число в рублях>, \"source\": \"<домен>\", \"title\": \"<краткое описание>\"}. " +
+    "Если указан диапазон (например 'от 70 000 до 120 000 ₽') — создай ДВЕ записи: с минимальной и максимальной ценой. " +
+    "Верни ТОЛЬКО валидный JSON-массив. Если ничего не найдено — верни []. " +
+    "НЕ включай новые и восстановленные агрегаты. Включай б/у, контрактные, с разборки. " +
+    "Не требуй пробег или другие структурированные поля.";
+
+  // Russian market search — flexible price extraction, any Russian auto parts source.
+  // extraContext is appended to the system instructions when partial Yandex listings
+  // are available — it asks GPT to confirm or expand the already-known prices.
+  const runSearch = async (query: string, extraContext = ""): Promise<ParsedListing[]> => {
     console.log(`[PriceSearcher] Web search query: "${query}"`);
-    const input =
-      query +
-      "\n\nSearch the Russian internet for prices of this used контрактная transmission.\n" +
-      "Find ANY price mentions from ANY source — marketplaces, dealer sites, price aggregators, forums, any Russian автозапчасти website.\n" +
-      "For each price found, return a JSON array item:\n" +
-      '{"price": <number in RUB, integers only>, "source": "<domain name>", "title": "<brief description>"}.\n' +
-      "If a source shows a price range (e.g. 'от 70 000 до 120 000 ₽'), create TWO entries with min and max.\n" +
-      "Do NOT require mileage or other structured fields.\n" +
-      "Return ONLY a valid JSON array. If nothing found, return [].\n" +
-      "EXCLUDE new and rebuilt units. INCLUDE only б/у, контрактные, с разборки.";
-    console.log('[PriceSearcher] Full search prompt:', input.substring(0, 1000));
+    const searchInstructions = extraContext
+      ? RU_SEARCH_INSTRUCTIONS + extraContext
+      : RU_SEARCH_INSTRUCTIONS;
     try {
       const response = await (openai as any).responses.create({
         model: "gpt-4.1",
         tools: [{ type: "web_search" }],
-        input,
+        instructions: searchInstructions,
+        input: query,
       });
 
       const content: string = response.output_text ?? "";
@@ -1005,21 +1036,36 @@ export async function searchUsedTransmissionPrice(
   // and converts prices to RUB using live FX rates fetched at session start
   const runInternationalSearch = async (): Promise<ParsedListing[]> => {
     const searchDesc = modelName ?? oem;
-    const input =
-      `Search international websites for prices of this used transmission: ${searchDesc} OEM ${oem}.\n` +
-      `Look on: Yahoo Auctions Japan (ヤフオク), eBay, JDM parts sites, ` +
-      `European parts dealers, any non-Russian auto parts website.\n` +
-      `For each price found, convert to Russian Rubles using these exchange rates:\n` +
-      `1 JPY = ${fxRates.JPY} RUB\n1 USD = ${fxRates.USD} RUB\n1 EUR = ${fxRates.EUR} RUB\n1 KRW = ${fxRates.KRW} RUB\n` +
-      `Return a JSON array: {"price": <converted RUB integer>, "source": "<site>", "title": "<description (original price in original currency)>"}.\n` +
-      `If price range found, return two entries (min and max).\n` +
-      `Return ONLY a valid JSON array. If nothing found, return [].`;
-    console.log('[PriceSearcher] Full search prompt:', input.substring(0, 1000));
+
+    // Target sources by transmission origin — Japanese units are on Яфуоку,
+    // European units are better covered by eBay.de / leboncoin / EU dealers.
+    const intlSources =
+      origin === "japan"
+        ? "Yahoo Auctions Japan (ヤフオク), JDM parts sites, eBay"
+        : origin === "europe"
+        ? "eBay, leboncoin.fr, mobile.de, European auto parts dealers"
+        : "Yahoo Auctions Japan (ヤフオク), eBay, JDM parts sites, European parts dealers";
+
+    const intlInstructions =
+      "Ты — агент поиска цен на б/у трансмиссии на международных площадках. " +
+      "Выполни веб-поиск по запросу пользователя. Найди цены продажи б/у агрегатов. " +
+      `Ищи на: ${intlSources}. ` +
+      "Конвертируй все цены в рубли по курсам: " +
+      `1 JPY = ${fxRates.JPY} RUB, 1 USD = ${fxRates.USD} RUB, ` +
+      `1 EUR = ${fxRates.EUR} RUB, 1 KRW = ${fxRates.KRW} RUB. ` +
+      "Верни JSON-массив: {\"price\": <конвертированная сумма в рублях, целое число>, " +
+      "\"source\": \"<сайт>\", \"title\": \"<описание (оригинальная цена в исходной валюте)>\"}. " +
+      "Если диапазон — две записи. Верни ТОЛЬКО валидный JSON-массив. Если ничего — верни []. " +
+      "Не включай новые и восстановленные агрегаты.";
+
+    const intlQuery = `${searchDesc} OEM ${oem} used gearbox price`;
+    console.log(`[PriceSearcher] International search query: "${intlQuery}"`);
     try {
       const response = await (openai as any).responses.create({
         model: "gpt-4.1",
         tools: [{ type: "web_search" }],
-        input,
+        instructions: intlInstructions,
+        input: intlQuery,
       });
 
       const content: string = response.output_text ?? "";
@@ -1094,6 +1140,9 @@ export async function searchUsedTransmissionPrice(
   const uniqueDomains = new Set(yandexResult.listings.map((l) => l.site)).size;
   const hasEnoughYandex =
     yandexResult.listings.length >= 3 || uniqueDomains >= 2;
+  // Partial: 1–2 listings found but below the standalone threshold.
+  // We carry them forward into the GPT stage rather than discarding them.
+  const hasPartialYandex = !hasEnoughYandex && yandexResult.listings.length >= 1;
 
   if (hasEnoughYandex) {
     const prices = yandexResult.listings.map((l) => l.price);
@@ -1127,8 +1176,9 @@ export async function searchUsedTransmissionPrice(
   }
 
   console.log(
-    `[PriceSearcher] Yandex insufficient (${yandexResult.listings.length} listings, ` +
-    `${uniqueDomains} domains) — falling through to GPT fallback`
+    `[PriceSearcher] Yandex ${hasPartialYandex ? "partial" : "no"} results ` +
+    `(${yandexResult.listings.length} listings, ${uniqueDomains} domains) — ` +
+    `${hasPartialYandex ? "enriching with GPT, carrying Yandex data forward" : "falling through to GPT fallback"}`
   );
 
   // Check if GPT web_search fallback is allowed (default true for backward compatibility)
@@ -1144,8 +1194,23 @@ export async function searchUsedTransmissionPrice(
     };
   }
 
+  // When partial Yandex listings exist, attach them as context so GPT knows
+  // what we already have and focuses on finding additional sources.
+  let yandexContextExtra = "";
+  if (hasPartialYandex) {
+    const yandexPriceList = yandexResult.listings
+      .map((l) => `${l.price} руб. (${l.site})${l.title ? ": " + l.title.slice(0, 60) : ""}`)
+      .join("; ");
+    yandexContextExtra =
+      ` Контекст: по этой трансмиссии уже найдены следующие цены через Яндекс: ${yandexPriceList}. ` +
+      "Найди дополнительные источники для подтверждения или расширения этих данных.";
+    console.log(
+      `[PriceSearcher] Passing ${yandexResult.listings.length} partial Yandex listing(s) as GPT context`
+    );
+  }
+
   // Primary Russian search (GPT web_search fallback — will be replaced by escalation in Phase 3)
-  const ruRawListings = await runSearch(primaryQuery);
+  const ruRawListings = await runSearch(primaryQuery, yandexContextExtra);
   let usedQuery = primaryQuery;
 
   // International fallback when primary Russian search returns nothing.
@@ -1162,21 +1227,28 @@ export async function searchUsedTransmissionPrice(
   // the current flow).
   let rawListings: ParsedListing[] = [...ruRawListings, ...intlRawListings];
 
+  // Helper: apply new/defective keyword filter to a raw listing array.
+  // Defined here so it is available for both the primary pass and all
+  // progressive simplification levels below.
+  const applyKeywordFilter = (raw: ParsedListing[], label: string): { kept: ParsedListing[]; excluded: number } => {
+    let excluded = 0;
+    const kept = raw.filter((l) => {
+      if (isExcluded(l.title)) { excluded++; return false; }
+      if (isDefective(l.title)) {
+        console.log(`[PriceSearcher] Excluded defective listing: "${l.title}" (${l.price} RUB)`);
+        excluded++;
+        return false;
+      }
+      return true;
+    });
+    console.log(`[PriceSearcher] After keyword filter (${label}): ${kept.length} kept, ${excluded} excluded`);
+    return { kept, excluded };
+  };
+
   // Filter: exclude new/rebuilt and defective/damaged units
-  let filteredOut = 0;
-  let listings = rawListings.filter((l) => {
-    if (isExcluded(l.title)) {
-      filteredOut++;
-      return false;
-    }
-    if (isDefective(l.title)) {
-      console.log(`[PriceSearcher] Excluded defective listing: "${l.title}" (${l.price} RUB)`);
-      filteredOut++;
-      return false;
-    }
-    return true;
-  });
-  console.log(`[PriceSearcher] After keyword filter (primary): ${listings.length} kept, ${filteredOut} excluded`);
+  const primaryFiltered = applyKeywordFilter(rawListings, "primary");
+  let filteredOut = primaryFiltered.excluded;
+  let listings = primaryFiltered.kept;
 
   // ── Intl mixing logic ────────────────────────────────────────────────────
   // Runs only when intl listings are present in the combined set.
@@ -1208,25 +1280,56 @@ export async function searchUsedTransmissionPrice(
   }
   // ── End intl mixing logic ────────────────────────────────────────────────
 
-  // Russian fallback search if still < 2 valid listings
-  if (listings.length < 2) {
-    console.log(`[PriceSearcher] Primary search yielded ${listings.length} listings, trying fallback`);
-    rawListings = await runSearch(fallbackQuery);
-    usedQuery = fallbackQuery;
-    filteredOut = 0;
-    listings = rawListings.filter((l) => {
-      if (isExcluded(l.title)) {
-        filteredOut++;
-        return false;
-      }
-      if (isDefective(l.title)) {
-        console.log(`[PriceSearcher] Excluded defective listing: "${l.title}" (${l.price} RUB)`);
-        filteredOut++;
-        return false;
-      }
-      return true;
+  // Progressive query simplification — each level activates only when the previous returns < 2 listings.
+  //   Level 2 (fallback): model + OEM + vehicle + "цена купить"
+  //   Level 3: model code only — strips OEM and vehicle context
+  //   Level 4: OEM only — last resort before international / not_found
+  const simplifiedQueries: Array<{ label: string; query: string }> = [];
+
+  // Level 2: existing fallback query
+  simplifiedQueries.push({ label: "fallback", query: fallbackQuery });
+
+  // Level 3: just the model code (or OEM if no distinct model name), no vehicle context
+  const level3Anchor = (modelName && modelName !== oem && !/\d{4,}/.test(modelName)) ? modelName : oem;
+  if (level3Anchor !== fallbackQuery) {
+    simplifiedQueries.push({
+      label: "simplified-code",
+      query: `${gearboxLabel} ${level3Anchor} купить`,
     });
-    console.log(`[PriceSearcher] After keyword filter (fallback): ${listings.length} kept, ${filteredOut} excluded`);
+  }
+
+  // Level 4: raw OEM number only (skipped when level3 already used OEM as anchor)
+  if (level3Anchor !== oem) {
+    simplifiedQueries.push({
+      label: "simplified-oem",
+      query: `${gearboxLabel} ${oem} купить`,
+    });
+  }
+
+  for (const { label, query } of simplifiedQueries) {
+    if (listings.length >= 2) break;
+    console.log(`[PriceSearcher] ${listings.length} listing(s) so far, trying ${label} query`);
+    rawListings = await runSearch(query);
+    usedQuery = query;
+    const filtered = applyKeywordFilter(rawListings, label);
+    listings = filtered.kept;
+    filteredOut = filtered.excluded;
+  }
+
+  // Merge partial Yandex listings that were carried forward into the GPT result set.
+  // Runs only when hasPartialYandex is true; deduplicates by URL (preferred) or price+site.
+  if (hasPartialYandex) {
+    const existingKeys = new Set(
+      listings.map((l) => (l.url ? l.url : `${l.price}:${l.site}`))
+    );
+    const freshYandex = yandexResult.listings.filter((l) => {
+      const key = l.url ? l.url : `${l.price}:${l.site}`;
+      return !existingKeys.has(key);
+    });
+    if (freshYandex.length > 0) {
+      console.log(`[PriceSearcher] Merging ${freshYandex.length} partial Yandex listing(s) into results`);
+      listings = [...listings, ...freshYandex];
+    }
   }
 
   if (listings.length < 2) {
@@ -1258,7 +1361,17 @@ export async function searchUsedTransmissionPrice(
 
   const { confidenceScore, confidenceLevel, confidenceSignals } =
     computePriceConfidence(validListings, "openai_web_search");
-  incr("price_search.confidence_level", { level: confidenceLevel });
+
+  // When partial Yandex data contributed to the result, the sample is inherently
+  // weaker than a clean GPT-only or Yandex-sufficient result — cap at "low".
+  const finalConfidenceLevel: "low" | "medium" | "high" = hasPartialYandex
+    ? "low"
+    : confidenceLevel;
+  const finalConfidenceScore = hasPartialYandex
+    ? Math.min(confidenceScore, 0.39)
+    : confidenceScore;
+
+  incr("price_search.confidence_level", { level: finalConfidenceLevel });
 
   return {
     minPrice,
@@ -1272,8 +1385,8 @@ export async function searchUsedTransmissionPrice(
     listings: validListings,
     searchQuery: usedQuery,
     filteredOutCount: filteredOut,
-    confidenceScore,
-    confidenceLevel,
+    confidenceScore: finalConfidenceScore,
+    confidenceLevel: finalConfidenceLevel,
     confidenceSignals,
   };
 }

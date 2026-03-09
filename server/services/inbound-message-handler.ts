@@ -395,11 +395,22 @@ export async function processIncomingMessageFull(
     // ── 1. Extract candidates from text ─────────────────────────────────────
     let allCandidates = extractCandidatesFromText(text);
 
-    // ── 2. Extract candidates from images (only when text is empty) ──────────
+    // ── 2. Extract candidates from images ───────────────────────────────────
+    // Run OCR when:
+    //   a) there is no text at all (pure image message), OR
+    //   b) text is present but yielded no strong VIN/FRAME/TC candidate —
+    //      covers the common case where a customer writes a description AND
+    //      attaches a photo of the registration doc or gearbox plate.
+    const hasStrongTextCandidate = allCandidates.some(
+      (c) =>
+        ((c.type === "VIN" || c.type === "FRAME") && c.score >= 0.80) ||
+        ((c.type === "TRANSMISSION_CODE") && c.score >= 0.55),
+    );
+
     let imageAnalysisType: "gearbox_tag" | "registration_doc" | null = null;
     let ocrQualityGateFailed = false;
 
-    if (!text) {
+    if (!hasStrongTextCandidate) {
       const imageAttachments = (parsed.attachments ?? []).filter(
         (a) => a.type === "image" && a.url
       );

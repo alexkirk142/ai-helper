@@ -146,19 +146,31 @@ async function tryFallbackPriceLookup(params: {
   messageId?: string;
   gearbox: GearboxInfo;
   vehicleMeta?: { make?: string; model?: string; year?: number };
+  vehicleGearboxType?: string | null;
 }): Promise<void> {
-  const { tenantId, conversationId, messageId, gearbox, vehicleMeta } = params;
+  const { tenantId, conversationId, messageId, gearbox, vehicleMeta, vehicleGearboxType } = params;
 
   const lastMessage = await getLastCustomerMessageText(conversationId, tenantId);
-  if (!lastMessage) {
-    console.log("[VehicleLookupWorker] No customer message found for fallback gearbox type detection");
+  const gearboxTypeFromText = lastMessage ? detectGearboxType(lastMessage) : "unknown";
+
+  // Derive gearbox type from customer text first; fall back to structured
+  // vehicle context (e.g. AT/CVT/MT from PartsAPI) when the customer sent
+  // only images with no accompanying text.
+  const gearboxTypeFromContext = vehicleGearboxType
+    ? toPriceSearchGearboxType(fromVehicleContextGearboxType(vehicleGearboxType))
+    : "unknown";
+
+  const gearboxType = gearboxTypeFromText !== "unknown"
+    ? gearboxTypeFromText
+    : gearboxTypeFromContext;
+
+  if (gearboxType === "unknown") {
+    console.log("[VehicleLookupWorker] Gearbox type unknown from both customer text and vehicleContext — skipping fallback price lookup");
     return;
   }
 
-  const gearboxType = detectGearboxType(lastMessage);
-  if (gearboxType === "unknown") {
-    console.log("[VehicleLookupWorker] Gearbox type not detected in customer message, skipping fallback price lookup");
-    return;
+  if (gearboxTypeFromText === "unknown" && gearboxTypeFromContext !== "unknown") {
+    console.log(`[VehicleLookupWorker] Gearbox type resolved from vehicleContext: ${gearboxType}`);
   }
 
   const make = vehicleMeta?.make ?? null;
@@ -521,7 +533,7 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
         isModelOnly: true,
       });
       console.log(`[VehicleLookupWorker] Auto-started price lookup (VW Group MODEL_ONLY, model: ${gearbox.model}).`);
-    } else if (lookupConfidence >= 0.85 && gearbox.oemStatus === "FOUND" && gearbox.oem) {
+    } else if (lookupConfidence >= 0.80 && gearbox.oemStatus === "FOUND" && gearbox.oem) {
       const { enqueuePriceLookup } = await import("../services/price-lookup-queue");
       await enqueuePriceLookup({
         tenantId,
@@ -543,6 +555,7 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
           make: vehicleContext.make ?? undefined,
           model: vehicleContext.model ?? undefined,
         },
+        vehicleGearboxType: vehicleContext.gearboxType ?? null,
       });
     }
   } catch (error) {
@@ -585,6 +598,7 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
             model: partsApi.modelName ?? undefined,
             year: partsApi.year ? Number(partsApi.year) : undefined,
           },
+          vehicleGearboxType: partsApi.gearboxType ?? null,
         });
         return;
       }
