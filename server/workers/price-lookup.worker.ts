@@ -933,6 +933,31 @@ async function createEscalationSuggestion(
     `Уже проверено (${urlsChecked.length} источников):\n` +
     urlsChecked.slice(0, 5).map((u) => `• ${u}`).join("\n");
 
+  // Do not create an escalation if a price result was already found for this
+  // conversation recently (within 10 minutes). This prevents a redundant
+  // "manual search required" card appearing alongside (or after) a price quote
+  // that was already sent — a common race condition when two concurrent price
+  // lookups run for the same conversation (e.g. TC from OCR vs OEM from VIN lookup).
+  try {
+    const recentSuggestions = await storage.getSuggestionsByConversation(conversationId, tenantId);
+    const priceCutoff = new Date(Date.now() - 10 * 60 * 1000);
+    const recentPriceExists = recentSuggestions.some(
+      (s) =>
+        s.intent === "price" &&
+        s.createdAt >= priceCutoff &&
+        (s.status === "approved" || s.status === "sent" || s.status === "autosent" || s.status === "pending")
+    );
+    if (recentPriceExists) {
+      console.log(
+        `[PriceLookupWorker] Skipping escalation for OEM ${oem} — recent price suggestion already exists for conversation ${conversationId}`
+      );
+      return;
+    }
+  } catch (checkErr) {
+    console.warn("[PriceLookupWorker] Could not check for recent price suggestions:", checkErr);
+    // Non-fatal — proceed to create escalation
+  }
+
   try {
     const suggestion = await storage.createAiSuggestion({
       conversationId,
