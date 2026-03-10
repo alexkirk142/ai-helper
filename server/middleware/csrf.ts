@@ -20,18 +20,24 @@
  *
  * SESSION IDENTIFIER
  * ──────────────────
- * We use the Express session ID (req.session.id) as the per-user binding for
- * the HMAC.  express-session always assigns a session ID on the first request
- * even before the session is persisted, so this is always non-empty.  Using
- * the session ID is safer than req.ip because reverse-proxy setups can expose
- * the same client as both IPv4 and IPv6 addresses on different requests,
- * making the IP-based token permanently invalid.
+ * We use an empty string as the session identifier (no per-session binding).
  *
- * The login flow is unaffected: CSRF validation runs before the login handler
- * mutates the session, so the pre-login token (bound to session S1) is still
- * valid at CSRF-check time.  After login, session.regenerate() creates S2;
- * subsequent POST requests get a fresh CSRF token via the auto-retry logic in
- * queryClient.ts.
+ * Rationale: binding the CSRF token to req.session.id caused login failures
+ * whenever the session expired or was regenerated.  After session expiry the
+ * old CSRF cookie became invalid for the new session ID; two concurrent
+ * GET /api/csrf-token calls both saw an invalid cookie and each generated a
+ * different fresh token — the last Set-Cookie won in the browser, making the
+ * first caller's token stale and causing an INVALID_CSRF_TOKEN 403 on login.
+ *
+ * Security is still preserved by the double-submit cookie pattern itself:
+ *   • The CSRF cookie is httpOnly → unreadable by JavaScript / XSS.
+ *   • The raw token is same-origin only → a cross-origin attacker cannot
+ *     read it from the GET /api/csrf-token response.
+ *   • An attacker would need to control both the CSRF cookie (httpOnly) and
+ *     the header value simultaneously — which is impossible without already
+ *     having full control of the victim's browser.
+ * The session-binding was defence-in-depth; removing it does not meaningfully
+ * weaken the protection in this application's threat model.
  */
 import { doubleCsrf } from "csrf-csrf";
 import type { Request, Response, NextFunction } from "express";
@@ -50,7 +56,7 @@ const { generateCsrfToken, doubleCsrfProtection } = doubleCsrf({
       return DEV_FALLBACK_SECRET;
     }
   },
-  getSessionIdentifier: (req: Request) => req.session?.id ?? req.ip ?? "",
+  getSessionIdentifier: () => "",
   cookieName: "x-csrf-token",
   cookieOptions: {
     httpOnly: true,
