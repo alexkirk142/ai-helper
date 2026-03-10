@@ -10,24 +10,36 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
  *
  * The server stores a matching signed value in an httpOnly cookie.  We send
  * the raw token as the `X-Csrf-Token` header; the server compares the two.
+ *
+ * pendingFetch deduplicates concurrent calls: if multiple callers hit
+ * getCsrfToken() simultaneously when csrfToken is null, they all await the
+ * same single fetch instead of each firing a separate request.  Without this,
+ * every concurrent call would use overwrite:true on the server and the last
+ * response to set the cookie would invalidate all earlier tokens, causing
+ * INVALID_CSRF_TOKEN errors on the login POST.
  */
 let csrfToken: string | null = null;
+let pendingFetch: Promise<string> | null = null;
 
 async function fetchCsrfToken(): Promise<string> {
   const res = await fetch("/api/csrf-token", { credentials: "include", cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch CSRF token");
   const data = (await res.json()) as { token: string };
   csrfToken = data.token;
+  pendingFetch = null;
   return data.token;
 }
 
 /** Forces a fresh token to be fetched on the next mutating request. */
 export function invalidateCsrfToken(): void {
   csrfToken = null;
+  pendingFetch = null;
 }
 
 async function getCsrfToken(): Promise<string> {
-  return csrfToken ?? fetchCsrfToken();
+  if (csrfToken) return csrfToken;
+  if (!pendingFetch) pendingFetch = fetchCsrfToken();
+  return pendingFetch;
 }
 
 // ---------------------------------------------------------------------------
