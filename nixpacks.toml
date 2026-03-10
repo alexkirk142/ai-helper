@@ -1,4 +1,4 @@
-# Last forced rebuild: 2026-02-23 — ensures dist/index.cjs is recompiled from source
+# Last forced rebuild: 2026-03-10 — ensures dist/index.cjs is recompiled from source
 [phases.setup]
 nixPkgs = ["nodejs_20", "python311", "python311Packages.pip"]
 

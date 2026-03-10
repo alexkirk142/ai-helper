@@ -50,7 +50,7 @@ async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     // Session expired — redirect to login automatically
     if (res.status === 401) {
-      window.location.href = "/auth";
+      window.location.href = "/login";
       throw new Error("Сессия истекла. Перенаправление на страницу входа...");
     }
     const text = (await res.text()) || res.statusText;
@@ -101,12 +101,14 @@ export async function apiRequest(
   const res = await doRequest(method, url, data, token);
 
   // Stale CSRF token: clear the cache, fetch a fresh token, and retry once.
+  // Use getCsrfToken() (not fetchCsrfToken()) so the pendingFetch deduplication
+  // still applies if multiple concurrent requests all hit 403 simultaneously.
   if (!res.ok && res.status === 403 && isMutating) {
     try {
       const body = (await res.clone().json()) as { code?: string };
       if (body.code === "INVALID_CSRF_TOKEN") {
         invalidateCsrfToken();
-        const freshToken = await fetchCsrfToken();
+        const freshToken = await getCsrfToken();
         const retryRes = await doRequest(method, url, data, freshToken);
         await throwIfResNotOk(retryRes);
         return retryRes;
