@@ -52,10 +52,13 @@ export async function registerRoutes(
   // can fetch a fresh token without a prior token.  The endpoint is a GET
   // (safe method) so it is automatically exempt from CSRF validation.
   app.get("/api/csrf-token", (req: Request, res: Response) => {
-    // overwrite: true — always generate a fresh token so that the client-side
-    // retry logic (invalidateCsrfToken → fetchCsrfToken → retry POST) actually
-    // receives a new token + cookie instead of the existing (already-invalid) one.
-    const token = generateCsrfToken(req, res, true);
+    // overwrite: false — return the existing valid token from the cookie if
+    // present; only generate a new one when no valid token exists yet (first
+    // visit, cleared cookies, or post-login session regeneration).
+    // Using overwrite:true caused a race condition: multiple parallel requests
+    // each generated a different token and overwrote the cookie, so the login
+    // POST header token no longer matched the final cookie value → 403.
+    const token = generateCsrfToken(req, res, false);
     res.set("Cache-Control", "no-store");
     res.json({ token });
   });
