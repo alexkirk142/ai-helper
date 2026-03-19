@@ -158,9 +158,16 @@ export class MaxGreenApiAdapter {
     buffer: Buffer,
     mimeType: string,
     fileName: string,
-    caption?: string
+    caption?: string,
+    mediaUrl?: string | null,
   ): Promise<{ idMessage: string }> {
-    const url = `${BASE_URL(idInstance)}/sendFileByUpload/${token}`;
+    // Use the mediaUrl from the GREEN-API dashboard when available — GREEN-API
+    // recommends using this dedicated host for sendFileByUpload. Falling back to
+    // the cluster-derived API host works for text but may silently drop files.
+    const baseUrl = mediaUrl
+      ? `${mediaUrl.replace(/\/$/, "")}/waInstance${idInstance}`
+      : BASE_URL(idInstance);
+    const url = `${baseUrl}/sendFileByUpload/${token}`;
     const sanitizedChatId = sanitizeMaxChatId(chatId);
     const form = new FormData();
     form.append("chatId", sanitizedChatId);

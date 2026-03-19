@@ -1568,6 +1568,9 @@ export const maxPersonalAccounts = pgTable("max_personal_accounts", {
   accountId: varchar("account_id").notNull().default(sql`gen_random_uuid()`),
   idInstance: varchar("id_instance").notNull(),
   apiTokenInstance: varchar("api_token_instance").notNull(),
+  // GREEN-API dashboard parameters: apiUrl for text, mediaUrl for file uploads (sendFileByUpload)
+  apiUrl: text("api_url"),
+  mediaUrl: text("media_url"),
   label: text("label"),
   displayName: text("display_name"),
   status: text("status").notNull().default("unknown"),

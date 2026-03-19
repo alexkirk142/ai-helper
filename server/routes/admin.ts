@@ -1919,6 +1919,9 @@ const maxPersonalAddSchema = z.object({
   idInstance: z.string().min(1),
   apiTokenInstance: z.string().min(1),
   label: z.string().optional(),
+  // GREEN-API dashboard URLs — apiUrl for text, mediaUrl for file uploads
+  apiUrl: z.string().url().optional(),
+  mediaUrl: z.string().url().optional(),
 });
 
 const maxPersonalPatchSchema = z.object({
@@ -1964,6 +1967,8 @@ router.get(
           accountId: a.accountId,
           idInstance: a.idInstance,
           apiTokenInstance: maskToken(a.apiTokenInstance),
+          apiUrl: a.apiUrl,
+          mediaUrl: a.mediaUrl,
           displayName: a.displayName,
           status: a.status,
           webhookRegistered: a.webhookRegistered,
@@ -1989,7 +1994,7 @@ router.post(
       if (!parsed.success) {
         return res.status(400).json({ error: "idInstance and apiTokenInstance are required" });
       }
-      const { idInstance, apiTokenInstance, label } = parsed.data;
+      const { idInstance, apiTokenInstance, label, apiUrl, mediaUrl } = parsed.data;
 
       const userRow = await db.select({ tenantId: users.tenantId }).from(users).where(eq(users.id, userId)).limit(1);
       if (!userRow[0]?.tenantId) {
@@ -2062,6 +2067,8 @@ router.post(
         accountId,
         idInstance,
         apiTokenInstance,
+        apiUrl: apiUrl ?? null,
+        mediaUrl: mediaUrl ?? null,
         label: label ?? null,
         displayName: displayName ?? null,
         status: state,
@@ -2072,6 +2079,8 @@ router.post(
         accountId: inserted.accountId,
         idInstance: inserted.idInstance,
         apiTokenInstance: maskToken(inserted.apiTokenInstance),
+        apiUrl: inserted.apiUrl,
+        mediaUrl: inserted.mediaUrl,
         displayName: inserted.displayName,
         status: inserted.status,
         webhookRegistered: inserted.webhookRegistered,

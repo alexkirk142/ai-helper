@@ -131,7 +131,8 @@ export class MaxPersonalAdapter implements ChannelAdapter {
           buf,
           att.mimeType ?? "application/octet-stream",
           att.fileName ?? "file",
-          att.caption
+          att.caption,
+          account.mediaUrl,
         );
         return { success: true, externalMessageId: result.idMessage, timestamp: new Date() };
       }
@@ -187,6 +188,7 @@ export class MaxPersonalAdapter implements ChannelAdapter {
         mimeType,
         fileName,
         caption || undefined,
+        account.mediaUrl,
       );
       return { success: true, externalMessageId: result.idMessage, timestamp: new Date() };
     } catch (error: any) {
