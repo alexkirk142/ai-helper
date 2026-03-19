@@ -364,6 +364,33 @@ router.post(
             console.error(`[OutboundHandler] Telegram Bot API file send error:`, sendError.message);
           }
         }
+
+        if (effectiveChannelType === "max_personal" && conversation.customer) {
+          try {
+            const { maxPersonalAdapter } = await import("../services/max-personal-adapter");
+            const chatId = conversation.customer.externalId;
+            const caption = content.trim() || undefined;
+
+            const sendResult = await maxPersonalAdapter.sendFileMessageForTenant(
+              conversation.tenantId,
+              chatId,
+              buffer,
+              mimetype,
+              originalname,
+              caption,
+              effectiveAccountId,
+            );
+
+            if (sendResult.success) {
+              outboundAttachment = buildAttachmentMeta(mimetype, originalname, size, {});
+              console.log(`[OutboundHandler] MAX Personal file sent: msgId=${sendResult.externalMessageId}`);
+            } else {
+              console.error(`[OutboundHandler] MAX Personal file send failed: ${sendResult.error}`);
+            }
+          } catch (sendError: any) {
+            console.error(`[OutboundHandler] MAX Personal file send error:`, sendError.message);
+          }
+        }
       }
 
       // ── Save message to DB ─────────────────────────────────────────────────

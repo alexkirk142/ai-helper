@@ -148,6 +148,52 @@ export class MaxPersonalAdapter implements ChannelAdapter {
       return { success: false, error: error.message };
     }
   }
+
+  /**
+   * Send a file (image, video, audio, document) directly from an in-memory buffer.
+   * Uses GREEN-API's sendFileByUpload multipart endpoint.
+   */
+  async sendFileMessageForTenant(
+    tenantId: string,
+    chatId: string,
+    buffer: Buffer,
+    mimeType: string,
+    fileName: string,
+    caption?: string,
+    accountId?: string,
+  ): Promise<ChannelSendResult> {
+    const account = await db.query.maxPersonalAccounts.findFirst({
+      where: accountId
+        ? and(
+            eq(maxPersonalAccounts.tenantId, tenantId),
+            eq(maxPersonalAccounts.accountId, accountId),
+            eq(maxPersonalAccounts.status, "authorized"),
+          )
+        : and(
+            eq(maxPersonalAccounts.tenantId, tenantId),
+            eq(maxPersonalAccounts.status, "authorized"),
+          ),
+    });
+    if (!account) {
+      return { success: false, error: "No MAX Personal account connected" };
+    }
+
+    try {
+      const result = await maxGreenApiAdapter.sendFile(
+        account.idInstance,
+        account.apiTokenInstance,
+        chatId,
+        buffer,
+        mimeType,
+        fileName,
+        caption || undefined,
+      );
+      return { success: true, externalMessageId: result.idMessage, timestamp: new Date() };
+    } catch (error: any) {
+      console.error("[MaxPersonal] sendFileMessageForTenant error:", error.message);
+      return { success: false, error: error.message };
+    }
+  }
 }
 
 export const maxPersonalAdapter = new MaxPersonalAdapter();
