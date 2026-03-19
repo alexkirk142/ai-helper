@@ -165,14 +165,18 @@ export class MaxGreenApiAdapter {
     const form = new FormData();
     form.append("chatId", sanitizedChatId);
     form.append("file", new Blob([buffer], { type: mimeType }), fileName);
+    // Pass fileName as a separate field so GREEN-API uses UTF-8 encoding
+    // for the filename in MAX, preventing Cyrillic/non-ASCII corruption.
+    form.append("fileName", fileName);
     if (caption) form.append("caption", caption);
 
     let res: Response;
     try {
-      res = await fetchWithTimeout(url, { method: "POST", body: form });
+      // Use a longer timeout for file uploads (up to 60s for large files)
+      res = await fetchWithTimeout(url, { method: "POST", body: form }, 60000);
     } catch (err: any) {
       if (err.name === "AbortError") {
-        throw new Error(`GREEN-API request timed out after 20s: ${url}`);
+        throw new Error(`GREEN-API request timed out after 60s: ${url}`);
       }
       throw err;
     }
