@@ -149,7 +149,7 @@ router.post("/:tenantId/:accountId", async (req, res) => {
 
     if (payload.typeWebhook === "outgoingMessageStatus") {
       const body = req.body as any;
-      console.log(`[MaxPersonalWebhook] outgoingMessageStatus: idMessage=${body.idMessage} status=${body.status} chatId=${body.senderData?.chatId ?? body.chatId ?? "?"}`);
+      console.log(`[MaxPersonalWebhook] outgoingMessageStatus FULL:`, JSON.stringify(body));
       return res.json({ ok: true });
     }
 
