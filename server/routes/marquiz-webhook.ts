@@ -1,11 +1,12 @@
 import { Router } from "express";
 import { enqueueMarquizLead } from "../services/marquiz-lead-queue";
+import type { MarquizLeadJobData } from "../services/marquiz-lead-queue";
+import { processMarquizLeadDirect } from "../workers/marquiz-lead.worker";
 
 const router = Router();
 
-// Marquiz sends webhook as JSON POST with this shape:
-// { quiz: string, results: Array<{ name: string, value: string }>, ... }
-// Top-level "phone" field may also be present for phone-type questions.
+// Marquiz webhook payload shapes:
+// { quiz: string, results: Array<{ name: string, value: string }>, phone?: string, ... }
 interface MarquizResultField {
   name: string;
   value: string;
@@ -49,14 +50,13 @@ function extractFields(body: MarquizPayload): Record<string, string> {
 
 function normalizePhone(raw: string): string {
   const digits = raw.replace(/\D/g, "");
-  // Replace leading 8 with 7 for Russian numbers
   if (digits.startsWith("8") && digits.length === 11) {
     return "7" + digits.slice(1);
   }
   return digits;
 }
 
-// Fuzzy field lookup — returns first field whose key starts with the given prefix
+// Fuzzy field lookup — returns first field whose key starts with any of the given prefixes
 function findField(fields: Record<string, string>, ...prefixes: string[]): string {
   for (const prefix of prefixes) {
     const found = Object.entries(fields).find(([k]) => k.startsWith(prefix));
@@ -71,14 +71,16 @@ router.post("/", async (req, res) => {
 
   try {
     const body = req.body as MarquizPayload;
-    console.log("[MarquizWebhook] Incoming lead:", JSON.stringify(body));
+    // Log the full payload to help debug format issues
+    console.log("[MarquizWebhook] Incoming lead payload:", JSON.stringify(body));
 
     const fields = extractFields(body);
+    console.log("[MarquizWebhook] Extracted fields:", JSON.stringify(fields));
 
     // Phone — top-level field has priority, then results array
     const rawPhone =
       (typeof body.phone === "string" ? body.phone : "") ||
-      findField(fields, "телефон", "phone");
+      findField(fields, "телефон", "phone", "номер");
 
     if (!rawPhone || normalizePhone(rawPhone).length < 10) {
       console.warn("[MarquizWebhook] No valid phone in payload, skipping:", JSON.stringify(body));
@@ -94,9 +96,11 @@ router.post("/", async (req, res) => {
     const carInfo = findField(fields, "марка авто", "марка и год", "автомобиль", "машина", "авто");
     const vin = findField(fields, "vin", "вин", "номер кузова");
     const city = findField(fields, "город", "ваш город", "city");
-    const clientName = findField(fields, "имя", "name", "ваше имя");
+    const clientName =
+      (typeof body.name === "string" ? body.name : "") ||
+      findField(fields, "имя", "name", "ваше имя");
 
-    const result = await enqueueMarquizLead({
+    const leadData: MarquizLeadJobData = {
       quizName,
       phone: rawPhone,
       maxPhone: rawMaxPhone,
@@ -106,13 +110,20 @@ router.post("/", async (req, res) => {
       city,
       clientName,
       rawFields: fields,
-    });
+    };
 
-    if (!result) {
-      console.error("[MarquizWebhook] Failed to enqueue lead — queue unavailable");
+    console.log(`[MarquizWebhook] Lead data: phone=${rawPhone}, maxPhone=${rawMaxPhone}, name=${clientName}`);
+
+    // Try BullMQ queue first; fall back to direct processing if Redis unavailable
+    const queued = await enqueueMarquizLead(leadData);
+    if (queued) {
+      console.log(`[MarquizWebhook] Lead enqueued, jobId=${queued.jobId}`);
+    } else {
+      console.warn("[MarquizWebhook] Queue unavailable — processing lead directly");
+      await processMarquizLeadDirect(leadData);
     }
   } catch (err: any) {
-    console.error("[MarquizWebhook] Unhandled error:", err.message);
+    console.error("[MarquizWebhook] Unhandled error:", err.message, err.stack);
   }
 });
 

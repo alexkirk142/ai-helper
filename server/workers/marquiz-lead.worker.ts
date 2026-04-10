@@ -180,6 +180,26 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
 }
 
 // ---------------------------------------------------------------------------
+// Direct processing (fallback when Redis/BullMQ is unavailable)
+// ---------------------------------------------------------------------------
+
+/**
+ * Process a Marquiz lead synchronously without going through BullMQ.
+ * Used as a fallback when Redis is not configured.
+ */
+export async function processMarquizLeadDirect(data: MarquizLeadJobData): Promise<void> {
+  // Create a minimal job-like object for processLead
+  const fakeJob = { data, id: `direct-${Date.now()}` } as Job<MarquizLeadJobData>;
+
+  // Use a dummy redis object (round-robin won't work, will pick first account)
+  const dummyRedis = {
+    incr: async () => 1,
+  } as unknown as IORedis;
+
+  await processLead(fakeJob, dummyRedis);
+}
+
+// ---------------------------------------------------------------------------
 // Worker factory
 // ---------------------------------------------------------------------------
 
