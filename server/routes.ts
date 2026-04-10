@@ -1380,7 +1380,7 @@ export async function registerRoutes(
         return res.status(403).json({ error: "User not associated with a tenant" });
       }
 
-      const { phoneNumber, initialMessage } = req.body;
+      const { phoneNumber, initialMessage, accountId: requestedAccountId } = req.body;
       if (!phoneNumber) {
         return res.status(400).json({ error: "Phone number is required" });
       }
@@ -1393,15 +1393,21 @@ export async function registerRoutes(
       // GREEN-API chatId format: "79991234567@c.us"
       const chatId = `${cleanDigits}@c.us`;
 
-      // Find authorized MAX Personal account for this tenant
+      // Find authorized MAX Personal account — use specific accountId if provided
       const { db: dbInst } = await import("./db");
       const { maxPersonalAccounts: mpTable } = await import("@shared/schema");
       const { eq: eqOp, and: andOp } = await import("drizzle-orm");
       const account = await dbInst.query.maxPersonalAccounts.findFirst({
-        where: andOp(
-          eqOp(mpTable.tenantId, tenantId),
-          eqOp(mpTable.status, "authorized"),
-        ),
+        where: requestedAccountId
+          ? andOp(
+              eqOp(mpTable.tenantId, tenantId),
+              eqOp(mpTable.accountId, String(requestedAccountId)),
+              eqOp(mpTable.status, "authorized"),
+            )
+          : andOp(
+              eqOp(mpTable.tenantId, tenantId),
+              eqOp(mpTable.status, "authorized"),
+            ),
       });
 
       if (!account) {

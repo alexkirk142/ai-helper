@@ -46,6 +46,7 @@ export default function Conversations() {
   const [newDialogPhone, setNewDialogPhone] = useState("");
   const [newDialogMessage, setNewDialogMessage] = useState("");
   const [newDialogPhoneError, setNewDialogPhoneError] = useState("");
+  const [newDialogMaxAccountId, setNewDialogMaxAccountId] = useState<string>("");
 
   const { toast } = useToast();
 
@@ -86,6 +87,12 @@ export default function Conversations() {
   const { data: personalChannelStatus } = useQuery<{ telegram_personal: boolean; max_personal: boolean }>({
     queryKey: ["/api/channels/personal-status"],
     staleTime: 60_000,
+  });
+
+  const { data: maxPersonalAccountsList } = useQuery<Array<{ accountId: string; idInstance: string; label: string | null; displayName: string | null; status: string }>>({
+    queryKey: ["/api/channels/max-personal/accounts"],
+    staleTime: 30_000,
+    enabled: newDialogOpen && newDialogChannel === "max_personal",
   });
 
   const filteredConversations = useMemo(() => {
@@ -228,7 +235,7 @@ export default function Conversations() {
   };
 
   const startMaxPersonalConversationMutation = useMutation({
-    mutationFn: async (data: { phoneNumber: string; initialMessage?: string }) => {
+    mutationFn: async (data: { phoneNumber: string; initialMessage?: string; accountId?: string }) => {
       const response = await apiRequest("POST", "/api/max-personal/start-conversation", data);
       const json = await response.json();
       if (!response.ok) throw new Error(json.error || "Не удалось начать диалог");
@@ -241,6 +248,7 @@ export default function Conversations() {
       setNewDialogMessage("");
       setNewDialogChannel("");
       setNewDialogPhoneError("");
+      setNewDialogMaxAccountId("");
       if (data.conversationId) {
         setSelectedId(data.conversationId);
         setMobileShowChat(true);
@@ -289,14 +297,17 @@ export default function Conversations() {
 
   const handleNewDialogSubmit = () => {
     if (!validatePhone(newDialogPhone)) return;
-    const payload = {
-      phoneNumber: newDialogPhone.trim(),
-      initialMessage: newDialogMessage.trim() || undefined,
-    };
     if (newDialogChannel === "max_personal") {
-      startMaxPersonalConversationMutation.mutate(payload);
+      startMaxPersonalConversationMutation.mutate({
+        phoneNumber: newDialogPhone.trim(),
+        initialMessage: newDialogMessage.trim() || undefined,
+        accountId: newDialogMaxAccountId || undefined,
+      });
     } else if (newDialogChannel === "telegram_personal") {
-      startTelegramPersonalConversationMutation.mutate(payload);
+      startTelegramPersonalConversationMutation.mutate({
+        phoneNumber: newDialogPhone.trim(),
+        initialMessage: newDialogMessage.trim() || undefined,
+      });
     }
   };
 
@@ -313,6 +324,7 @@ export default function Conversations() {
     setNewDialogPhone("");
     setNewDialogMessage("");
     setNewDialogPhoneError("");
+    setNewDialogMaxAccountId("");
     // Pre-select channel if only one is connected
     if (connectedPersonalChannels.length === 1) {
       setNewDialogChannel(connectedPersonalChannels[0]);
@@ -625,7 +637,10 @@ export default function Conversations() {
                     <Label htmlFor="new-dialog-channel">Канал</Label>
                     <Select
                       value={newDialogChannel}
-                      onValueChange={(v) => setNewDialogChannel(v as "telegram_personal" | "max_personal")}
+                      onValueChange={(v) => {
+                        setNewDialogChannel(v as "telegram_personal" | "max_personal");
+                        setNewDialogMaxAccountId("");
+                      }}
                     >
                       <SelectTrigger id="new-dialog-channel">
                         <SelectValue placeholder="Выберите канал" />
@@ -637,6 +652,29 @@ export default function Conversations() {
                         {connectedPersonalChannels.includes("max_personal") && (
                           <SelectItem value="max_personal">MAX Personal</SelectItem>
                         )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {/* Account selector — shown when MAX Personal is selected and there are multiple accounts */}
+                {newDialogChannel === "max_personal" && maxPersonalAccountsList && maxPersonalAccountsList.filter(a => a.status === "authorized").length > 1 && (
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="new-dialog-max-account">Аккаунт MAX</Label>
+                    <Select
+                      value={newDialogMaxAccountId}
+                      onValueChange={setNewDialogMaxAccountId}
+                    >
+                      <SelectTrigger id="new-dialog-max-account">
+                        <SelectValue placeholder="Выберите аккаунт" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {maxPersonalAccountsList
+                          .filter(a => a.status === "authorized")
+                          .map(acc => (
+                            <SelectItem key={acc.accountId} value={acc.accountId}>
+                              {acc.label || acc.displayName || `Instance ${acc.idInstance}`}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </div>

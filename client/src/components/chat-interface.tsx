@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -369,6 +370,36 @@ export function ChatInterface({
   const prevConversationId = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Determine if this is a MAX Personal conversation and which account is used
+  const isMaxPersonal =
+    conversation?.customer?.channel === "max_personal" ||
+    conversation?.channel?.type === "max_personal";
+
+  const { data: maxAccountsList } = useQuery<Array<{ accountId: string; idInstance: string; label: string | null; displayName: string | null; status: string }>>({
+    queryKey: ["/api/channels/max-personal/accounts"],
+    staleTime: 60_000,
+    enabled: !!isMaxPersonal,
+  });
+
+  // Find which accountId this conversation uses (from most recent message that has one)
+  const activeAccountId = useMemo(() => {
+    if (!conversation?.messages) return null;
+    for (let i = conversation.messages.length - 1; i >= 0; i--) {
+      const meta = conversation.messages[i].metadata as any;
+      if (meta?.accountId) return meta.accountId as string;
+    }
+    return null;
+  }, [conversation?.messages]);
+
+  const activeAccount = useMemo(() => {
+    if (!activeAccountId || !maxAccountsList) return null;
+    return maxAccountsList.find(a => a.accountId === activeAccountId) ?? null;
+  }, [activeAccountId, maxAccountsList]);
+
+  const activeAccountLabel = activeAccount
+    ? (activeAccount.label || activeAccount.displayName || `Instance ${activeAccount.idInstance}`)
+    : null;
+
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior, block: "end" });
@@ -482,11 +513,16 @@ export function ChatInterface({
             <div className="font-medium">
               {conversation.customer?.name || "Неизвестный клиент"}
             </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
               <span>{conversation.customer?.phone || "Нет телефона"}</span>
               <Badge variant="outline" className="text-xs">
                 {conversation.mode === "learning" ? "Обучение" : conversation.mode === "semi_auto" ? "Полуавто" : "Авто"}
               </Badge>
+              {isMaxPersonal && activeAccountLabel && (
+                <Badge variant="outline" className="text-xs border-blue-400 text-blue-500">
+                  MAX: {activeAccountLabel}
+                </Badge>
+              )}
             </div>
           </div>
         </div>
