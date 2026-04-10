@@ -3908,7 +3908,13 @@ export default function Settings() {
   });
 
   const handleSubmit = (data: SettingsFormValues) => {
-    updateMutation.mutate(data);
+    // Convert empty strings to null for nullable server fields
+    const cleaned = {
+      ...data,
+      escalationEmail: data.escalationEmail?.trim() || null,
+      escalationTelegram: (data as any).escalationTelegram?.trim() || null,
+    };
+    updateMutation.mutate(cleaned as SettingsFormValues);
   };
 
   if (isLoading) {
