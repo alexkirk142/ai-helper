@@ -31,31 +31,21 @@ function toMaxChatId(phone: string): string {
 }
 
 function buildResponseText(data: MarquizLeadJobData): string {
-  const greeting = data.clientName
-    ? `Здравствуйте, ${data.clientName}!`
-    : "Здравствуйте!";
+  // Build the order summary: "gearboxType carInfo"
+  const parts: string[] = [];
+  if (data.gearboxType) parts.push(data.gearboxType);
+  if (data.carInfo) parts.push(data.carInfo);
+  const orderSummary = parts.join(" ") || "КПП";
 
-  const lines: string[] = [
-    `${greeting} Получили вашу заявку на подбор КПП 🔧`,
-    "",
-  ];
-
-  if (data.carInfo) lines.push(`🚗 Автомобиль: ${data.carInfo}`);
-  if (data.gearboxType) lines.push(`⚙️ Тип КПП: ${data.gearboxType}`);
-  if (data.vin) lines.push(`🔑 VIN: ${data.vin}`);
-  if (data.city) lines.push(`📍 Город: ${data.city}`);
-
-  lines.push("");
+  const cityPart = data.city ? `, г. ${data.city}` : "";
 
   if (data.vin) {
-    // Has VIN — can do precise search
-    lines.push("Отлично — VIN есть, подберём точные варианты под ваш автомобиль. Свяжемся в течение 15 минут!");
+    // Has VIN — confirm details and ask for verification
+    return `Здравствуйте! Вы оставляли заявку на подбор ${orderSummary}, VIN ${data.vin}${cityPart} — всё верно?`;
   } else {
-    // No VIN — ask for it, but proceed anyway
-    lines.push("Подберём варианты по марке и типу КПП. Чтобы подобрать точнее — пришлите VIN или номер кузова. Свяжемся в течение 15 минут!");
+    // No VIN — ask for it to improve search accuracy
+    return `Здравствуйте! Вы оставляли заявку на подбор ${orderSummary}${cityPart}. Для точного подбора напишите ВИН-код авто или маркировку вашей коробки 🙏`;
   }
-
-  return lines.join("\n");
 }
 
 /**
