@@ -25,6 +25,7 @@ interface GreenApiFileData {
 interface GreenApiMessageData {
   typeMessage:
     | "textMessage"
+    | "extendedTextMessage"
     | "imageMessage"
     | "videoMessage"
     | "audioMessage"
@@ -33,6 +34,7 @@ interface GreenApiMessageData {
     | "stickerMessage"
     | string;
   textMessageData?: { textMessage: string };
+  extendedTextMessageData?: { text: string; description?: string; title?: string };
   fileMessageData?: GreenApiFileData;
 }
 
@@ -170,6 +172,9 @@ router.post("/:tenantId/:accountId", async (req, res) => {
 
     if (msgType === "textMessage" && msgData.textMessageData) {
       text = msgData.textMessageData.textMessage || "";
+    } else if (msgType === "extendedTextMessage" && msgData.extendedTextMessageData) {
+      // GREEN-API sends messages with URLs/emails/links as extendedTextMessage
+      text = msgData.extendedTextMessageData.text || "";
     } else {
       const att = buildAttachment(msgData);
       if (att) {
