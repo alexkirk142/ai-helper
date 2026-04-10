@@ -1,5 +1,4 @@
-import { useState, useRef } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useState, useRef, useCallback } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -70,9 +69,8 @@ const modeLabels: Record<string, string> = {
   auto: "Авто",
 };
 
-// Estimated height per conversation item in pixels.
-// Actual: avatar(40) + 3 content rows(~36) + padding(24) ≈ 80px
-const ITEM_ESTIMATED_SIZE = 80;
+// Render PAGE_SIZE items initially, load more as user scrolls
+const PAGE_SIZE = 60;
 
 export function ConversationList({
   conversations,
@@ -85,6 +83,7 @@ export function ConversationList({
 }: ConversationListProps) {
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   const handleDeleteConfirm = () => {
     if (deleteTargetId && onDelete) {
@@ -93,7 +92,7 @@ export function ConversationList({
     setDeleteTargetId(null);
   };
 
-  // Client-side search filter (name, phone, last message)
+  // Client-side search filter
   const filtered = searchQuery.trim()
     ? conversations.filter((c) => {
         const q = searchQuery.toLowerCase();
@@ -105,14 +104,34 @@ export function ConversationList({
       })
     : conversations;
 
-  const parentRef = useRef<HTMLDivElement>(null);
+  // Reset visible count when filter/search changes so we always start fresh
+  const prevFilterKey = useRef("");
+  const filterKey = searchQuery + "|" + conversations.length;
+  if (filterKey !== prevFilterKey.current) {
+    prevFilterKey.current = filterKey;
+    if (visibleCount !== PAGE_SIZE) setVisibleCount(PAGE_SIZE);
+  }
 
-  const rowVirtualizer = useVirtualizer({
-    count: filtered.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => ITEM_ESTIMATED_SIZE,
-    overscan: 8,
-  });
+  const visibleItems = filtered.slice(0, visibleCount);
+  const hasMore = visibleCount < filtered.length;
+
+  // IntersectionObserver sentinel — load next page when visible
+  const sentinelRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node || !hasMore) return;
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (entries[0].isIntersecting) {
+            setVisibleCount((c) => Math.min(c + PAGE_SIZE, filtered.length));
+          }
+        },
+        { threshold: 0.1 },
+      );
+      observer.observe(node);
+      return () => observer.disconnect();
+    },
+    [hasMore, filtered.length],
+  );
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -152,8 +171,7 @@ export function ConversationList({
         )}
       </div>
 
-      {/* Scrollable list — only visible items are rendered */}
-      <div ref={parentRef} className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
         {isLoading ? (
           <div className="space-y-2 p-3">
             {[1, 2, 3, 4, 5].map((i) => (
@@ -180,111 +198,99 @@ export function ConversationList({
             </p>
           </div>
         ) : (
-          // Virtual scroll container — total height reserves space for all items
-          <div
-            style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: "relative" }}
-            className="px-2 py-1"
-          >
-            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-              const conversation = filtered[virtualRow.index];
+          <div className="p-2 w-full">
+            {visibleItems.map((conversation) => {
               const isMarquizLead =
                 (conversation.customer?.metadata as any)?.source === "marquiz";
 
               return (
                 <div
                   key={conversation.id}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
-                  className="px-0 py-0.5"
-                  data-index={virtualRow.index}
-                  ref={rowVirtualizer.measureElement}
+                  className={cn(
+                    "group relative flex w-full max-w-full gap-3 rounded-md p-3 text-left transition-colors hover-elevate cursor-pointer",
+                    selectedId === conversation.id && "bg-accent",
+                  )}
+                  data-testid={`conversation-item-${conversation.id}`}
+                  onClick={() => onSelect(conversation.id)}
                 >
-                  <div
-                    className={cn(
-                      "group relative flex w-full max-w-full gap-3 rounded-md p-3 text-left transition-colors hover-elevate cursor-pointer",
-                      selectedId === conversation.id && "bg-accent",
-                    )}
-                    data-testid={`conversation-item-${conversation.id}`}
-                    onClick={() => onSelect(conversation.id)}
-                  >
-                    <div className="relative">
-                      <Avatar className="h-10 w-10">
-                        <AvatarFallback className="text-xs">
-                          {conversation.customer?.name?.slice(0, 2).toUpperCase() || "КЛ"}
-                        </AvatarFallback>
-                      </Avatar>
-                      <span
-                        className={cn(
-                          "absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-background",
-                          statusColors[conversation.status],
-                        )}
-                      />
-                    </div>
-
-                    <div className="flex-1 min-w-0 overflow-hidden">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-sm font-medium">
-                          {conversation.customer?.name || "Неизвестный клиент"}
-                        </span>
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {conversation.lastMessageAt &&
-                            formatDistanceToNow(new Date(conversation.lastMessageAt), {
-                              addSuffix: false,
-                              locale: ru,
-                            })}
-                        </span>
-                      </div>
-
-                      <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {conversation.lastMessage?.content || "Нет сообщений"}
-                      </div>
-
-                      <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-                        {conversation.channel?.type && (
-                          <ChannelIcon
-                            type={conversation.channel.type}
-                            className="h-3.5 w-3.5"
-                          />
-                        )}
-                        <Badge variant="outline" className="text-xs">
-                          {modeLabels[conversation.mode] || conversation.mode}
-                        </Badge>
-                        {isMarquizLead && (
-                          <Badge
-                            variant="outline"
-                            className="text-xs border-orange-400 text-orange-500"
-                          >
-                            Заявка
-                          </Badge>
-                        )}
-                        {conversation.unreadCount > 0 && (
-                          <Badge className="text-xs">{conversation.unreadCount}</Badge>
-                        )}
-                      </div>
-                    </div>
-
-                    {onDelete && (
-                      <button
-                        className="absolute top-1 right-1 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive text-muted-foreground transition-colors"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteTargetId(conversation.id);
-                        }}
-                        data-testid={`delete-conversation-${conversation.id}`}
-                        aria-label="Удалить диалог"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
+                  <div className="relative">
+                    <Avatar className="h-10 w-10">
+                      <AvatarFallback className="text-xs">
+                        {conversation.customer?.name?.slice(0, 2).toUpperCase() || "КЛ"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span
+                      className={cn(
+                        "absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-background",
+                        statusColors[conversation.status],
+                      )}
+                    />
                   </div>
+
+                  <div className="flex-1 min-w-0 overflow-hidden">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium">
+                        {conversation.customer?.name || "Неизвестный клиент"}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {conversation.lastMessageAt &&
+                          formatDistanceToNow(new Date(conversation.lastMessageAt), {
+                            addSuffix: false,
+                            locale: ru,
+                          })}
+                      </span>
+                    </div>
+
+                    <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {conversation.lastMessage?.content || "Нет сообщений"}
+                    </div>
+
+                    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                      {conversation.channel?.type && (
+                        <ChannelIcon type={conversation.channel.type} className="h-3.5 w-3.5" />
+                      )}
+                      <Badge variant="outline" className="text-xs">
+                        {modeLabels[conversation.mode] || conversation.mode}
+                      </Badge>
+                      {isMarquizLead && (
+                        <Badge
+                          variant="outline"
+                          className="text-xs border-orange-400 text-orange-500"
+                        >
+                          Заявка
+                        </Badge>
+                      )}
+                      {conversation.unreadCount > 0 && (
+                        <Badge className="text-xs">{conversation.unreadCount}</Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  {onDelete && (
+                    <button
+                      className="absolute top-1 right-1 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive text-muted-foreground transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTargetId(conversation.id);
+                      }}
+                      data-testid={`delete-conversation-${conversation.id}`}
+                      aria-label="Удалить диалог"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               );
             })}
+
+            {/* Sentinel — triggers loading the next page when scrolled into view */}
+            {hasMore && (
+              <div ref={sentinelRef} className="h-8 flex items-center justify-center">
+                <span className="text-xs text-muted-foreground">
+                  Показано {visibleCount} из {filtered.length}
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
