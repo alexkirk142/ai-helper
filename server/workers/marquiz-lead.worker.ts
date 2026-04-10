@@ -82,7 +82,7 @@ function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
   if (data.vin) {
     return `Здравствуйте! Получили вашу заявку на подбор КПП.${details}\n\nВсё верно?${oohSuffix}`;
   } else {
-    return `Здравствуйте! Получили вашу заявку на подбор КПП.${details}\n\nВсё верно? Если есть ВИН-код — напишите, подберём точнее 🙏${oohSuffix}`;
+    return `Здравствуйте! Получили вашу заявку на подбор КПП.${details}\n\nНапишите ВИН-код или маркировку коробки — подберём точный вариант 🙏${oohSuffix}`;
   }
 }
 
