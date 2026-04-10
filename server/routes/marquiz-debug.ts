@@ -25,15 +25,33 @@ router.get("/", async (req: Request, res: Response) => {
   let queueStatus = "unknown";
   let pendingJobs = 0;
   let failedJobs = 0;
+  let completedJobs = 0;
+  let recentJobs: Array<{ id: string | undefined; state: string; phone?: string; name?: string; addedAt?: string; error?: string }> = [];
   try {
     const queue = getMarquizLeadQueue();
     if (!queue) {
       queueStatus = "disabled (no Redis URL)";
     } else {
-      const counts = await queue.getJobCounts("wait", "active", "failed", "delayed");
+      const counts = await queue.getJobCounts("wait", "active", "failed", "delayed", "completed");
       pendingJobs = (counts.wait ?? 0) + (counts.active ?? 0) + (counts.delayed ?? 0);
       failedJobs = counts.failed ?? 0;
+      completedJobs = counts.completed ?? 0;
       queueStatus = "connected";
+
+      // Fetch last 5 completed jobs
+      const completed = await queue.getCompleted(0, 4);
+      const failed = await queue.getFailed(0, 4);
+      for (const job of [...completed, ...failed]) {
+        recentJobs.push({
+          id: job.id,
+          state: completed.includes(job) ? "completed" : "failed",
+          phone: job.data?.phone,
+          name: job.data?.clientName,
+          addedAt: job.timestamp ? new Date(job.timestamp).toISOString() : undefined,
+          error: (job.failedReason as string | undefined),
+        });
+      }
+      recentJobs.sort((a, b) => (b.addedAt ?? "").localeCompare(a.addedAt ?? ""));
     }
   } catch (e: any) {
     queueStatus = `error: ${e.message}`;
@@ -57,9 +75,14 @@ router.get("/", async (req: Request, res: Response) => {
     redisUrl: redisUrl ? `${redisUrl.slice(0, 20)}...` : "⚠️ NOT SET",
     queueStatus,
     pendingJobs,
+    completedJobs,
     failedJobs,
+    recentJobs,
     maxAccounts: accounts,
     webhookUrl: "https://ai-helper-production-c56f.up.railway.app/webhooks/marquiz",
+    hint: completedJobs === 0 && failedJobs === 0
+      ? "No jobs processed yet — send a test quiz submission to trigger the webhook"
+      : undefined,
   });
 });
 
