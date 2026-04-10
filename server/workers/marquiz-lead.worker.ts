@@ -7,6 +7,7 @@ import { getRedisConnectionConfig } from "../services/message-queue";
 import type { MarquizLeadJobData } from "../services/marquiz-lead-queue";
 import { MaxPersonalAdapter } from "../services/max-personal-adapter";
 import { storage } from "../storage";
+import type { Tenant } from "../../shared/schema";
 
 const QUEUE_NAME = "marquiz_leads";
 const ROTATION_KEY_PREFIX = "marquiz:rotation:";
@@ -30,7 +31,39 @@ function toMaxChatId(phone: string): string {
   return `${normalizePhone(phone)}@c.us`;
 }
 
-function buildResponseText(data: MarquizLeadJobData): string {
+/** Check if current moment falls within tenant working hours */
+function isWorkingHours(tenant: Tenant): boolean {
+  try {
+    const timezone = tenant.timezone || "Europe/Moscow";
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(now);
+    const h = parseInt(parts.find((p) => p.type === "hour")?.value ?? "12", 10);
+    const m = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
+    const current = h * 60 + m;
+
+    const parseHM = (t: string | null | undefined, def: number) => {
+      if (!t) return def;
+      const [hh, mm] = t.split(":").map(Number);
+      return hh * 60 + (mm || 0);
+    };
+    const start = parseHM(tenant.workingHoursStart, 9 * 60);
+    const end = parseHM(tenant.workingHoursEnd, 18 * 60);
+
+    return start <= end
+      ? current >= start && current < end
+      : current >= start || current < end;
+  } catch {
+    return true; // default to "working hours" on error
+  }
+}
+
+function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
   // Build the order summary: "gearboxType carInfo"
   const parts: string[] = [];
   if (data.gearboxType) parts.push(data.gearboxType);
@@ -38,13 +71,17 @@ function buildResponseText(data: MarquizLeadJobData): string {
   const orderSummary = parts.join(" ") || "КПП";
 
   const cityPart = data.city ? `, г. ${data.city}` : "";
+  const afterHours = !isWorkingHours(tenant);
+
+  // Out-of-hours suffix added to both message variants
+  const oohSuffix = afterHours
+    ? " Утром приеду на работу, скину Вам подходящий вариант 👍"
+    : "";
 
   if (data.vin) {
-    // Has VIN — confirm details and ask for verification
-    return `Здравствуйте! Вы оставляли заявку на подбор ${orderSummary}, VIN ${data.vin}${cityPart} — всё верно?`;
+    return `Здравствуйте! Вы оставляли заявку на подбор ${orderSummary}, VIN ${data.vin}${cityPart} — всё верно?${oohSuffix}`;
   } else {
-    // No VIN — ask for it to improve search accuracy
-    return `Здравствуйте! Вы оставляли заявку на подбор ${orderSummary}${cityPart}. Для точного подбора напишите ВИН-код авто или маркировку вашей коробки 🙏`;
+    return `Здравствуйте! Вы оставляли заявку на подбор ${orderSummary}${cityPart}. Для точного подбора напишите ВИН-код авто или маркировку вашей коробки 🙏${oohSuffix}`;
   }
 }
 
@@ -88,9 +125,16 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     return;
   }
 
+  // Load tenant to access working hours / timezone
+  const tenant = await storage.getTenant(tenantId);
+  if (!tenant) {
+    console.error(`[MarquizWorker] Tenant ${tenantId} not found`);
+    return;
+  }
+
   const chatId = toMaxChatId(data.maxPhone);
   console.log(
-    `[MarquizWorker] Processing lead: chatId=${chatId}, quiz="${data.quizName}", jobId=${job.id}`,
+    `[MarquizWorker] Processing lead: chatId=${chatId}, quiz="${data.quizName}", jobId=${job.id}, workingHours=${isWorkingHours(tenant)}`,
   );
 
   // 1. Select account with round-robin rotation
@@ -142,7 +186,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   console.log(`[MarquizWorker] Conversation created: ${conversation.id}`);
 
   // 4. Send message via MAX Personal
-  const text = buildResponseText(data);
+  const text = buildResponseText(data, tenant);
   const result = await maxPersonalAdapter.sendMessageForTenant(
     tenantId,
     chatId,
