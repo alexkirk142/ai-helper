@@ -64,24 +64,25 @@ function isWorkingHours(tenant: Tenant): boolean {
 }
 
 function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
-  // Build the order summary: "gearboxType carInfo"
-  const parts: string[] = [];
-  if (data.gearboxType) parts.push(data.gearboxType);
-  if (data.carInfo) parts.push(data.carInfo);
-  const orderSummary = parts.join(" ") || "КПП";
-
-  const cityPart = data.city ? `, г. ${data.city}` : "";
   const afterHours = !isWorkingHours(tenant);
 
-  // Out-of-hours suffix added to both message variants
+  // Build structured field lines
+  const lines: string[] = [];
+  if (data.carInfo)     lines.push(`🚗 Автомобиль: ${data.carInfo}`);
+  if (data.gearboxType) lines.push(`⚙️ Тип КПП: ${data.gearboxType}`);
+  if (data.city)        lines.push(`📍 Город: ${data.city}`);
+  if (data.vin)         lines.push(`🔑 VIN: ${data.vin}`);
+
+  const details = lines.length > 0 ? `\n\n${lines.join("\n")}` : "";
+
   const oohSuffix = afterHours
-    ? " Утром приеду на работу, скину Вам подходящий вариант 👍"
+    ? "\n\nУтром приеду на работу, скину Вам подходящий вариант 👍"
     : "";
 
   if (data.vin) {
-    return `Здравствуйте! Вы оставляли заявку на подбор ${orderSummary}, VIN ${data.vin}${cityPart} — всё верно?${oohSuffix}`;
+    return `Здравствуйте! Получили вашу заявку на подбор КПП.${details}\n\nУже подбираем — скоро пришлём подходящие варианты 👍${oohSuffix}`;
   } else {
-    return `Здравствуйте! Вы оставляли заявку на подбор ${orderSummary}${cityPart}. Для точного подбора напишите ВИН-код авто или маркировку вашей коробки 🙏${oohSuffix}`;
+    return `Здравствуйте! Получили вашу заявку на подбор КПП.${details}\n\nНапишите ВИН-код или маркировку коробки — подберём точнее 🙏${oohSuffix}`;
   }
 }
 
