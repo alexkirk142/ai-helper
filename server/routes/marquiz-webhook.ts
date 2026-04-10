@@ -138,9 +138,10 @@ router.post("/", async (req, res) => {
       findAnswer(answers, "город", "ваш город") ||
       findField(legacyFields, "город");
 
-    // MAX phone could be a dedicated field in the quiz answers
+    // MAX phone — dedicated quiz field named "max" or similar
     const maxPhoneRaw =
-      findAnswer(answers, "номер max", "max номер", "номер в max") ||
+      findAnswer(answers, "max") ||
+      findAnswer(answers, "номер max", "max номер", "номер в max", "ваш номер max") ||
       rawPhone;
 
     const leadData: MarquizLeadJobData = {

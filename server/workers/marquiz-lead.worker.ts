@@ -36,7 +36,7 @@ function buildResponseText(data: MarquizLeadJobData): string {
     : "Здравствуйте!";
 
   const lines: string[] = [
-    `${greeting} Получили вашу заявку на подбор КПП.`,
+    `${greeting} Получили вашу заявку на подбор КПП 🔧`,
     "",
   ];
 
@@ -46,7 +46,14 @@ function buildResponseText(data: MarquizLeadJobData): string {
   if (data.city) lines.push(`📍 Город: ${data.city}`);
 
   lines.push("");
-  lines.push("Подбираем варианты прямо сейчас, свяжемся с вами в течение 15 минут!");
+
+  if (data.vin) {
+    // Has VIN — can do precise search
+    lines.push("Отлично — VIN есть, подберём точные варианты под ваш автомобиль. Свяжемся в течение 15 минут!");
+  } else {
+    // No VIN — ask for it, but proceed anyway
+    lines.push("Подберём варианты по марке и типу КПП. Чтобы подобрать точнее — пришлите VIN или номер кузова. Свяжемся в течение 15 минут!");
+  }
 
   return lines.join("\n");
 }
