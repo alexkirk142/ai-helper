@@ -99,7 +99,8 @@ const phoneRegex = /(\+?[0-9][\s\-()0-9]{8,}[0-9])/g;
 
 function parseMessageWithPhones(
   content: string,
-  onPhoneClick?: (phone: string) => void
+  onPhoneClick?: (phone: string) => void,
+  isOnPrimary = false
 ): React.ReactNode[] {
   if (!onPhoneClick) {
     return [content];
@@ -128,7 +129,10 @@ function parseMessageWithPhones(
             e.stopPropagation();
             onPhoneClick(cleanPhone);
           }}
-          className="text-primary underline font-medium cursor-pointer"
+          className={isOnPrimary
+            ? "underline font-medium cursor-pointer opacity-90"
+            : "text-primary underline font-medium cursor-pointer"
+          }
           role="button"
           tabIndex={0}
           data-testid={`link-phone-${cleanPhone}`}
@@ -615,7 +619,11 @@ export function ChatInterface({
                 >
                   {message.content && (
                     <p className="text-sm whitespace-pre-wrap">
-                      {parseMessageWithPhones(message.content, onPhoneClick)}
+                      {parseMessageWithPhones(
+                        message.content,
+                        onPhoneClick,
+                        message.role === "assistant" || message.role === "owner"
+                      )}
                     </p>
                   )}
                   <AttachmentRenderer
