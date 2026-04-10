@@ -371,15 +371,16 @@ export function ChatInterface({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Determine if this is a MAX Personal conversation and which account is used
-  const isMaxPersonal =
-    conversation?.customer?.channel === "max_personal" ||
-    conversation?.channel?.type === "max_personal";
+  const isMaxPersonal = conversation?.customer?.channel === "max_personal";
 
-  const { data: maxAccountsList } = useQuery<Array<{ accountId: string; idInstance: string; label: string | null; displayName: string | null; status: string }>>({
+  const { data: maxAccountsData } = useQuery<{
+    accounts: Array<{ accountId: string; idInstance: string; label: string | null; displayName: string | null; status: string }>;
+  }>({
     queryKey: ["/api/channels/max-personal/accounts"],
     staleTime: 60_000,
     enabled: !!isMaxPersonal,
   });
+  const maxAccountsList = maxAccountsData?.accounts ?? [];
 
   // Find which accountId this conversation uses (from most recent message that has one)
   const activeAccountId = useMemo(() => {
@@ -392,7 +393,7 @@ export function ChatInterface({
   }, [conversation?.messages]);
 
   const activeAccount = useMemo(() => {
-    if (!activeAccountId || !maxAccountsList) return null;
+    if (!activeAccountId || maxAccountsList.length === 0) return null;
     return maxAccountsList.find(a => a.accountId === activeAccountId) ?? null;
   }, [activeAccountId, maxAccountsList]);
 

@@ -89,11 +89,14 @@ export default function Conversations() {
     staleTime: 60_000,
   });
 
-  const { data: maxPersonalAccountsList } = useQuery<Array<{ accountId: string; idInstance: string; label: string | null; displayName: string | null; status: string }>>({
+  const { data: maxPersonalAccountsData } = useQuery<{
+    accounts: Array<{ accountId: string; idInstance: string; label: string | null; displayName: string | null; status: string }>;
+  }>({
     queryKey: ["/api/channels/max-personal/accounts"],
     staleTime: 30_000,
     enabled: newDialogOpen && newDialogChannel === "max_personal",
   });
+  const maxPersonalAccountsList = maxPersonalAccountsData?.accounts ?? [];
 
   const filteredConversations = useMemo(() => {
     if (!conversations) return [];
@@ -657,7 +660,7 @@ export default function Conversations() {
                   </div>
                 )}
                 {/* Account selector — shown when MAX Personal is selected and there are multiple accounts */}
-                {newDialogChannel === "max_personal" && maxPersonalAccountsList && maxPersonalAccountsList.filter(a => a.status === "authorized").length > 1 && (
+                {newDialogChannel === "max_personal" && maxPersonalAccountsList.filter(a => a.status === "authorized").length > 1 && (
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="new-dialog-max-account">Аккаунт MAX</Label>
                     <Select

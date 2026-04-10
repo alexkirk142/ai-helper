@@ -260,7 +260,7 @@ export function ConversationList({
                           Заявка
                         </Badge>
                       )}
-                      {conversation.unreadCount > 0 && (
+                      {(conversation.unreadCount ?? 0) > 0 && (
                         <Badge className="text-xs">{conversation.unreadCount}</Badge>
                       )}
                     </div>
