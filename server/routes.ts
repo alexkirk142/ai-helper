@@ -6,6 +6,7 @@ import authRouter from "./routes/auth";
 import adminRouter from "./routes/admin";
 import maxWebhookRouter from "./routes/max-webhook";
 import maxPersonalWebhookRouter from "./routes/max-personal-webhook";
+import marquizWebhookRouter from "./routes/marquiz-webhook";
 import { telegramWebhookHandler } from "./routes/telegram-webhook";
 import { whatsappWebhookHandler, whatsappWebhookVerifyHandler } from "./routes/whatsapp-webhook";
 import { featureFlagService } from "./services/feature-flags";
@@ -1877,6 +1878,9 @@ export async function registerRoutes(
   });
 
   app.use("/webhooks/max-personal", webhookRateLimiter, maxPersonalWebhookRouter);
+
+  // ============ MARQUIZ WEBHOOK ============
+  app.use("/webhooks/marquiz", webhookRateLimiter, marquizWebhookRouter);
 
   // ============ AUTH ROUTES (email/password) ============
   app.use("/auth", authRouter);

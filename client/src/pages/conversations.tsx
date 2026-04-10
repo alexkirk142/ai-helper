@@ -17,7 +17,7 @@ import { User, ArrowLeft, Send, X, Paperclip } from "lucide-react";
 import type { ConversationWithCustomer, ConversationDetail } from "@shared/schema";
 import type { ChannelFilter } from "@/components/channel-tabs";
 
-const CHANNEL_FAMILY_TYPES: Record<Exclude<ChannelFilter, "all">, string[]> = {
+const CHANNEL_FAMILY_TYPES: Record<Exclude<ChannelFilter, "all" | "marquiz">, string[]> = {
   telegram: ["telegram", "telegram_personal"],
   max: ["max", "max_personal"],
   whatsapp: ["whatsapp", "whatsapp_personal"],
@@ -75,6 +75,14 @@ export default function Conversations() {
     queryKey: ["/api/conversations/channel-counts"],
   });
 
+  // Count marquiz leads from already-loaded conversations (client-side)
+  const marquizCount = useMemo(() => {
+    if (!conversations) return 0;
+    return conversations.filter(
+      (c) => (c.customer?.metadata as any)?.source === "marquiz"
+    ).length;
+  }, [conversations]);
+
   const { data: personalChannelStatus } = useQuery<{ telegram_personal: boolean; max_personal: boolean }>({
     queryKey: ["/api/channels/personal-status"],
     staleTime: 60_000,
@@ -83,6 +91,11 @@ export default function Conversations() {
   const filteredConversations = useMemo(() => {
     if (!conversations) return [];
     if (channelFilter === "all") return conversations;
+    if (channelFilter === "marquiz") {
+      return conversations.filter(
+        (c) => (c.customer?.metadata as any)?.source === "marquiz"
+      );
+    }
     const types = CHANNEL_FAMILY_TYPES[channelFilter];
     return conversations.filter((c) => {
       // Prefer channel.type from the channels table; fall back to customer.channel
@@ -471,7 +484,10 @@ export default function Conversations() {
         <ChannelTabs
           activeFilter={channelFilter}
           onFilterChange={setChannelFilter}
-          counts={channelCounts ?? { all: 0 }}
+          counts={{
+            ...(channelCounts ?? { all: 0 }),
+            ...(marquizCount > 0 ? { marquiz: marquizCount } : {}),
+          }}
         />
         <ConversationList
           conversations={filteredConversations}

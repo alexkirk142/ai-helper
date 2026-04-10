@@ -1,15 +1,16 @@
 import { cn } from "@/lib/utils";
 
-export type ChannelFilter = "all" | "telegram" | "max" | "whatsapp";
+export type ChannelFilter = "all" | "telegram" | "max" | "whatsapp" | "marquiz";
 
 const CHANNEL_LABELS: Record<ChannelFilter, string> = {
   all: "Все",
   telegram: "Telegram",
   max: "MAX",
   whatsapp: "WhatsApp",
+  marquiz: "Заявки",
 };
 
-const ALL_FILTERS: ChannelFilter[] = ["all", "telegram", "max", "whatsapp"];
+const ALL_FILTERS: ChannelFilter[] = ["all", "telegram", "max", "whatsapp", "marquiz"];
 
 interface ChannelTabsProps {
   activeFilter: ChannelFilter;
@@ -19,6 +20,7 @@ interface ChannelTabsProps {
     telegram?: number;
     max?: number;
     whatsapp?: number;
+    marquiz?: number;
   };
 }
 
@@ -34,7 +36,7 @@ function UnreadBadge({ count }: { count: number }) {
 export function ChannelTabs({ activeFilter, onFilterChange, counts }: ChannelTabsProps) {
   const visibleFilters: ChannelFilter[] = ALL_FILTERS.filter((f) => {
     if (f === "all") return true;
-    return counts[f] !== undefined;
+    return counts[f] !== undefined && counts[f]! > 0;
   });
 
   if (visibleFilters.length <= 1) return null;
@@ -52,7 +54,9 @@ export function ChannelTabs({ activeFilter, onFilterChange, counts }: ChannelTab
               "flex items-center gap-0.5 rounded-t px-2.5 py-1.5 text-xs font-medium transition-colors",
               isActive
                 ? "border-b-2 border-primary text-primary"
-                : "text-muted-foreground hover:text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+              filter === "marquiz" && !isActive && "text-orange-500/70 hover:text-orange-500",
+              filter === "marquiz" && isActive && "border-orange-500 text-orange-500",
             )}
           >
             {CHANNEL_LABELS[filter]}

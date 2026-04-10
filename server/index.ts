@@ -35,6 +35,7 @@ import { closePriceLookupQueue } from "./services/price-lookup-queue";
 import { startVehicleLookupWorker } from "./workers/vehicle-lookup.worker";
 import { startPriceLookupWorker } from "./workers/price-lookup.worker";
 import { startWorker as startMessageSendWorker } from "./workers/message-send.worker";
+import { startMarquizLeadWorker } from "./workers/marquiz-lead.worker";
 import type { Worker } from "bullmq";
 import * as fs from "fs";
 import { spawn, ChildProcess } from "child_process";
@@ -46,6 +47,7 @@ let podzamenuProcess: ChildProcess | null = null;
 let vehicleLookupWorker: Worker | null = null;
 let priceLookupWorker: Worker | null = null;
 let messageSendWorker: Worker | null = null;
+let marquizLeadWorker: Worker | null = null;
 
 // Prevent gramjs internal timeouts and other unhandled rejections from crashing the process
 process.on("unhandledRejection", (reason: unknown) => {
@@ -231,6 +233,7 @@ app.use((req, res, next) => {
       vehicleLookupWorker = await startVehicleLookupWorker();
       priceLookupWorker = await startPriceLookupWorker();
       messageSendWorker = await startMessageSendWorker();
+      marquizLeadWorker = startMarquizLeadWorker();
       log("BullMQ workers started", "startup");
 
       // Auto-restore Telegram Personal sessions in background — must not block worker startup
@@ -404,6 +407,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     vehicleLookupWorker?.close(),
     priceLookupWorker?.close(),
     messageSendWorker?.close(),
+    marquizLeadWorker?.close(),
   ]);
   log("BullMQ workers closed", "shutdown");
 
