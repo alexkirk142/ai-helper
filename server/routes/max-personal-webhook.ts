@@ -170,6 +170,13 @@ router.post("/:tenantId/:accountId", async (req, res) => {
     let text = "";
     const attachments: ParsedAttachment[] = [];
 
+    // Silently ignore service events that carry no user content
+    const IGNORED_TYPES = ["reactionMessage", "stickerMessage", "pollMessage", "pollUpdateMessage"];
+    if (IGNORED_TYPES.includes(msgType)) {
+      console.log(`[MaxPersonalWebhook] Ignored non-content message type: ${msgType}`);
+      return res.json({ ok: true });
+    }
+
     if (msgType === "textMessage" && msgData.textMessageData) {
       text = msgData.textMessageData.textMessage || "";
     } else if (msgType === "extendedTextMessage" && msgData.extendedTextMessageData) {
@@ -183,6 +190,12 @@ router.post("/:tenantId/:accountId", async (req, res) => {
           text = msgData.fileMessageData.caption;
         }
       }
+    }
+
+    // Skip if no content at all (unknown type with no attachment)
+    if (!text && attachments.length === 0) {
+      console.log(`[MaxPersonalWebhook] Skipped empty message of type: ${msgType}`);
+      return res.json({ ok: true });
     }
 
     // Normalize chatId for storage.
