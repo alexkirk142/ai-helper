@@ -1727,8 +1727,26 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
   const [qrImage, setQrImage] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [checkingStatus, setCheckingStatus] = useState<string | null>(null);
+  const [reregisteringWebhook, setReregisteringWebhook] = useState<string | null>(null);
   const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastQrFetchRef = useRef<number>(0);
+
+  const reregisterWebhook = async (accountId: string) => {
+    setReregisteringWebhook(accountId);
+    try {
+      const res = await fetch(`/api/channels/max-personal/${accountId}/reregister-webhook`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed");
+      toast({ title: "Вебхук переподключён", description: "Входящие сообщения будут поступать на этот аккаунт" });
+      refetchAccounts();
+    } catch {
+      toast({ title: "Ошибка переподключения", variant: "destructive" });
+    } finally {
+      setReregisteringWebhook(null);
+    }
+  };
 
   const { data: accountsData, refetch: refetchAccounts } = useQuery<{
     accounts: Array<{
@@ -1873,6 +1891,18 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
                 </p>
                 <p className="text-xs text-muted-foreground">Статус: авторизован</p>
               </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => reregisterWebhook(acc.accountId)}
+                disabled={reregisteringWebhook === acc.accountId}
+                title="Переподключить вебхук для получения входящих сообщений"
+              >
+                {reregisteringWebhook === acc.accountId
+                  ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Подключение...</>
+                  : "Обновить вебхук"
+                }
+              </Button>
             </div>
           ))}
           {pendingAccounts.map((acc, idx) => (
