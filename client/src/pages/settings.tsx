@@ -4197,6 +4197,16 @@ export default function Settings() {
                         )}
                       />
                     </div>
+                    <div className="flex justify-end pt-2">
+                      <Button
+                        type="submit"
+                        disabled={updateMutation.isPending}
+                        data-testid="button-save-working-hours"
+                      >
+                        <Save className="mr-2 h-4 w-4" />
+                        Сохранить
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
 
