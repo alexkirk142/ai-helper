@@ -5,47 +5,36 @@ import { processMarquizLeadDirect } from "../workers/marquiz-lead.worker";
 
 const router = Router();
 
-// Marquiz webhook payload shapes:
-// { quiz: string, results: Array<{ name: string, value: string }>, phone?: string, ... }
-interface MarquizResultField {
-  name: string;
-  value: string;
+// Actual Marquiz webhook format (from https://help.marquiz.ru/article/518):
+// {
+//   contacts: { name, email, phone },
+//   answers: [{ q: "question text", a: "answer text" }],
+//   quiz: { id, name },
+//   created: "ISO date",
+//   extra: { utm, ... }
+// }
+interface MarquizContacts {
+  name?: string;
+  email?: string;
+  phone?: string;
+}
+
+interface MarquizAnswer {
+  q: string;
+  a: string;
 }
 
 interface MarquizPayload {
-  quiz?: string;
-  quizId?: string;
+  contacts?: MarquizContacts;
+  answers?: MarquizAnswer[];
+  quiz?: { id?: string; name?: string } | string;
+  created?: string;
+  extra?: Record<string, unknown>;
+  // Legacy / alternative top-level fields
   phone?: string;
-  email?: string;
   name?: string;
-  results?: MarquizResultField[];
+  results?: Array<{ name: string; value: string }>;
   [key: string]: unknown;
-}
-
-/**
- * Flatten all fields from Marquiz payload into a lowercase-keyed map
- * so we can look up answers regardless of label capitalisation.
- */
-function extractFields(body: MarquizPayload): Record<string, string> {
-  const fields: Record<string, string> = {};
-
-  // Structured results array (primary format)
-  if (Array.isArray(body.results)) {
-    for (const field of body.results) {
-      if (field.name != null && field.value != null) {
-        fields[String(field.name).toLowerCase().trim()] = String(field.value).trim();
-      }
-    }
-  }
-
-  // Top-level string fields (fallback / alternative format)
-  for (const [key, val] of Object.entries(body)) {
-    if (typeof val === "string" && val.trim() !== "") {
-      fields[key.toLowerCase().trim()] = val.trim();
-    }
-  }
-
-  return fields;
 }
 
 function normalizePhone(raw: string): string {
@@ -56,10 +45,23 @@ function normalizePhone(raw: string): string {
   return digits;
 }
 
-// Fuzzy field lookup — returns first field whose key starts with any of the given prefixes
+/** Look for an answer whose question text contains any of the given keywords (case-insensitive) */
+function findAnswer(answers: MarquizAnswer[], ...keywords: string[]): string {
+  for (const keyword of keywords) {
+    const found = answers.find((a) =>
+      a.q.toLowerCase().includes(keyword.toLowerCase()),
+    );
+    if (found) return found.a;
+  }
+  return "";
+}
+
+/** Fuzzy field lookup in legacy results format */
 function findField(fields: Record<string, string>, ...prefixes: string[]): string {
   for (const prefix of prefixes) {
-    const found = Object.entries(fields).find(([k]) => k.startsWith(prefix));
+    const found = Object.entries(fields).find(([k]) =>
+      k.toLowerCase().startsWith(prefix.toLowerCase()),
+    );
     if (found) return found[1];
   }
   return "";
@@ -71,48 +73,93 @@ router.post("/", async (req, res) => {
 
   try {
     const body = req.body as MarquizPayload;
-    // Log the full payload to help debug format issues
-    console.log("[MarquizWebhook] Incoming lead payload:", JSON.stringify(body));
+    console.log("[MarquizWebhook] Incoming payload:", JSON.stringify(body));
 
-    const fields = extractFields(body);
-    console.log("[MarquizWebhook] Extracted fields:", JSON.stringify(fields));
-
-    // Phone — top-level field has priority, then results array
+    // ── Phone ──────────────────────────────────────────────────────────────
+    // Primary: contacts.phone (standard Marquiz format)
+    // Fallback: top-level phone field (older/alternative format)
     const rawPhone =
-      (typeof body.phone === "string" ? body.phone : "") ||
-      findField(fields, "телефон", "phone", "номер");
+      body.contacts?.phone?.trim() ||
+      (typeof body.phone === "string" ? body.phone.trim() : "") ||
+      "";
 
-    if (!rawPhone || normalizePhone(rawPhone).length < 10) {
-      console.warn("[MarquizWebhook] No valid phone in payload, skipping:", JSON.stringify(body));
+    const normalizedPhone = normalizePhone(rawPhone);
+    if (!rawPhone || normalizedPhone.length < 10) {
+      console.warn(
+        "[MarquizWebhook] No valid phone found. contacts.phone=",
+        body.contacts?.phone,
+        "body.phone=",
+        body.phone,
+      );
       return;
     }
 
-    // MAX phone — dedicated quiz field; fall back to main phone
-    const rawMaxPhone = findField(fields, "max") || rawPhone;
-
-    const quizName = typeof body.quiz === "string" ? body.quiz.trim() : "Квиз";
-
-    const gearboxType = findField(fields, "выберите тип коробки", "тип коробки", "тип кпп", "коробка");
-    const carInfo = findField(fields, "марка авто", "марка и год", "автомобиль", "машина", "авто");
-    const vin = findField(fields, "vin", "вин", "номер кузова");
-    const city = findField(fields, "город", "ваш город", "city");
+    // ── Name ───────────────────────────────────────────────────────────────
     const clientName =
-      (typeof body.name === "string" ? body.name : "") ||
-      findField(fields, "имя", "name", "ваше имя");
+      body.contacts?.name?.trim() ||
+      (typeof body.name === "string" ? body.name.trim() : "") ||
+      "";
+
+    // ── Quiz name ──────────────────────────────────────────────────────────
+    const quizName =
+      typeof body.quiz === "object"
+        ? (body.quiz?.name ?? "Квиз").trim()
+        : typeof body.quiz === "string"
+          ? body.quiz.trim()
+          : "Квиз";
+
+    // ── Answers ────────────────────────────────────────────────────────────
+    // Support both formats: answers[] and legacy results[]
+    const answers: MarquizAnswer[] = body.answers ?? [];
+
+    // Also build legacy fields map from results[] if present
+    const legacyFields: Record<string, string> = {};
+    if (Array.isArray(body.results)) {
+      for (const field of body.results) {
+        if (field.name && field.value) {
+          legacyFields[field.name.toLowerCase().trim()] = field.value.trim();
+        }
+      }
+    }
+
+    const gearboxType =
+      findAnswer(answers, "тип коробки", "тип кпп", "коробка передач", "коробка") ||
+      findField(legacyFields, "тип коробки", "тип кпп", "коробка");
+
+    const carInfo =
+      findAnswer(answers, "марка авто", "марка и год", "автомобиль", "марка машины", "авто") ||
+      findField(legacyFields, "марка авто", "автомобиль", "авто");
+
+    const vin =
+      findAnswer(answers, "vin", "вин", "номер кузова") ||
+      findField(legacyFields, "vin", "вин");
+
+    const city =
+      findAnswer(answers, "город", "ваш город") ||
+      findField(legacyFields, "город");
+
+    // MAX phone could be a dedicated field in the quiz answers
+    const maxPhoneRaw =
+      findAnswer(answers, "номер max", "max номер", "номер в max") ||
+      rawPhone;
 
     const leadData: MarquizLeadJobData = {
       quizName,
       phone: rawPhone,
-      maxPhone: rawMaxPhone,
+      maxPhone: maxPhoneRaw,
       gearboxType,
       carInfo,
       vin,
       city,
       clientName,
-      rawFields: fields,
+      rawFields: Object.fromEntries(
+        answers.map((a) => [a.q.toLowerCase().slice(0, 60), a.a]),
+      ),
     };
 
-    console.log(`[MarquizWebhook] Lead data: phone=${rawPhone}, maxPhone=${rawMaxPhone}, name=${clientName}`);
+    console.log(
+      `[MarquizWebhook] Parsed lead: phone=${rawPhone}, name=${clientName}, quiz="${quizName}", gearbox="${gearboxType}", car="${carInfo}"`,
+    );
 
     // Try BullMQ queue first; fall back to direct processing if Redis unavailable
     const queued = await enqueueMarquizLead(leadData);
