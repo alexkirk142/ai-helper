@@ -142,6 +142,20 @@ export default function AdminUsers() {
     },
   });
 
+  const unlockLoginMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const res = await apiRequest("POST", `/api/admin/users/${userId}/unlock-login`, {});
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Блокировка входа снята" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Ошибка", description: error.message, variant: "destructive" });
+    },
+  });
+
   const impersonateMutation = useMutation({
     mutationFn: async ({ userId, reason }: { userId: string; reason: string }) => {
       const res = await apiRequest("POST", `/api/admin/users/${userId}/impersonate`, { reason });
@@ -620,12 +634,26 @@ export default function AdminUsers() {
                               </p>
                             )}
                             {userDetail.lockedUntil && (
-                              <p className="text-sm">
-                                Временная блокировка до: {formatDate(userDetail.lockedUntil)}
-                                <span className="block text-muted-foreground">
-                                  Неудачных попыток: {userDetail.failedLoginAttempts}
-                                </span>
-                              </p>
+                              <div className="flex items-start justify-between gap-3 mt-1">
+                                <p className="text-sm">
+                                  Временная блокировка до: {formatDate(userDetail.lockedUntil)}
+                                  <span className="block text-muted-foreground">
+                                    Неудачных попыток: {userDetail.failedLoginAttempts}
+                                  </span>
+                                </p>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="shrink-0"
+                                  disabled={unlockLoginMutation.isPending}
+                                  onClick={() => unlockLoginMutation.mutate(userDetail.id)}
+                                >
+                                  {unlockLoginMutation.isPending
+                                    ? "Снятие..."
+                                    : "Снять блокировку"
+                                  }
+                                </Button>
+                              </div>
                             )}
                           </CardContent>
                         </Card>

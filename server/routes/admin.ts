@@ -391,6 +391,24 @@ router.post(
 );
 
 router.post(
+  "/users/:userId/unlock-login",
+  requireAuth,
+  requirePlatformAdmin(),
+  async (req, res) => {
+    const { userId } = req.params;
+    try {
+      await db.update(users)
+        .set({ failedLoginAttempts: 0, lockedUntil: null })
+        .where(eq(users.id, userId));
+      console.log(`[Admin] Login lock cleared for user ${userId} by admin`);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+router.post(
   "/tenants/:tenantId/grants",
   requireAuth,
   requirePlatformAdmin(),
