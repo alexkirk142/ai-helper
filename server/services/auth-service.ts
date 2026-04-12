@@ -309,11 +309,8 @@ export class AuthService {
 
     // Check if account is locked
     if (user.lockedUntil && new Date() < user.lockedUntil) {
-      // SECURITY: Extend lockout on repeated attempts while locked
-      const newLockUntil = new Date(Date.now() + LOCKOUT_DURATION_MS);
-      await storage.updateUserLoginAttempts(user.id, MAX_FAILED_ATTEMPTS, newLockUntil);
-      
-      const remainingMinutes = Math.ceil(LOCKOUT_DURATION_MS / 60000);
+      const remainingMs = user.lockedUntil.getTime() - Date.now();
+      const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
       return { 
         success: false, 
         error: `Account locked. Try again in ${remainingMinutes} minutes`, 

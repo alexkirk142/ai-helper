@@ -7,7 +7,8 @@ import { RedisStore } from "rate-limit-redis";
 import { getRateLimiterRedisInstance } from "../redis-client";
 import { storage } from "../storage";
 import { db } from "../db";
-import { adminActions } from "@shared/schema";
+import { adminActions, users } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 const router = Router();
 
@@ -554,6 +555,39 @@ router.post("/reset-password", async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("[Auth] Reset password error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/auth/unlock — unlocks a locked account (requires UNLOCK_SECRET env var)
+router.post("/unlock", async (req: Request, res: Response) => {
+  try {
+    const { email, secret } = req.body as { email?: string; secret?: string };
+    const UNLOCK_SECRET = process.env.UNLOCK_SECRET;
+
+    if (!UNLOCK_SECRET) {
+      return res.status(503).json({ error: "Unlock endpoint is not configured" });
+    }
+    if (!secret || secret !== UNLOCK_SECRET) {
+      return res.status(403).json({ error: "Invalid secret" });
+    }
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    const result = await db.update(users)
+      .set({ failedLoginAttempts: 0, lockedUntil: null })
+      .where(eq(users.email, email.toLowerCase().trim()))
+      .returning({ id: users.id, email: users.email });
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    console.log(`[Auth] Account unlocked for ${email}`);
+    return res.json({ ok: true, email: result[0].email });
+  } catch (error) {
+    console.error("[Auth] Unlock error:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
