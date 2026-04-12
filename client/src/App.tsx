@@ -9,6 +9,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { useAuth } from "@/hooks/use-auth";
+import { useNotifications } from "@/hooks/use-notifications";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, Bot, MessageSquare, Brain, Shield } from "lucide-react";
@@ -206,6 +207,8 @@ function AuthenticatedApp() {
     queryKey: ["/api/onboarding/state"],
     enabled: !isPlatformStaff, // don't query tenant endpoints for staff
   });
+
+  useNotifications();
 
   useEffect(() => {
     // Platform staff has no tenant — don't try to connect WebSocket (would loop rejections)

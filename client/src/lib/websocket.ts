@@ -1,4 +1,5 @@
 import { queryClient } from "./queryClient";
+import { showBrowserNotification } from "@/hooks/use-notifications";
 
 type MessageHandler = (data: any) => void;
 
@@ -76,11 +77,25 @@ class WebSocketClient {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations", data.conversationId] });
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/conversations/channel-counts"] });
+
+      // Browser notification for incoming customer messages only
+      if (data.message?.role === "customer") {
+        const senderName = data.message?.metadata?.pushName
+          || data.message?.metadata?.senderName
+          || "Клиент";
+        const text = data.message?.content || "Новое сообщение";
+        showBrowserNotification(`💬 ${senderName}`, text, data.conversationId);
+      }
     }
 
     if (type === "new_conversation") {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/conversations/channel-counts"] });
+
+      // Browser notification for new incoming conversations
+      const customer = data.conversation?.customer;
+      const senderName = customer?.name || customer?.phone || "Новый клиент";
+      showBrowserNotification("🆕 Новый диалог", senderName, data.conversation?.id);
     }
 
     if (type === "conversation_update") {
