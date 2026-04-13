@@ -245,6 +245,12 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   }
 
   // ── Strategy 2 (fallback): MAX Personal ─────────────────────────────────
+  // Skip MAX if no phone number available (Telegram-only lead)
+  if (!data.maxPhone || normalizePhone(data.maxPhone).length < 10) {
+    console.warn(`[MarquizWorker] Telegram-only lead and Telegram send failed — no phone for MAX fallback. Giving up.`);
+    return;
+  }
+
   const chatId = toMaxChatId(data.maxPhone);
 
   // 1. Select account with round-robin rotation

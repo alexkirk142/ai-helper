@@ -76,22 +76,35 @@ router.post("/", async (req, res) => {
     console.log("[MarquizWebhook] Incoming payload:", JSON.stringify(body));
 
     // ── Phone ──────────────────────────────────────────────────────────────
-    // Primary: contacts.phone (standard Marquiz format)
-    // Fallback: top-level phone field (older/alternative format)
     const rawPhone =
       body.contacts?.phone?.trim() ||
       (typeof body.phone === "string" ? body.phone.trim() : "") ||
       "";
 
+    // ── Telegram username (needed before phone check) ───────────────────────
+    const rawTelegramEarly =
+      (body.contacts as any)?.telegram?.trim() ||
+      findAnswer(body.answers ?? [], "telegram", "телеграм", "юзернейм", "username") ||
+      "";
+    const telegramUsernameEarly = rawTelegramEarly.replace(/^@/, "").trim();
+
     const normalizedPhone = normalizePhone(rawPhone);
-    if (!rawPhone || normalizedPhone.length < 10) {
+    const hasPhone = rawPhone && normalizedPhone.length >= 10;
+    const hasTelegram = telegramUsernameEarly.length > 0;
+
+    if (!hasPhone && !hasTelegram) {
       console.warn(
-        "[MarquizWebhook] No valid phone found. contacts.phone=",
-        body.contacts?.phone,
-        "body.phone=",
-        body.phone,
+        "[MarquizWebhook] No valid phone or Telegram username found — skipping lead.",
+        "contacts.phone=", body.contacts?.phone,
+        "contacts.telegram=", (body.contacts as any)?.telegram,
       );
       return;
+    }
+
+    if (!hasPhone) {
+      console.log(
+        `[MarquizWebhook] No phone in payload — Telegram-only lead (@${telegramUsernameEarly}), will send via Telegram Personal`,
+      );
     }
 
     // ── Name ───────────────────────────────────────────────────────────────
@@ -156,13 +169,8 @@ router.post("/", async (req, res) => {
       findAnswer(answers, "номер max", "max номер", "номер в max", "ваш номер max") ||
       rawPhone;
 
-    // Telegram username — from contacts.telegram or quiz answer field
-    const rawTelegram =
-      (body.contacts as any)?.telegram?.trim() ||
-      findAnswer(answers, "telegram", "телеграм", "юзернейм", "username") ||
-      "";
-    // Normalize: strip leading @ for storage, we'll add it when sending
-    const telegramUsername = rawTelegram.replace(/^@/, "").trim();
+    // Telegram username already resolved above (telegramUsernameEarly)
+    const telegramUsername = telegramUsernameEarly;
 
     const leadData: MarquizLeadJobData = {
       quizName,
