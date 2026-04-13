@@ -90,7 +90,7 @@ function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
 
     const details = lines.length > 0 ? `\n\n${lines.join("\n")}` : "";
 
-    if (data.vin) {
+    if (data.vin || data.engineModel) {
       return `Здравствуйте! Получили вашу заявку на подбор двигателя.${details}\n\nВсё верно?${oohSuffix}`;
     } else {
       return `Здравствуйте! Получили вашу заявку на подбор двигателя.${details}\n\nНапишите ВИН-код или маркировку двигателя — подберём точный вариант 🙏${oohSuffix}`;
