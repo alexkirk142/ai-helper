@@ -156,10 +156,19 @@ router.post("/", async (req, res) => {
       findAnswer(answers, "номер max", "max номер", "номер в max", "ваш номер max") ||
       rawPhone;
 
+    // Telegram username — from contacts.telegram or quiz answer field
+    const rawTelegram =
+      (body.contacts as any)?.telegram?.trim() ||
+      findAnswer(answers, "telegram", "телеграм", "юзернейм", "username") ||
+      "";
+    // Normalize: strip leading @ for storage, we'll add it when sending
+    const telegramUsername = rawTelegram.replace(/^@/, "").trim();
+
     const leadData: MarquizLeadJobData = {
       quizName,
       phone: rawPhone,
       maxPhone: maxPhoneRaw,
+      telegramUsername,
       gearboxType,
       engineType,
       engineVolume,

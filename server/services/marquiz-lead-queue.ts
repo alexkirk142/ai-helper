@@ -5,6 +5,7 @@ export interface MarquizLeadJobData {
   quizName: string;
   phone: string;
   maxPhone: string;
+  telegramUsername: string; // e.g. "@username" or "username"
   // КПП fields
   gearboxType: string;
   // Engine fields

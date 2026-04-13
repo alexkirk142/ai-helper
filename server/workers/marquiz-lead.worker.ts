@@ -6,6 +6,7 @@ import { maxPersonalAccounts } from "../../shared/schema";
 import { getRedisConnectionConfig } from "../services/message-queue";
 import type { MarquizLeadJobData } from "../services/marquiz-lead-queue";
 import { MaxPersonalAdapter } from "../services/max-personal-adapter";
+import { telegramClientManager } from "../services/telegram-client-manager";
 import { storage } from "../storage";
 import type { Tenant } from "../../shared/schema";
 
@@ -160,10 +161,91 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     return;
   }
 
-  const chatId = toMaxChatId(data.maxPhone);
   console.log(
-    `[MarquizWorker] Processing lead: chatId=${chatId}, quiz="${data.quizName}", jobId=${job.id}, workingHours=${isWorkingHours(tenant)}`,
+    `[MarquizWorker] Processing lead: quiz="${data.quizName}", tgUsername="${data.telegramUsername}", jobId=${job.id}, workingHours=${isWorkingHours(tenant)}`,
   );
+
+  const text = buildResponseText(data, tenant);
+  const phone = `+${normalizePhone(data.phone)}`;
+  const commonMeta = {
+    source: "marquiz",
+    quizName: data.quizName,
+    gearboxType: data.gearboxType,
+    engineType: data.engineType,
+    carInfo: data.carInfo,
+    vin: data.vin,
+    city: data.city,
+  };
+
+  // ── Strategy 1: Telegram Personal by username ────────────────────────────
+  if (data.telegramUsername) {
+    // Find any connected Telegram Personal account for this tenant
+    const tgAccounts = await storage.getTelegramAccountsByTenant(tenantId);
+    const tgAccount = tgAccounts.find(a => a.status === "active" && a.isEnabled);
+
+    if (tgAccount) {
+      console.log(`[MarquizWorker] Trying Telegram username @${data.telegramUsername} via account ${tgAccount.id}`);
+      const tgResult = await telegramClientManager.sendMessageByUsername(
+        tenantId,
+        tgAccount.id,
+        data.telegramUsername,
+        text,
+      );
+
+      if (tgResult.success && tgResult.userId) {
+        // Create/find customer by Telegram user ID
+        let customer = await storage.getCustomerByExternalId(tenantId, "telegram_personal", tgResult.userId);
+        if (!customer) {
+          customer = await storage.createCustomer(
+            {
+              tenantId,
+              channel: "telegram_personal",
+              externalId: tgResult.userId,
+              phone,
+              name: data.clientName || tgResult.firstName || null,
+              metadata: {
+                ...commonMeta,
+                telegramUsername: tgResult.username ?? data.telegramUsername,
+                channelAccountId: tgAccount.id,
+              },
+            },
+            tenantId,
+          );
+          console.log(`[MarquizWorker] TG customer created: ${customer.id}`);
+        }
+
+        const conversation = await storage.createConversation(
+          { tenantId, customerId: customer.id, status: "active", mode: "learning" },
+          tenantId,
+        );
+
+        await storage.createMessage(
+          {
+            conversationId: conversation.id,
+            role: "assistant",
+            content: text,
+            metadata: {
+              source: "marquiz_autoresponse",
+              channel: "telegram_personal",
+              accountId: tgAccount.id,
+              externalMessageId: tgResult.externalMessageId ?? null,
+            },
+          },
+          tenantId,
+        );
+
+        console.log(`[MarquizWorker] Done via Telegram — username=@${data.telegramUsername}, msgId=${tgResult.externalMessageId}`);
+        return;
+      }
+
+      console.warn(`[MarquizWorker] Telegram send failed (${tgResult.error}), falling back to MAX`);
+    } else {
+      console.warn(`[MarquizWorker] No active Telegram Personal account — falling back to MAX`);
+    }
+  }
+
+  // ── Strategy 2 (fallback): MAX Personal ─────────────────────────────────
+  const chatId = toMaxChatId(data.maxPhone);
 
   // 1. Select account with round-robin rotation
   const account = await getNextAccount(redis, tenantId);
@@ -171,10 +253,9 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     console.error(`[MarquizWorker] No authorised MAX Personal accounts for tenant ${tenantId}`);
     throw new Error("No authorised MAX Personal accounts");
   }
-  console.log(`[MarquizWorker] Using account: ${account.label ?? account.accountId}`);
+  console.log(`[MarquizWorker] Using MAX account: ${account.label ?? account.accountId}`);
 
   // 2. Find or create customer
-  const phone = `+${normalizePhone(data.phone)}`;
   let customer = await storage.getCustomerByExternalId(tenantId, "max_personal", chatId);
 
   if (!customer) {
@@ -185,14 +266,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
         externalId: chatId,
         phone,
         name: data.clientName || null,
-        metadata: {
-          source: "marquiz",
-          quizName: data.quizName,
-          gearboxType: data.gearboxType,
-          carInfo: data.carInfo,
-          vin: data.vin,
-          city: data.city,
-        },
+        metadata: commonMeta,
       },
       tenantId,
     );
@@ -214,7 +288,6 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   console.log(`[MarquizWorker] Conversation created: ${conversation.id}`);
 
   // 4. Send message via MAX Personal
-  const text = buildResponseText(data, tenant);
   const result = await maxPersonalAdapter.sendMessageForTenant(
     tenantId,
     chatId,

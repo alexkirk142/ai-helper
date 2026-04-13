@@ -1470,6 +1470,67 @@ class TelegramClientManager {
     };
   }
 
+  /**
+   * Send a message to a Telegram user by their @username.
+   * Works even if there's no existing conversation (gramjs resolves the entity).
+   * Returns userId (numeric string) for creating the customer record.
+   */
+  async sendMessageByUsername(
+    tenantId: string,
+    accountId: string,
+    username: string,
+    text: string,
+  ): Promise<{ success: boolean; externalMessageId?: string; userId?: string; firstName?: string; username?: string; error?: string }> {
+    // Find any connected account for this tenant (or specific accountId)
+    const connection = accountId
+      ? this.connections.get(`${tenantId}:${accountId}`) ?? this.findAnyConnection(tenantId)
+      : this.findAnyConnection(tenantId);
+
+    if (!connection?.connected) {
+      return { success: false, error: "No connected Telegram Personal account" };
+    }
+
+    const cleanUsername = username.startsWith("@") ? username : `@${username}`;
+
+    try {
+      console.log(`[TelegramClientManager] Sending to username ${cleanUsername} via account ${connection.accountId}`);
+      const entity = await connection.client.getEntity(cleanUsername);
+      const result = await connection.client.sendMessage(entity, { message: text });
+
+      const user = entity as Api.User;
+      const userId = user.id?.toString() ?? "";
+      const firstName = user.firstName ?? "";
+      const resolvedUsername = user.username ?? username;
+
+      // Cache access_hash for future sends
+      if (user.accessHash !== undefined && userId) {
+        this.accessHashCache.set(`${tenantId}:${userId}`, user.accessHash);
+      }
+
+      connection.lastActivity = new Date();
+      console.log(`[TelegramClientManager] Message sent to ${cleanUsername} (userId=${userId}), msgId=${result.id}`);
+
+      return {
+        success: true,
+        externalMessageId: result.id.toString(),
+        userId,
+        firstName,
+        username: resolvedUsername,
+      };
+    } catch (error: any) {
+      console.error(`[TelegramClientManager] sendMessageByUsername error for ${cleanUsername}: ${error.message}`);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /** Find any connected account for the given tenant */
+  private findAnyConnection(tenantId: string): ActiveConnection | undefined {
+    for (const [, conn] of this.connections) {
+      if (conn.tenantId === tenantId && conn.connected) return conn;
+    }
+    return undefined;
+  }
+
   async shutdown(): Promise<void> {
     console.log("[TelegramClientManager] Shutting down...");
 
