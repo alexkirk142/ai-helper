@@ -5,7 +5,13 @@ export interface MarquizLeadJobData {
   quizName: string;
   phone: string;
   maxPhone: string;
+  // КПП fields
   gearboxType: string;
+  // Engine fields
+  engineType: string;
+  engineVolume: string;
+  engineModel: string;
+  // Common
   carInfo: string;
   vin: string;
   city: string;

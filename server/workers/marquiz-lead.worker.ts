@@ -63,10 +63,41 @@ function isWorkingHours(tenant: Tenant): boolean {
   }
 }
 
+/** Detect lead type by quiz name or filled fields */
+function detectLeadType(data: MarquizLeadJobData): "engine" | "gearbox" {
+  const qn = data.quizName.toLowerCase();
+  if (qn.includes("двигател") || qn.includes("мотор")) return "engine";
+  if (data.engineType || data.engineVolume || data.engineModel) return "engine";
+  return "gearbox";
+}
+
 function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
   const afterHours = !isWorkingHours(tenant);
+  const leadType = detectLeadType(data);
 
-  // Build structured field lines
+  const oohSuffix = afterHours
+    ? "\n\nУтром приеду на работу, скину Вам подходящий вариант 👍"
+    : "";
+
+  if (leadType === "engine") {
+    const lines: string[] = [];
+    if (data.carInfo)      lines.push(`🚗 Автомобиль: ${data.carInfo}`);
+    if (data.engineType)   lines.push(`⚙️ Тип: ${data.engineType}`);
+    if (data.engineVolume) lines.push(`📦 Объём: ${data.engineVolume}`);
+    if (data.engineModel)  lines.push(`🔧 Модель двигателя: ${data.engineModel}`);
+    if (data.city)         lines.push(`📍 Город: ${data.city}`);
+    if (data.vin)          lines.push(`🔑 VIN: ${data.vin}`);
+
+    const details = lines.length > 0 ? `\n\n${lines.join("\n")}` : "";
+
+    if (data.vin) {
+      return `Здравствуйте! Получили вашу заявку на подбор двигателя.${details}\n\nВсё верно?${oohSuffix}`;
+    } else {
+      return `Здравствуйте! Получили вашу заявку на подбор двигателя.${details}\n\nНапишите ВИН-код или маркировку двигателя — подберём точный вариант 🙏${oohSuffix}`;
+    }
+  }
+
+  // Default: КПП
   const lines: string[] = [];
   if (data.carInfo)     lines.push(`🚗 Автомобиль: ${data.carInfo}`);
   if (data.gearboxType) lines.push(`⚙️ Тип КПП: ${data.gearboxType}`);
@@ -74,10 +105,6 @@ function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
   if (data.vin)         lines.push(`🔑 VIN: ${data.vin}`);
 
   const details = lines.length > 0 ? `\n\n${lines.join("\n")}` : "";
-
-  const oohSuffix = afterHours
-    ? "\n\nУтром приеду на работу, скину Вам подходящий вариант 👍"
-    : "";
 
   if (data.vin) {
     return `Здравствуйте! Получили вашу заявку на подбор КПП.${details}\n\nВсё верно?${oohSuffix}`;

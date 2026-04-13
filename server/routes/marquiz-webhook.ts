@@ -126,6 +126,18 @@ router.post("/", async (req, res) => {
       findAnswer(answers, "тип коробки", "тип кпп", "коробка передач", "коробка") ||
       findField(legacyFields, "тип коробки", "тип кпп", "коробка");
 
+    const engineType =
+      findAnswer(answers, "тип двигателя", "вид двигателя", "двигатель") ||
+      findField(legacyFields, "тип двигателя", "двигатель");
+
+    const engineVolume =
+      findAnswer(answers, "объем двигателя", "объём двигателя", "объем мотора", "объём") ||
+      findField(legacyFields, "объем двигателя", "объём");
+
+    const engineModel =
+      findAnswer(answers, "модель двигателя", "маркировка двигателя", "модель мотора") ||
+      findField(legacyFields, "модель двигателя");
+
     const carInfo =
       findAnswer(answers, "марка авто", "марка и год", "автомобиль", "марка машины", "авто") ||
       findField(legacyFields, "марка авто", "автомобиль", "авто");
@@ -149,6 +161,9 @@ router.post("/", async (req, res) => {
       phone: rawPhone,
       maxPhone: maxPhoneRaw,
       gearboxType,
+      engineType,
+      engineVolume,
+      engineModel,
       carInfo,
       vin,
       city,
@@ -159,7 +174,7 @@ router.post("/", async (req, res) => {
     };
 
     console.log(
-      `[MarquizWebhook] Parsed lead: phone=${rawPhone}, name=${clientName}, quiz="${quizName}", gearbox="${gearboxType}", car="${carInfo}"`,
+      `[MarquizWebhook] Parsed lead: phone=${rawPhone}, name=${clientName}, quiz="${quizName}", gearbox="${gearboxType}", engine="${engineType}", car="${carInfo}"`,
     );
 
     // Try BullMQ queue first; fall back to direct processing if Redis unavailable
