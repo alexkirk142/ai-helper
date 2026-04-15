@@ -202,6 +202,17 @@ app.use((req, res, next) => {
     async () => {
       log(`serving on port ${port}`);
       
+      // Apply any pending lightweight column migrations (idempotent ADD COLUMN IF NOT EXISTS)
+      try {
+        await pool.query(`
+          ALTER TABLE max_personal_accounts
+            ADD COLUMN IF NOT EXISTS auto_reply_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+        `);
+        log("DB column check: max_personal_accounts.auto_reply_enabled OK", "startup");
+      } catch (err: any) {
+        log(`DB column migration warning: ${err.message}`, "startup");
+      }
+
       // Load persisted feature flags from DB into in-memory cache
       await featureFlagService.initFromDb();
 
