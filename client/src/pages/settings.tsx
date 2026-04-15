@@ -1748,6 +1748,27 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
     }
   };
 
+  const toggleAutoReply = async (accountId: string, enabled: boolean) => {
+    try {
+      const res = await fetch(`/api/channels/max-personal/${accountId}/auto-reply`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      toast({
+        title: enabled ? "Авторассылка включена" : "Авторассылка отключена",
+        description: enabled
+          ? "Аккаунт будет участвовать в автоответах на заявки"
+          : "Аккаунт не будет использоваться для автоответов",
+      });
+      refetchAccounts();
+    } catch {
+      toast({ title: "Ошибка", variant: "destructive" });
+    }
+  };
+
   const { data: accountsData, refetch: refetchAccounts } = useQuery<{
     accounts: Array<{
       accountId: string;
@@ -1756,6 +1777,7 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
       label?: string | null;
       status: string;
       webhookRegistered?: boolean | null;
+      autoReplyEnabled?: boolean | null;
     }>;
   }>({
     queryKey: ["/api/channels/max-personal/accounts"],
@@ -1882,27 +1904,47 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
             </div>
           )}
           {authorizedAccounts.map((acc, idx) => (
-            <div key={acc.accountId} className="rounded-md border p-3 bg-green-500/5 flex items-center gap-3">
-              <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm">
-                  {acc.displayName ?? `Аккаунт ${idx + 1}`}
-                  {acc.label ? <span className="text-muted-foreground font-normal"> ({acc.label})</span> : null}
-                </p>
-                <p className="text-xs text-muted-foreground">Статус: авторизован</p>
+            <div key={acc.accountId} className="rounded-md border p-3 bg-green-500/5">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm">
+                    {acc.displayName ?? `Аккаунт ${idx + 1}`}
+                    {acc.label ? <span className="text-muted-foreground font-normal"> ({acc.label})</span> : null}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Статус: авторизован</p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => reregisterWebhook(acc.accountId)}
+                  disabled={reregisteringWebhook === acc.accountId}
+                  title="Переподключить вебхук для получения входящих сообщений"
+                >
+                  {reregisteringWebhook === acc.accountId
+                    ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Подключение...</>
+                    : "Обновить вебхук"
+                  }
+                </Button>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => reregisterWebhook(acc.accountId)}
-                disabled={reregisteringWebhook === acc.accountId}
-                title="Переподключить вебхук для получения входящих сообщений"
-              >
-                {reregisteringWebhook === acc.accountId
-                  ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Подключение...</>
-                  : "Обновить вебхук"
-                }
-              </Button>
+              <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50">
+                <div>
+                  <p className="text-xs font-medium">Авторассылка (Marquiz)</p>
+                  <p className="text-xs text-muted-foreground">
+                    {acc.autoReplyEnabled !== false
+                      ? "Этот номер участвует в автоответах на заявки"
+                      : "Этот номер не отправляет автоответы на заявки"}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant={acc.autoReplyEnabled !== false ? "default" : "outline"}
+                  onClick={() => toggleAutoReply(acc.accountId, acc.autoReplyEnabled === false)}
+                  className="shrink-0"
+                >
+                  {acc.autoReplyEnabled !== false ? "Включена" : "Выключена"}
+                </Button>
+              </div>
             </div>
           ))}
           {pendingAccounts.map((acc, idx) => (

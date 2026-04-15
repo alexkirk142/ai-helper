@@ -129,6 +129,7 @@ async function getNextAccount(
       and(
         eq(maxPersonalAccounts.tenantId, tenantId),
         eq(maxPersonalAccounts.status, "authorized"),
+        eq(maxPersonalAccounts.autoReplyEnabled, true),
       ),
     )
     .orderBy(asc(maxPersonalAccounts.createdAt));

@@ -246,6 +246,7 @@ export async function registerRoutes(
         label: maxPersonalAccounts.label,
         status: maxPersonalAccounts.status,
         webhookRegistered: maxPersonalAccounts.webhookRegistered,
+        autoReplyEnabled: maxPersonalAccounts.autoReplyEnabled,
       }).from(maxPersonalAccounts).where(eq(maxPersonalAccounts.tenantId, tenantId));
 
       return res.json({ accounts: rows });
@@ -372,6 +373,35 @@ export async function registerRoutes(
       return res.json({ ok: true, webhookUrl });
     } catch (err: any) {
       console.error("[Routes] reregister-webhook error:", err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PATCH /api/channels/max-personal/:accountId/auto-reply — toggle auto-reply for account
+  app.patch("/api/channels/max-personal/:accountId/auto-reply", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = req.userId ? await storage.getUser(req.userId) : undefined;
+      const tenantId = user?.tenantId;
+      if (!tenantId) return res.status(404).json({ error: "Tenant not found" });
+
+      const { enabled } = req.body as { enabled: boolean };
+      if (typeof enabled !== "boolean") return res.status(400).json({ error: "enabled must be boolean" });
+
+      const { db: dbInst } = await import("./db");
+      const { maxPersonalAccounts: mpTable } = await import("@shared/schema");
+      const { and: andOp, eq: eqOp } = await import("drizzle-orm");
+
+      const result = await dbInst.update(mpTable)
+        .set({ autoReplyEnabled: enabled, updatedAt: new Date() })
+        .where(andOp(eqOp(mpTable.tenantId, tenantId), eqOp(mpTable.accountId, req.params.accountId)))
+        .returning({ accountId: mpTable.accountId, autoReplyEnabled: mpTable.autoReplyEnabled });
+
+      if (result.length === 0) return res.status(404).json({ error: "Account not found" });
+
+      console.log(`[Routes] MAX account ${req.params.accountId} auto-reply set to ${enabled}`);
+      return res.json({ ok: true, autoReplyEnabled: result[0].autoReplyEnabled });
+    } catch (err: any) {
+      console.error("[Routes] auto-reply toggle error:", err.message);
       return res.status(500).json({ error: err.message });
     }
   });
