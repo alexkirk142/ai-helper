@@ -82,11 +82,19 @@ router.post("/", async (req, res) => {
       "";
 
     // ── Telegram username (needed before phone check) ───────────────────────
+    // Marquiz sometimes puts the phone number into contacts.telegram when the
+    // user picks MAX/Telegram as delivery channel — guard against that.
+    const looksLikePhone = (s: string) => /^[+\d][\d\s\-()]{6,}$/.test(s.trim());
+
     const rawTelegramEarly =
       (body.contacts as any)?.telegram?.trim() ||
       findAnswer(body.answers ?? [], "telegram", "телеграм", "юзернейм", "username") ||
       "";
-    const telegramUsernameEarly = rawTelegramEarly.replace(/^@/, "").trim();
+    const cleanedTg = rawTelegramEarly.replace(/^@/, "").trim();
+    // Discard if it looks like a phone number or is too short to be a username (min 5 chars)
+    const telegramUsernameEarly = (!cleanedTg || looksLikePhone(rawTelegramEarly) || cleanedTg.length < 5)
+      ? ""
+      : cleanedTg;
 
     const normalizedPhone = normalizePhone(rawPhone);
     const hasPhone = rawPhone && normalizedPhone.length >= 10;

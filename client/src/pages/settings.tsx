@@ -1750,13 +1750,7 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
 
   const toggleAutoReply = async (accountId: string, enabled: boolean) => {
     try {
-      const res = await fetch(`/api/channels/max-personal/${accountId}/auto-reply`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-      if (!res.ok) throw new Error("Failed");
+      await apiRequest("PATCH", `/api/channels/max-personal/${accountId}/auto-reply`, { enabled });
       toast({
         title: enabled ? "Авторассылка включена" : "Авторассылка отключена",
         description: enabled
