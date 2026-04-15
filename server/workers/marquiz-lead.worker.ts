@@ -179,7 +179,10 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   };
 
   // ── Strategy 1: Telegram Personal by username ────────────────────────────
-  if (data.telegramUsername) {
+  // Only use Telegram when there is NO phone number — if a phone is present,
+  // MAX is preferred because it is more reliable for cold outreach.
+  const hasPhone = data.phone && normalizePhone(data.phone).length >= 10;
+  if (data.telegramUsername && !hasPhone) {
     // Find any connected Telegram Personal account for this tenant
     const tgAccounts = await storage.getTelegramAccountsByTenant(tenantId);
     const tgAccount = tgAccounts.find(a => a.status === "active" && a.isEnabled);
