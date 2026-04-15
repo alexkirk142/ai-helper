@@ -1909,6 +1909,7 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
                   <p className="text-xs text-muted-foreground">Статус: авторизован</p>
                 </div>
                 <Button
+                  type="button"
                   size="sm"
                   variant="outline"
                   onClick={() => reregisterWebhook(acc.accountId)}
@@ -1931,6 +1932,7 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
                   </p>
                 </div>
                 <Button
+                  type="button"
                   size="sm"
                   variant={acc.autoReplyEnabled !== false ? "default" : "outline"}
                   onClick={() => toggleAutoReply(acc.accountId, acc.autoReplyEnabled === false)}
