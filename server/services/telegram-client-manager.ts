@@ -1611,40 +1611,111 @@ class TelegramClientManager {
       return { success: false, error: err.message };
     }
 
-    // ── Step 2: Account B — send message using userId + accessHash ───────────
-    // Prefer explicit "sender" or "both"; avoid the resolver if possible.
+    // ── Step 2: Pick sender account ──────────────────────────────────────────
     const senderConn =
       allConns.find(c => accountRoles.get(c.accountId) === "sender") ??
       allConns.find(c => c.accountId !== resolverConn.accountId && accountRoles.get(c.accountId) === "both") ??
       allConns.find(c => c.accountId !== resolverConn.accountId) ??
       resolverConn;
 
-    // Cache the accessHash for the sender account's entity lookup
-    this.accessHashCache.set(`${tenantId}:${userId}`, accessHash);
+    // ── Step 2a: If single-account mode — resolver sends directly ─────────────
+    if (senderConn.accountId === resolverConn.accountId) {
+      try {
+        const peer = new Api.InputPeerUser({ userId: BigInt(userId), accessHash });
+        const result = await resolverConn.client.sendMessage(peer, { message: text });
+        resolverConn.lastActivity = new Date();
+        console.log(`[TelegramClientManager] importContactAndSend (single): sent to ${userId}, msgId=${result.id}`);
+        return { success: true, userId, firstName, username, accountId: resolverConn.accountId, externalMessageId: result.id.toString() } as any;
+      } catch (err: any) {
+        console.error(`[TelegramClientManager] importContactAndSend single send failed: ${err.message}`);
+        return { success: false, error: err.message };
+      }
+    }
+
+    // ── Step 2b: Two-account mode — bridge contact card resolver → sender ─────
+    //
+    // accessHash is PER SESSION. The sender account's importContacts may return empty
+    // results (shadow ban on phone search). Instead, we:
+    //   1. Resolver sends the lead's contact card as a media message to the sender account
+    //   2. Telegram embeds the lead's user object (with sender's own accessHash) in that update
+    //   3. gramjs caches the entity automatically → sender can now use getEntity(userId)
+    //
+    let senderAccessHash: bigint | null = null;
 
     try {
-      console.log(`[TelegramClientManager] importContactAndSend: sending to userId=${userId} via account ${senderConn.accountId}`);
+      // Resolver needs the sender's peer in resolver's context
+      const allDbAccounts = await storage.getTelegramAccountsByTenant(tenantId);
+      const senderDbAcc = allDbAccounts.find(a => a.id === senderConn.accountId);
 
-      const peer = new Api.InputPeerUser({
-        userId: BigInt(userId),
-        accessHash,
-      });
+      if (!senderDbAcc?.phoneNumber) throw new Error("Sender account phone not found in DB");
 
+      console.log(`[TelegramClientManager] Bridge: resolver importing sender phone ${senderDbAcc.phoneNumber}`);
+      const senderImport = await resolverConn.client.invoke(
+        new Api.contacts.ImportContacts({
+          contacts: [new Api.InputPhoneContact({
+            clientId: BigInt(Date.now() + 1),
+            phone: senderDbAcc.phoneNumber,
+            firstName: "Sender",
+            lastName: "",
+          })],
+        }),
+      );
+
+      const senderTgUser = senderImport.users?.[0] as Api.User | undefined;
+      if (!senderTgUser) throw new Error("Resolver could not resolve sender's phone");
+
+      const leadUser = { firstName, id: BigInt(userId) };
+
+      console.log(`[TelegramClientManager] Bridge: resolver sending lead contact card to sender account`);
+      await resolverConn.client.invoke(
+        new Api.messages.SendMedia({
+          peer: new Api.InputPeerUser({
+            userId: senderTgUser.id,
+            accessHash: senderTgUser.accessHash!,
+          }),
+          media: new Api.InputMediaContact({
+            phoneNumber: cleanPhone,
+            firstName: firstName || "Lead",
+            lastName: cleanPhone.slice(-4),
+            vcard: "",
+          }),
+          message: "",
+          randomId: BigInt(Date.now() + 2),
+        }),
+      );
+
+      // Wait for sender's gramjs client to process the incoming update.
+      // When it receives the MessageMediaContact message, Telegram includes the lead
+      // user object in the update's `users` list — gramjs caches it with sender's own accessHash.
+      console.log(`[TelegramClientManager] Bridge: waiting 4s for sender to process contact card update...`);
+      await new Promise(r => setTimeout(r, 4000));
+
+      // Now try to get the cached entity from sender's session
+      const cachedEntity = await senderConn.client.getEntity(BigInt(userId)).catch(() => null);
+      if (cachedEntity && (cachedEntity as any).accessHash) {
+        senderAccessHash = (cachedEntity as any).accessHash as bigint;
+        console.log(`[TelegramClientManager] Bridge: sender got own accessHash for userId=${userId}`);
+      } else {
+        console.warn(`[TelegramClientManager] Bridge: sender entity cache miss after 4s`);
+      }
+    } catch (bridgeErr: any) {
+      console.warn(`[TelegramClientManager] Bridge failed: ${bridgeErr.message}`);
+    }
+
+    // ── Step 2c: Send via sender only — resolver must never send to clients ──────
+    if (senderAccessHash === null) {
+      console.error(`[TelegramClientManager] importContactAndSend: sender did not get accessHash — cannot send`);
+      return { success: false, error: "Sender account could not resolve lead entity after bridge" };
+    }
+
+    try {
+      const peer = new Api.InputPeerUser({ userId: BigInt(userId), accessHash: senderAccessHash });
       const result = await senderConn.client.sendMessage(peer, { message: text });
       senderConn.lastActivity = new Date();
-
-      console.log(`[TelegramClientManager] importContactAndSend: sent to ${userId}, msgId=${result.id}`);
-
-      return {
-        success: true,
-        userId,
-        firstName,
-        username,
-        accountId: senderConn.accountId,
-        externalMessageId: result.id.toString(),
-      } as any;
+      console.log(`[TelegramClientManager] importContactAndSend (sender): sent to ${userId}, msgId=${result.id}`);
+      return { success: true, userId, firstName, username, accountId: senderConn.accountId, externalMessageId: result.id.toString() } as any;
     } catch (err: any) {
-      console.error(`[TelegramClientManager] importContactAndSend send failed for userId=${userId}: ${err.message}`);
+      console.error(`[TelegramClientManager] importContactAndSend sender send failed: ${err.message}`);
       return { success: false, error: err.message };
     }
   }
