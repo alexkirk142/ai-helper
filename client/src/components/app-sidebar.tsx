@@ -10,6 +10,7 @@ import {
   Bot,
   BarChart3,
   Building2,
+  XCircle,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -74,9 +75,20 @@ export function AppSidebar() {
     queryKey: ["/api/escalations", "pending"],
     refetchInterval: 30000,
   });
+
+  const { data: failedLeads } = useQuery<{ id: string }[]>({
+    queryKey: ["/api/failed-leads"],
+    queryFn: async () => {
+      const res = await fetch("/api/failed-leads", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    refetchInterval: 60000,
+  });
   
   const activeConversationsCount = conversations?.filter(c => c.status === "active").length || 0;
   const pendingEscalationsCount = escalations?.filter(e => e.status === "pending").length || 0;
+  const failedLeadsCount = failedLeads?.length || 0;
 
   return (
     <Sidebar>
@@ -137,6 +149,23 @@ export function AppSidebar() {
                     {pendingEscalationsCount > 0 && (
                       <Badge variant="secondary" className="ml-auto text-xs">
                         {pendingEscalationsCount}
+                      </Badge>
+                    )}
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={location === "/failed-leads"}
+                  data-testid="nav-failed-leads"
+                >
+                  <Link href="/failed-leads">
+                    <XCircle className="h-4 w-4" />
+                    <span>Неудачные заявки</span>
+                    {failedLeadsCount > 0 && (
+                      <Badge variant="destructive" className="ml-auto text-xs">
+                        {failedLeadsCount}
                       </Badge>
                     )}
                   </Link>

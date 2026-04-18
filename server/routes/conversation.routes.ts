@@ -76,6 +76,23 @@ router.get("/api/conversations/channel-counts", requireAuth, requirePermission("
   }
 });
 
+router.get("/api/failed-leads", requireAuth, requirePermission("VIEW_CONVERSATIONS"), async (req: Request, res: Response) => {
+  try {
+    if (!req.userId || req.userId === "system") {
+      return res.status(403).json({ error: "User authentication required" });
+    }
+    const user = await getUserForConversations(req.userId);
+    if (!user?.tenantId) {
+      return res.status(403).json({ error: "User not associated with a tenant" });
+    }
+    const leads = await storage.getFailedLeads(user.tenantId);
+    res.json(leads);
+  } catch (error) {
+    console.error("Error fetching failed leads:", error);
+    res.status(500).json({ error: "Failed to fetch failed leads" });
+  }
+});
+
 router.get("/api/conversations/:id", requireAuth, requirePermission("VIEW_CONVERSATIONS"), async (req: Request, res: Response) => {
   try {
     if (!req.userId || req.userId === "system") {

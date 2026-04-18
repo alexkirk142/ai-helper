@@ -110,6 +110,7 @@ export interface IStorage {
   getConversationWithCustomer(id: string, tenantId: string): Promise<ConversationWithCustomer | undefined>;
   getConversationDetail(id: string, tenantId: string): Promise<ConversationDetail | undefined>;
   getConversationsByTenant(tenantId: string): Promise<ConversationWithCustomer[]>;
+  getFailedLeads(tenantId: string): Promise<ConversationWithCustomer[]>;
   getActiveConversations(tenantId: string): Promise<ConversationWithCustomer[]>;
   getConversationChannelCounts(tenantId: string): Promise<{ all: number; telegram?: number; max?: number; whatsapp?: number }>;
   createConversation(conversation: InsertConversation & { lastMessageAt?: Date; createdAt?: Date }, tenantId: string): Promise<Conversation>;

@@ -257,7 +257,6 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
 
   // ── STRICT: client chose Telegram ─────────────────────────────────────────
   if (preferred === "telegram") {
-    // Try by username first (most reliable), then by phone via importContacts
     if (data.telegramUsername) {
       const r = await sendViaTelegramByUsername();
       if (r.success) return;
@@ -268,14 +267,16 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
       if (r.success) return;
       console.warn(`[MarquizWorker] Telegram phone send failed (${r.error})`);
     }
-    console.warn(`[MarquizWorker] Client chose Telegram but all Telegram methods failed — NOT falling back to MAX`);
+    console.warn(`[MarquizWorker] Client chose Telegram but all methods failed — saving as failed lead`);
+    await saveFailedLead(data, tenantId, phone, commonMeta, "telegram_failed");
     return;
   }
 
   // ── STRICT: client chose MAX ───────────────────────────────────────────────
   if (preferred === "max") {
     if (!data.maxPhone || normalizePhone(data.maxPhone).length < 10) {
-      console.warn(`[MarquizWorker] Client chose MAX but no valid phone — giving up`);
+      console.warn(`[MarquizWorker] Client chose MAX but no valid phone — saving as failed lead`);
+      await saveFailedLead(data, tenantId, phone, commonMeta, "max_no_phone");
       return;
     }
     // Fall through to MAX block below
@@ -283,53 +284,43 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
 
   // ── AUTO (no preferredChannel): Telegram first, MAX fallback ──────────────
   if (!preferred) {
-    // By username (username-only leads)
     if (data.telegramUsername && !hasPhone) {
       const r = await sendViaTelegramByUsername();
       if (r.success) return;
       console.warn(`[MarquizWorker] Telegram username failed (${r.error}), falling back to MAX`);
     }
-    // By phone via importContacts
     if (hasPhone) {
       const r = await sendViaTelegramByPhone();
       if (r.success) return;
       console.warn(`[MarquizWorker] Telegram phone failed (${r.error}), falling back to MAX`);
     }
     if (!hasPhone && !data.telegramUsername) {
-      console.warn(`[MarquizWorker] No contact info — giving up`);
+      console.warn(`[MarquizWorker] No contact info — saving as failed lead`);
+      await saveFailedLead(data, tenantId, phone, commonMeta, "no_contact_info");
       return;
     }
   }
 
   // ── MAX Personal ───────────────────────────────────────────────────────────
   if (!data.maxPhone || normalizePhone(data.maxPhone).length < 10) {
-    console.warn(`[MarquizWorker] No valid phone for MAX — giving up`);
+    console.warn(`[MarquizWorker] No valid phone for MAX — saving as failed lead`);
+    await saveFailedLead(data, tenantId, phone, commonMeta, "max_no_phone");
     return;
   }
 
   const chatId = toMaxChatId(data.maxPhone);
-
-  // 1. Select account with round-robin rotation
   const account = await getNextAccount(redis, tenantId);
   if (!account) {
     console.error(`[MarquizWorker] No authorised MAX Personal accounts for tenant ${tenantId}`);
-    throw new Error("No authorised MAX Personal accounts");
+    await saveFailedLead(data, tenantId, phone, commonMeta, "max_no_account");
+    return;
   }
   console.log(`[MarquizWorker] Using MAX account: ${account.label ?? account.accountId}`);
 
-  // 2. Find or create customer
   let customer = await storage.getCustomerByExternalId(tenantId, "max_personal", chatId);
-
   if (!customer) {
     customer = await storage.createCustomer(
-      {
-        tenantId,
-        channel: "max_personal",
-        externalId: chatId,
-        phone,
-        name: data.clientName || null,
-        metadata: commonMeta,
-      },
+      { tenantId, channel: "max_personal", externalId: chatId, phone, name: data.clientName || null, metadata: commonMeta },
       tenantId,
     );
     console.log(`[MarquizWorker] Customer created: ${customer.id}`);
@@ -337,50 +328,113 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     console.log(`[MarquizWorker] Existing customer found: ${customer.id}`);
   }
 
-  // 3. Create conversation
   const conversation = await storage.createConversation(
-    {
-      tenantId,
-      customerId: customer.id,
-      status: "active",
-      mode: "learning",
-    },
+    { tenantId, customerId: customer.id, status: "active", mode: "learning" },
     tenantId,
   );
   console.log(`[MarquizWorker] Conversation created: ${conversation.id}`);
 
-  // 4. Send message via MAX Personal
-  const result = await maxPersonalAdapter.sendMessageForTenant(
-    tenantId,
-    chatId,
-    text,
-    undefined,
-    account.accountId,
-  );
+  const result = await maxPersonalAdapter.sendMessageForTenant(tenantId, chatId, text, undefined, account.accountId);
 
   if (!result.success) {
     console.error(`[MarquizWorker] Failed to send MAX message: ${result.error}`);
-    throw new Error(`MAX send failed: ${result.error}`);
+    // Mark the already-created conversation as failed
+    await storage.updateConversation(conversation.id, tenantId, { status: "failed_delivery" });
+    await storage.createMessage(
+      { conversationId: conversation.id, role: "assistant", content: text,
+        metadata: { source: "marquiz_autoresponse", accountId: account.accountId, failureReason: `MAX send failed: ${result.error}` } },
+      tenantId,
+    );
+    console.warn(`[MarquizWorker] MAX send failed — conversation marked as failed_delivery`);
+    return;
   }
 
-  // 5. Save outgoing message to DB
   await storage.createMessage(
-    {
-      conversationId: conversation.id,
-      role: "assistant",
-      content: text,
-      metadata: {
-        source: "marquiz_autoresponse",
-        accountId: account.accountId,
-        externalMessageId: result.externalMessageId ?? null,
-      },
-    },
+    { conversationId: conversation.id, role: "assistant", content: text,
+      metadata: { source: "marquiz_autoresponse", accountId: account.accountId, externalMessageId: result.externalMessageId ?? null } },
     tenantId,
   );
 
-  console.log(
-    `[MarquizWorker] Done — account=${account.accountId}, externalMsgId=${result.externalMessageId}`,
-  );
+  console.log(`[MarquizWorker] Done — account=${account.accountId}, externalMsgId=${result.externalMessageId}`);
+}
+
+// ---------------------------------------------------------------------------
+// Failed lead persistence
+// ---------------------------------------------------------------------------
+
+/**
+ * Saves a Marquiz lead that could not be delivered to any messenger.
+ * Creates a customer + conversation with status="failed_delivery" so it
+ * appears on the dedicated "Failed Leads" page but NOT in the main list.
+ */
+async function saveFailedLead(
+  data: MarquizLeadJobData,
+  tenantId: string,
+  phone: string,
+  commonMeta: Record<string, unknown>,
+  failureReason: string,
+): Promise<void> {
+  try {
+    const externalId = `failed:${normalizePhone(data.phone || data.maxPhone || Date.now().toString())}`;
+    let customer = await storage.getCustomerByExternalId(tenantId, "marquiz_failed", externalId);
+    if (!customer) {
+      customer = await storage.createCustomer(
+        {
+          tenantId,
+          channel: "marquiz_failed" as any,
+          externalId,
+          phone: phone || null,
+          name: data.clientName || null,
+          metadata: { ...commonMeta, telegramUsername: data.telegramUsername || null },
+        },
+        tenantId,
+      );
+    }
+
+    const conversation = await storage.createConversation(
+      {
+        tenantId,
+        customerId: customer.id,
+        status: "failed_delivery",
+        mode: "learning",
+      },
+      tenantId,
+    );
+
+    await storage.createMessage(
+      {
+        conversationId: conversation.id,
+        role: "assistant",
+        content: buildResponseText_forFailed(data),
+        metadata: {
+          source: "marquiz_autoresponse",
+          failureReason,
+          preferredChannel: data.preferredChannel ?? "auto",
+          phone: data.phone,
+          maxPhone: data.maxPhone,
+          telegramUsername: data.telegramUsername,
+        },
+      },
+      tenantId,
+    );
+
+    console.log(`[MarquizWorker] Saved failed lead — conversationId=${conversation.id}, reason=${failureReason}`);
+  } catch (err: any) {
+    console.error(`[MarquizWorker] Failed to save failed lead: ${err.message}`);
+  }
+}
+
+/** Returns the auto-response text for a failed lead record (same as would have been sent). */
+function buildResponseText_forFailed(data: MarquizLeadJobData): string {
+  // Reuse the same builder with a minimal fake tenant (no working hours suffix needed)
+  const fakeTenant = {
+    workingHoursStart: "09:00",
+    workingHoursEnd: "21:00",
+    workingDays: ["mon","tue","wed","thu","fri"],
+    timezone: "Europe/Moscow",
+    autoReplyOutsideHours: false,
+  } as any;
+  return buildResponseText(data, fakeTenant);
 }
 
 // ---------------------------------------------------------------------------

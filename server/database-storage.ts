@@ -1,4 +1,4 @@
-import { eq, desc, asc, and, or, ilike, inArray, sql, gte, gt, isNull } from "drizzle-orm";
+import { eq, desc, asc, and, or, ilike, inArray, sql, gte, gt, isNull, ne } from "drizzle-orm";
 import { db } from "./db";
 import {
   tenants, channels, users, userInvites, emailTokens, customers, customerNotes, customerMemory, conversations, messages,
@@ -427,7 +427,7 @@ export class DatabaseStorage implements IStorage {
       .from(conversations)
       .innerJoin(customers, eq(conversations.customerId, customers.id))
       .leftJoin(channels, eq(conversations.channelId, channels.id))
-      .where(eq(conversations.tenantId, tenantId))
+      .where(and(eq(conversations.tenantId, tenantId), ne(conversations.status, "failed_delivery")))
       .orderBy(desc(conversations.lastMessageAt));
 
     if (rows.length === 0) return [];
@@ -440,6 +440,39 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(messages.createdAt));
 
     // Keep the first occurrence per conversationId (newest, since ordered DESC)
+    const lastMsgMap = new Map<string, Message>();
+    for (const msg of allMessages) {
+      if (!lastMsgMap.has(msg.conversationId)) {
+        lastMsgMap.set(msg.conversationId, msg);
+      }
+    }
+
+    return rows.map(({ conv, customer, channel }) => ({
+      ...conv,
+      customer,
+      lastMessage: lastMsgMap.get(conv.id),
+      channel: channel ?? undefined,
+    }));
+  }
+
+  async getFailedLeads(tenantId: string): Promise<ConversationWithCustomer[]> {
+    const rows = await db
+      .select({ conv: conversations, customer: customers, channel: channels })
+      .from(conversations)
+      .innerJoin(customers, eq(conversations.customerId, customers.id))
+      .leftJoin(channels, eq(conversations.channelId, channels.id))
+      .where(and(eq(conversations.tenantId, tenantId), eq(conversations.status, "failed_delivery")))
+      .orderBy(desc(conversations.lastMessageAt));
+
+    if (rows.length === 0) return [];
+
+    const convIds = rows.map(r => r.conv.id);
+    const allMessages = await db
+      .select()
+      .from(messages)
+      .where(inArray(messages.conversationId, convIds))
+      .orderBy(desc(messages.createdAt));
+
     const lastMsgMap = new Map<string, Message>();
     for (const msg of allMessages) {
       if (!lastMsgMap.has(msg.conversationId)) {
