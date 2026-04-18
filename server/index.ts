@@ -208,7 +208,11 @@ app.use((req, res, next) => {
           ALTER TABLE max_personal_accounts
             ADD COLUMN IF NOT EXISTS auto_reply_enabled BOOLEAN NOT NULL DEFAULT TRUE;
         `);
-        log("DB column check: max_personal_accounts.auto_reply_enabled OK", "startup");
+        await pool.query(`
+          ALTER TABLE telegram_sessions
+            ADD COLUMN IF NOT EXISTS tg_role TEXT NOT NULL DEFAULT 'both';
+        `);
+        log("DB column check: auto_reply_enabled + tg_role OK", "startup");
       } catch (err: any) {
         log(`DB column migration warning: ${err.message}`, "startup");
       }

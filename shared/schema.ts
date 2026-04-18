@@ -488,6 +488,10 @@ export const telegramSessions = pgTable("telegram_sessions", {
   lastName: text("last_name"),
   authMethod: text("auth_method"), // "qr" | "phone"
   isEnabled: boolean("is_enabled").default(true).notNull(),
+  // "resolver" = importContacts(phone) to get userId (can have shadow ban on search)
+  // "sender"   = sendMessage(userId) — the clean outbound account
+  // "both"     = acts as resolver and sender (default when only one account)
+  tgRole: text("tg_role").notNull().default("both"), // "resolver" | "sender" | "both"
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (t) => ({

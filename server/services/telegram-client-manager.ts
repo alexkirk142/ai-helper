@@ -1546,7 +1546,7 @@ class TelegramClientManager {
     accountId?: string;  // sender account id
     error?: string;
   }> {
-    // Collect all connected accounts for this tenant
+    // Collect all connected accounts for this tenant, with their DB roles
     const allConns = Array.from(this.connections.values()).filter(
       c => c.tenantId === tenantId && c.connected,
     );
@@ -1557,9 +1557,21 @@ class TelegramClientManager {
 
     const cleanPhone = phone.replace(/[^\d+]/g, "");
 
+    // Load roles from DB to honour resolver/sender designation
+    let accountRoles: Map<string, string> = new Map();
+    try {
+      const accounts = await storage.getTelegramAccountsByTenant(tenantId);
+      for (const a of accounts) {
+        accountRoles.set(a.id, (a as any).tgRole ?? "both");
+      }
+    } catch { /* fallback: treat all as "both" */ }
+
     // ── Step 1: Account A — importContacts → userId + accessHash ────────────
-    // Prefer any account; if multiple exist, pick the first as resolver.
-    const resolverConn = allConns[0];
+    // Prefer explicit "resolver" or "both"; fallback to first connected account.
+    const resolverConn =
+      allConns.find(c => accountRoles.get(c.accountId) === "resolver") ??
+      allConns.find(c => accountRoles.get(c.accountId) === "both") ??
+      allConns[0];
 
     let userId: string;
     let accessHash: bigint;
@@ -1600,9 +1612,12 @@ class TelegramClientManager {
     }
 
     // ── Step 2: Account B — send message using userId + accessHash ───────────
-    // Prefer a different account from resolver (the "clean" sender).
-    // If only one account is connected, use it for both steps.
-    const senderConn = allConns.find(c => c.accountId !== resolverConn.accountId) ?? resolverConn;
+    // Prefer explicit "sender" or "both"; avoid the resolver if possible.
+    const senderConn =
+      allConns.find(c => accountRoles.get(c.accountId) === "sender") ??
+      allConns.find(c => c.accountId !== resolverConn.accountId && accountRoles.get(c.accountId) === "both") ??
+      allConns.find(c => c.accountId !== resolverConn.accountId) ??
+      resolverConn;
 
     // Cache the accessHash for the sender account's entity lookup
     this.accessHashCache.set(`${tenantId}:${userId}`, accessHash);

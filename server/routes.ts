@@ -711,6 +711,7 @@ export async function registerRoutes(
         status: a.status,
         authMethod: a.authMethod,
         isEnabled: a.isEnabled,
+        tgRole: (a as any).tgRole ?? "both",
         isConnected: a.status === "active" && a.isEnabled && telegramClientManager.isAccountConnected(tenantId, a.id),
         createdAt: a.createdAt,
       }));
@@ -719,6 +720,36 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error listing Telegram accounts:", error);
       res.status(500).json({ error: error.message || "Failed to list accounts" });
+    }
+  });
+
+  // --- Update account role (resolver / sender / both) ---
+  app.patch("/api/telegram-personal/accounts/:id/role", requireAuth, requirePermission("MANAGE_CHANNELS"), async (req: Request, res: Response) => {
+    try {
+      const tenantId = (req as any).user?.tenantId;
+      if (!tenantId) return res.status(403).json({ error: "User not associated with a tenant" });
+
+      const { role } = req.body as { role: string };
+      if (!["resolver", "sender", "both"].includes(role)) {
+        return res.status(400).json({ error: "role must be resolver | sender | both" });
+      }
+
+      const { db: dbInst } = await import("./db");
+      const { telegramSessions } = await import("@shared/schema");
+      const { and: andOp, eq: eqOp } = await import("drizzle-orm");
+
+      const result = await dbInst.update(telegramSessions)
+        .set({ tgRole: role, updatedAt: new Date() } as any)
+        .where(andOp(eqOp(telegramSessions.tenantId, tenantId), eqOp(telegramSessions.id, req.params.id)))
+        .returning({ id: telegramSessions.id });
+
+      if (result.length === 0) return res.status(404).json({ error: "Account not found" });
+
+      console.log(`[Routes] Telegram account ${req.params.id} role set to ${role}`);
+      return res.json({ ok: true, tgRole: role });
+    } catch (err: any) {
+      console.error("[Routes] tg role update error:", err.message);
+      return res.status(500).json({ error: err.message });
     }
   });
 

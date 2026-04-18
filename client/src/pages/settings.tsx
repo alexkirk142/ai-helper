@@ -1284,44 +1284,87 @@ function TelegramPersonalCard({ channelStatuses, featureFlags, toggleChannelMuta
             {/* Account list */}
             {accounts.length > 0 && authStep === "idle" && (
               <div className="space-y-2">
-                {accounts.filter(a => a.status === "active").map(account => (
-                  <div key={account.id} className="rounded-md border p-3 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={cn(
-                        "h-8 w-8 rounded-full flex items-center justify-center shrink-0",
-                        account.isConnected ? "bg-green-500/10 text-green-600" : "bg-muted text-muted-foreground"
-                      )}>
-                        <User className="h-4 w-4" />
+                {accounts.filter(a => a.status === "active").map(account => {
+                  const role = (account as any).tgRole ?? "both";
+                  const roleLabel: Record<string, string> = {
+                    resolver: "Резолвер",
+                    sender: "Отправщик",
+                    both: "Оба",
+                  };
+                  const roleDesc: Record<string, string> = {
+                    resolver: "Добавляет контакт по номеру → получает userId",
+                    sender: "Отправляет сообщения клиентам по userId",
+                    both: "Выполняет обе роли (если один аккаунт)",
+                  };
+                  const nextRole: Record<string, string> = {
+                    both: "resolver",
+                    resolver: "sender",
+                    sender: "both",
+                  };
+                  return (
+                    <div key={account.id} className="rounded-md border p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={cn(
+                            "h-8 w-8 rounded-full flex items-center justify-center shrink-0",
+                            account.isConnected ? "bg-green-500/10 text-green-600" : "bg-muted text-muted-foreground"
+                          )}>
+                            <User className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">
+                              {account.firstName || account.phoneNumber || "Telegram"}
+                              {account.username ? ` (@${account.username})` : ""}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {account.isConnected ? "Активен" : account.isEnabled ? "Отключен от сервера" : "Выключен"}
+                              {account.authMethod === "phone" ? " · Телефон" : account.authMethod === "qr" ? " · QR" : ""}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button
+                            type="button"
+                            variant="ghost" size="icon" className="h-8 w-8"
+                            onClick={() => toggleAccount(account.id, !account.isEnabled)}
+                            title={account.isEnabled ? "Выключить" : "Включить"}
+                          >
+                            {account.isEnabled ? <Power className="h-4 w-4 text-green-600" /> : <PowerOff className="h-4 w-4 text-muted-foreground" />}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => deleteAccount(account.id)}
+                            title="Удалить"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">
-                          {account.firstName || account.phoneNumber || "Telegram"}
-                          {account.username ? ` (@${account.username})` : ""}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {account.isConnected ? "Активен" : account.isEnabled ? "Отключен от сервера" : "Выключен"}
-                          {account.authMethod === "phone" ? " · Телефон" : account.authMethod === "qr" ? " · QR" : ""}
-                        </p>
+                      <div className="flex items-center justify-between pt-1.5 border-t border-border/50">
+                        <div>
+                          <p className="text-xs font-medium">Роль в авторассылке</p>
+                          <p className="text-xs text-muted-foreground">{roleDesc[role]}</p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={role === "sender" ? "default" : role === "resolver" ? "secondary" : "outline"}
+                          className="shrink-0"
+                          onClick={async () => {
+                            try {
+                              await apiRequest("PATCH", `/api/telegram-personal/accounts/${account.id}/role`, { role: nextRole[role] });
+                              refetchAccounts();
+                            } catch { toast({ title: "Ошибка смены роли", variant: "destructive" }); }
+                          }}
+                          title="Нажмите чтобы сменить роль"
+                        >
+                          {roleLabel[role]}
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button
-                        variant="ghost" size="icon" className="h-8 w-8"
-                        onClick={() => toggleAccount(account.id, !account.isEnabled)}
-                        title={account.isEnabled ? "Выключить" : "Включить"}
-                      >
-                        {account.isEnabled ? <Power className="h-4 w-4 text-green-600" /> : <PowerOff className="h-4 w-4 text-muted-foreground" />}
-                      </Button>
-                      <Button
-                        variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
-                        onClick={() => deleteAccount(account.id)}
-                        title="Удалить"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
