@@ -6,6 +6,9 @@ export interface MarquizLeadJobData {
   phone: string;
   maxPhone: string;
   telegramUsername: string; // e.g. "@username" or "username"
+  // Channel selected by the client in Marquiz ("telegram" | "max" | "whatsapp" | undefined)
+  // When set, routing is STRICT — only the chosen channel is used, no cross-channel fallback.
+  preferredChannel?: string;
   // КПП fields
   gearboxType: string;
   // Engine fields

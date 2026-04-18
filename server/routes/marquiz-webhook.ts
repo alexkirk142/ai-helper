@@ -180,11 +180,29 @@ router.post("/", async (req, res) => {
     // Telegram username already resolved above (telegramUsernameEarly)
     const telegramUsername = telegramUsernameEarly;
 
+    // ── Preferred channel (strict routing) ─────────────────────────────────
+    // Marquiz sets extra.messenger to the channel the client chose in the quiz.
+    // We normalise to "telegram" | "max" | undefined.
+    const messengerRaw = (body.extra?.messenger as string | undefined)?.toLowerCase().trim() ?? "";
+    // Also detect from contacts object: if only contacts.telegram is present → telegram
+    const hasTelegramContact = !!(body.contacts as any)?.telegram && !body.contacts?.phone;
+    const hasMaxContact = !!(body.contacts as any)?.max;
+
+    let preferredChannel: string | undefined;
+    if (messengerRaw === "telegram" || hasTelegramContact) {
+      preferredChannel = "telegram";
+    } else if (messengerRaw === "max" || hasMaxContact) {
+      preferredChannel = "max";
+    }
+
+    console.log(`[MarquizWebhook] preferredChannel="${preferredChannel ?? "auto"}" (extra.messenger="${messengerRaw}")`);
+
     const leadData: MarquizLeadJobData = {
       quizName,
       phone: rawPhone,
       maxPhone: maxPhoneRaw,
       telegramUsername,
+      preferredChannel,
       gearboxType,
       engineType,
       engineVolume,

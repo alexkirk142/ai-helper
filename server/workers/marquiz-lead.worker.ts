@@ -179,138 +179,131 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   };
 
   const hasPhone = data.phone && normalizePhone(data.phone).length >= 10;
+  const preferred = data.preferredChannel; // "telegram" | "max" | undefined
 
-  // ── Strategy 1: Telegram Personal — two-account scheme by phone ──────────
-  // Account A: importContacts(phone) → userId + accessHash (no shadow-ban risk)
-  // Account B: sendMessage(userId, accessHash) → message delivered (no search)
-  // Only attempted when a phone number is available and Telegram accounts are connected.
-  if (hasPhone) {
+  console.log(`[MarquizWorker] Channel routing: preferredChannel="${preferred ?? "auto"}", hasPhone=${!!hasPhone}, tgUsername="${data.telegramUsername}"`);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // STRICT ROUTING: respect the channel the client chose in Marquiz.
+  // If preferred is set — use ONLY that channel, no cross-channel fallback.
+  // If not set — use best-effort auto logic (Telegram first, then MAX).
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // Helper: send via Telegram by phone (two-account importContacts strategy)
+  const sendViaTelegramByPhone = async () => {
     const tgAccounts = await storage.getTelegramAccountsByTenant(tenantId);
-    const hasTgAccounts = tgAccounts.some(a => a.status === "active" && a.isEnabled);
+    const hasTg = tgAccounts.some(a => a.status === "active" && a.isEnabled);
+    if (!hasTg) return { success: false, error: "No active Telegram account" };
 
-    if (hasTgAccounts) {
-      console.log(`[MarquizWorker] Trying Telegram two-account strategy for phone ${phone}`);
-      const tgResult = await telegramClientManager.importContactAndSend(tenantId, phone, text);
+    console.log(`[MarquizWorker] Telegram two-account strategy for phone ${phone}`);
+    const tgResult = await telegramClientManager.importContactAndSend(tenantId, phone, text);
 
-      if (tgResult.success && tgResult.userId) {
-        let customer = await storage.getCustomerByExternalId(tenantId, "telegram_personal", tgResult.userId);
-        if (!customer) {
-          customer = await storage.createCustomer(
-            {
-              tenantId,
-              channel: "telegram_personal",
-              externalId: tgResult.userId,
-              phone,
-              name: data.clientName || tgResult.firstName || null,
-              metadata: {
-                ...commonMeta,
-                telegramUsername: tgResult.username ?? null,
-                channelAccountId: (tgResult as any).accountId ?? null,
-              },
-            },
-            tenantId,
-          );
-          console.log(`[MarquizWorker] TG customer created: ${customer.id}`);
-        }
-
-        const conversation = await storage.createConversation(
-          { tenantId, customerId: customer.id, status: "active", mode: "learning" },
+    if (tgResult.success && tgResult.userId) {
+      let customer = await storage.getCustomerByExternalId(tenantId, "telegram_personal", tgResult.userId);
+      if (!customer) {
+        customer = await storage.createCustomer(
+          { tenantId, channel: "telegram_personal", externalId: tgResult.userId, phone,
+            name: data.clientName || tgResult.firstName || null,
+            metadata: { ...commonMeta, telegramUsername: tgResult.username ?? null, channelAccountId: (tgResult as any).accountId ?? null } },
           tenantId,
         );
-
-        await storage.createMessage(
-          {
-            conversationId: conversation.id,
-            role: "assistant",
-            content: text,
-            metadata: {
-              source: "marquiz_autoresponse",
-              channel: "telegram_personal",
-              accountId: (tgResult as any).accountId ?? null,
-            },
-          },
-          tenantId,
-        );
-
-        console.log(`[MarquizWorker] Done via Telegram two-account — userId=${tgResult.userId}, phone=${phone}`);
-        return;
+        console.log(`[MarquizWorker] TG customer created: ${customer.id}`);
       }
-
-      console.warn(`[MarquizWorker] Telegram two-account failed (${tgResult.error}), falling back to MAX`);
+      const conversation = await storage.createConversation(
+        { tenantId, customerId: customer.id, status: "active", mode: "learning" }, tenantId,
+      );
+      await storage.createMessage(
+        { conversationId: conversation.id, role: "assistant", content: text,
+          metadata: { source: "marquiz_autoresponse", channel: "telegram_personal", accountId: (tgResult as any).accountId ?? null } },
+        tenantId,
+      );
+      console.log(`[MarquizWorker] Done via Telegram phone — userId=${tgResult.userId}`);
     }
-  }
+    return tgResult;
+  };
 
-  // ── Strategy 2: Telegram Personal by username (for username-only leads) ──
-  if (data.telegramUsername && !hasPhone) {
-    // Find any connected Telegram Personal account for this tenant
+  // Helper: send via Telegram by username
+  const sendViaTelegramByUsername = async () => {
     const tgAccounts = await storage.getTelegramAccountsByTenant(tenantId);
     const tgAccount = tgAccounts.find(a => a.status === "active" && a.isEnabled);
+    if (!tgAccount) return { success: false, error: "No active Telegram account" };
 
-    if (tgAccount) {
-      console.log(`[MarquizWorker] Trying Telegram username @${data.telegramUsername} via account ${tgAccount.id}`);
-      const tgResult = await telegramClientManager.sendMessageByUsername(
-        tenantId,
-        tgAccount.id,
-        data.telegramUsername,
-        text,
-      );
+    console.log(`[MarquizWorker] Telegram username @${data.telegramUsername} via account ${tgAccount.id}`);
+    const tgResult = await telegramClientManager.sendMessageByUsername(tenantId, tgAccount.id, data.telegramUsername, text);
 
-      if (tgResult.success && tgResult.userId) {
-        // Create/find customer by Telegram user ID
-        let customer = await storage.getCustomerByExternalId(tenantId, "telegram_personal", tgResult.userId);
-        if (!customer) {
-          customer = await storage.createCustomer(
-            {
-              tenantId,
-              channel: "telegram_personal",
-              externalId: tgResult.userId,
-              phone,
-              name: data.clientName || tgResult.firstName || null,
-              metadata: {
-                ...commonMeta,
-                telegramUsername: tgResult.username ?? data.telegramUsername,
-                channelAccountId: tgAccount.id,
-              },
-            },
-            tenantId,
-          );
-          console.log(`[MarquizWorker] TG customer created: ${customer.id}`);
-        }
-
-        const conversation = await storage.createConversation(
-          { tenantId, customerId: customer.id, status: "active", mode: "learning" },
+    if (tgResult.success && tgResult.userId) {
+      let customer = await storage.getCustomerByExternalId(tenantId, "telegram_personal", tgResult.userId);
+      if (!customer) {
+        customer = await storage.createCustomer(
+          { tenantId, channel: "telegram_personal", externalId: tgResult.userId, phone,
+            name: data.clientName || tgResult.firstName || null,
+            metadata: { ...commonMeta, telegramUsername: tgResult.username ?? data.telegramUsername, channelAccountId: tgAccount.id } },
           tenantId,
         );
-
-        await storage.createMessage(
-          {
-            conversationId: conversation.id,
-            role: "assistant",
-            content: text,
-            metadata: {
-              source: "marquiz_autoresponse",
-              channel: "telegram_personal",
-              accountId: tgAccount.id,
-              externalMessageId: tgResult.externalMessageId ?? null,
-            },
-          },
-          tenantId,
-        );
-
-        console.log(`[MarquizWorker] Done via Telegram — username=@${data.telegramUsername}, msgId=${tgResult.externalMessageId}`);
-        return;
+        console.log(`[MarquizWorker] TG customer created: ${customer.id}`);
       }
+      const conversation = await storage.createConversation(
+        { tenantId, customerId: customer.id, status: "active", mode: "learning" }, tenantId,
+      );
+      await storage.createMessage(
+        { conversationId: conversation.id, role: "assistant", content: text,
+          metadata: { source: "marquiz_autoresponse", channel: "telegram_personal", accountId: tgAccount.id, externalMessageId: tgResult.externalMessageId ?? null } },
+        tenantId,
+      );
+      console.log(`[MarquizWorker] Done via Telegram username — @${data.telegramUsername}`);
+    }
+    return tgResult;
+  };
 
-      console.warn(`[MarquizWorker] Telegram send failed (${tgResult.error}), falling back to MAX`);
-    } else {
-      console.warn(`[MarquizWorker] No active Telegram Personal account — falling back to MAX`);
+  // ── STRICT: client chose Telegram ─────────────────────────────────────────
+  if (preferred === "telegram") {
+    // Try by username first (most reliable), then by phone via importContacts
+    if (data.telegramUsername) {
+      const r = await sendViaTelegramByUsername();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] Telegram username send failed (${r.error})`);
+    }
+    if (hasPhone) {
+      const r = await sendViaTelegramByPhone();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] Telegram phone send failed (${r.error})`);
+    }
+    console.warn(`[MarquizWorker] Client chose Telegram but all Telegram methods failed — NOT falling back to MAX`);
+    return;
+  }
+
+  // ── STRICT: client chose MAX ───────────────────────────────────────────────
+  if (preferred === "max") {
+    if (!data.maxPhone || normalizePhone(data.maxPhone).length < 10) {
+      console.warn(`[MarquizWorker] Client chose MAX but no valid phone — giving up`);
+      return;
+    }
+    // Fall through to MAX block below
+  }
+
+  // ── AUTO (no preferredChannel): Telegram first, MAX fallback ──────────────
+  if (!preferred) {
+    // By username (username-only leads)
+    if (data.telegramUsername && !hasPhone) {
+      const r = await sendViaTelegramByUsername();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] Telegram username failed (${r.error}), falling back to MAX`);
+    }
+    // By phone via importContacts
+    if (hasPhone) {
+      const r = await sendViaTelegramByPhone();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] Telegram phone failed (${r.error}), falling back to MAX`);
+    }
+    if (!hasPhone && !data.telegramUsername) {
+      console.warn(`[MarquizWorker] No contact info — giving up`);
+      return;
     }
   }
 
-  // ── Strategy 2 (fallback): MAX Personal ─────────────────────────────────
-  // Skip MAX if no phone number available (Telegram-only lead)
+  // ── MAX Personal ───────────────────────────────────────────────────────────
   if (!data.maxPhone || normalizePhone(data.maxPhone).length < 10) {
-    console.warn(`[MarquizWorker] Telegram-only lead and Telegram send failed — no phone for MAX fallback. Giving up.`);
+    console.warn(`[MarquizWorker] No valid phone for MAX — giving up`);
     return;
   }
 
