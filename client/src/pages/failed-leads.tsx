@@ -111,7 +111,7 @@ export default function FailedLeads() {
                             </span>
                             <Badge variant="outline" className="text-xs border-destructive/40 text-destructive">
                               <AlertTriangle className="h-2.5 w-2.5 mr-1" />
-                              {FAILURE_REASON_LABELS[failureReason] ?? failureReason || "Ошибка доставки"}
+                                {FAILURE_REASON_LABELS[failureReason] ?? (failureReason || "Ошибка доставки")}
                             </Badge>
                             <Badge variant="secondary" className="text-xs">
                               {CHANNEL_LABELS[preferredChannel] ?? preferredChannel}
