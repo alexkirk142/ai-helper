@@ -178,10 +178,69 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     city: data.city,
   };
 
-  // ── Strategy 1: Telegram Personal by username ────────────────────────────
-  // Only use Telegram when there is NO phone number — if a phone is present,
-  // MAX is preferred because it is more reliable for cold outreach.
   const hasPhone = data.phone && normalizePhone(data.phone).length >= 10;
+
+  // ── Strategy 1: Telegram Personal — two-account scheme by phone ──────────
+  // Account A: importContacts(phone) → userId + accessHash (no shadow-ban risk)
+  // Account B: sendMessage(userId, accessHash) → message delivered (no search)
+  // Only attempted when a phone number is available and Telegram accounts are connected.
+  if (hasPhone) {
+    const tgAccounts = await storage.getTelegramAccountsByTenant(tenantId);
+    const hasTgAccounts = tgAccounts.some(a => a.status === "active" && a.isEnabled);
+
+    if (hasTgAccounts) {
+      console.log(`[MarquizWorker] Trying Telegram two-account strategy for phone ${phone}`);
+      const tgResult = await telegramClientManager.importContactAndSend(tenantId, phone, text);
+
+      if (tgResult.success && tgResult.userId) {
+        let customer = await storage.getCustomerByExternalId(tenantId, "telegram_personal", tgResult.userId);
+        if (!customer) {
+          customer = await storage.createCustomer(
+            {
+              tenantId,
+              channel: "telegram_personal",
+              externalId: tgResult.userId,
+              phone,
+              name: data.clientName || tgResult.firstName || null,
+              metadata: {
+                ...commonMeta,
+                telegramUsername: tgResult.username ?? null,
+                channelAccountId: (tgResult as any).accountId ?? null,
+              },
+            },
+            tenantId,
+          );
+          console.log(`[MarquizWorker] TG customer created: ${customer.id}`);
+        }
+
+        const conversation = await storage.createConversation(
+          { tenantId, customerId: customer.id, status: "active", mode: "learning" },
+          tenantId,
+        );
+
+        await storage.createMessage(
+          {
+            conversationId: conversation.id,
+            role: "assistant",
+            content: text,
+            metadata: {
+              source: "marquiz_autoresponse",
+              channel: "telegram_personal",
+              accountId: (tgResult as any).accountId ?? null,
+            },
+          },
+          tenantId,
+        );
+
+        console.log(`[MarquizWorker] Done via Telegram two-account — userId=${tgResult.userId}, phone=${phone}`);
+        return;
+      }
+
+      console.warn(`[MarquizWorker] Telegram two-account failed (${tgResult.error}), falling back to MAX`);
+    }
+  }
+
+  // ── Strategy 2: Telegram Personal by username (for username-only leads) ──
   if (data.telegramUsername && !hasPhone) {
     // Find any connected Telegram Personal account for this tenant
     const tgAccounts = await storage.getTelegramAccountsByTenant(tenantId);

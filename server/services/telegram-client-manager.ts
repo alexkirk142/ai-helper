@@ -1523,6 +1523,117 @@ class TelegramClientManager {
     }
   }
 
+  /**
+   * Two-account strategy for sending by phone number without shadow-ban risk:
+   *
+   * Account A (resolver) — calls contacts.ImportContacts(phone) to get userId + accessHash.
+   *   ImportContacts does NOT trigger the phone-search shadow ban.
+   * Account B (sender)   — sends the actual message using InputPeerUser(userId, accessHash).
+   *   Because it uses a known userId (not a search), it also avoids the shadow ban.
+   *
+   * If only one account is connected, it acts as both A and B.
+   * Returns userId so the caller can create/find the customer record.
+   */
+  async importContactAndSend(
+    tenantId: string,
+    phone: string,
+    text: string,
+  ): Promise<{
+    success: boolean;
+    userId?: string;
+    firstName?: string;
+    username?: string;
+    accountId?: string;  // sender account id
+    error?: string;
+  }> {
+    // Collect all connected accounts for this tenant
+    const allConns = Array.from(this.connections.values()).filter(
+      c => c.tenantId === tenantId && c.connected,
+    );
+
+    if (allConns.length === 0) {
+      return { success: false, error: "No connected Telegram Personal account" };
+    }
+
+    const cleanPhone = phone.replace(/[^\d+]/g, "");
+
+    // ── Step 1: Account A — importContacts → userId + accessHash ────────────
+    // Prefer any account; if multiple exist, pick the first as resolver.
+    const resolverConn = allConns[0];
+
+    let userId: string;
+    let accessHash: bigint;
+    let firstName = "";
+    let username: string | undefined;
+
+    try {
+      console.log(`[TelegramClientManager] importContactAndSend: resolving ${cleanPhone} via account ${resolverConn.accountId}`);
+
+      const contact = new Api.InputPhoneContact({
+        clientId: BigInt(Date.now()),
+        phone: cleanPhone,
+        firstName: "Lead",
+        lastName: cleanPhone.slice(-4),
+      });
+
+      const result = await resolverConn.client.invoke(
+        new Api.contacts.ImportContacts({ contacts: [contact] }),
+      );
+
+      if (!result.users || result.users.length === 0) {
+        return { success: false, error: "Phone not registered in Telegram" };
+      }
+
+      const user = result.users[0] as Api.User;
+      userId = user.id.toString();
+      accessHash = user.accessHash!;
+      firstName = user.firstName ?? "";
+      username = user.username ?? undefined;
+
+      console.log(`[TelegramClientManager] importContacts: resolved ${cleanPhone} → userId=${userId} (${firstName})`);
+
+      // Cache for resolver account too (in case it is also the sender)
+      this.accessHashCache.set(`${tenantId}:${userId}`, accessHash);
+    } catch (err: any) {
+      console.error(`[TelegramClientManager] importContacts failed for ${cleanPhone}: ${err.message}`);
+      return { success: false, error: err.message };
+    }
+
+    // ── Step 2: Account B — send message using userId + accessHash ───────────
+    // Prefer a different account from resolver (the "clean" sender).
+    // If only one account is connected, use it for both steps.
+    const senderConn = allConns.find(c => c.accountId !== resolverConn.accountId) ?? resolverConn;
+
+    // Cache the accessHash for the sender account's entity lookup
+    this.accessHashCache.set(`${tenantId}:${userId}`, accessHash);
+
+    try {
+      console.log(`[TelegramClientManager] importContactAndSend: sending to userId=${userId} via account ${senderConn.accountId}`);
+
+      const peer = new Api.InputPeerUser({
+        userId: BigInt(userId),
+        accessHash,
+      });
+
+      const result = await senderConn.client.sendMessage(peer, { message: text });
+      senderConn.lastActivity = new Date();
+
+      console.log(`[TelegramClientManager] importContactAndSend: sent to ${userId}, msgId=${result.id}`);
+
+      return {
+        success: true,
+        userId,
+        firstName,
+        username,
+        accountId: senderConn.accountId,
+        externalMessageId: result.id.toString(),
+      } as any;
+    } catch (err: any) {
+      console.error(`[TelegramClientManager] importContactAndSend send failed for userId=${userId}: ${err.message}`);
+      return { success: false, error: err.message };
+    }
+  }
+
   /** Find any connected account for the given tenant */
   private findAnyConnection(tenantId: string): ActiveConnection | undefined {
     for (const [, conn] of this.connections) {
