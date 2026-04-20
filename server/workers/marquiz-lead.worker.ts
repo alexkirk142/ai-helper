@@ -93,11 +93,11 @@ function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
       const size = [data.tireWidth, data.tireHeight, data.tireDiameter].filter(Boolean).join("/");
       lines.unshift(`🔧 Размер: ${size}`);
       const details = lines.length > 0 ? `\n\n${lines.join("\n")}` : "";
-      return `Здравствуйте! Получили вашу заявку на подбор шин.${details}\n\nПодберём подходящие варианты и свяжемся с вами в ближайшее время 👍${oohSuffix}`;
+      return `Здравствуйте! Получили вашу заявку на подбор шин.${details}\n\nВсё верно?${oohSuffix}`;
     } else {
       if (data.carInfo) lines.unshift(`🚗 Автомобиль: ${data.carInfo}`);
       const details = lines.length > 0 ? `\n\n${lines.join("\n")}` : "";
-      return `Здравствуйте! Получили вашу заявку на подбор шин.${details}\n\nПодберём подходящие варианты и свяжемся с вами в ближайшее время 👍${oohSuffix}`;
+      return `Здравствуйте! Получили вашу заявку на подбор шин.${details}\n\nВсё верно?${oohSuffix}`;
     }
   }
 
