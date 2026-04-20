@@ -86,6 +86,10 @@ export const tenants = pgTable("tenants", {
   maxDiscountPercent: integer("max_discount_percent").default(0),
   status: text("status").notNull().default("active").$type<TenantStatus>(), // active, restricted (fraud prevention)
   templates: jsonb("templates").default({}), // tenant text templates e.g. gearboxLookupFound, gearboxLookupModelOnly, gearboxTagRequest
+  // Marquiz auto-reply template toggles (admin-controlled per tenant)
+  templateGearboxEnabled: boolean("template_gearbox_enabled").notNull().default(true),
+  templateEngineEnabled: boolean("template_engine_enabled").notNull().default(true),
+  templateTiresEnabled: boolean("template_tires_enabled").notNull().default(true),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 

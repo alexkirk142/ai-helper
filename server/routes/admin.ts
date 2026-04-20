@@ -278,6 +278,61 @@ function maskEmail(email: string): string {
   return `${maskedLocal}@${domain}`;
 }
 
+// GET + PATCH template settings for a tenant
+router.get(
+  "/tenants/:tenantId/template-settings",
+  requireAuth,
+  requirePlatformAdmin(),
+  async (req, res) => {
+    const { tenantId } = req.params;
+    const [tenant] = await db
+      .select({
+        templateGearboxEnabled: tenants.templateGearboxEnabled,
+        templateEngineEnabled: tenants.templateEngineEnabled,
+        templateTiresEnabled: tenants.templateTiresEnabled,
+      })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .limit(1);
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+    res.json(tenant);
+  }
+);
+
+const templateSettingsSchema = z.object({
+  templateGearboxEnabled: z.boolean().optional(),
+  templateEngineEnabled: z.boolean().optional(),
+  templateTiresEnabled: z.boolean().optional(),
+});
+
+router.patch(
+  "/tenants/:tenantId/template-settings",
+  requireAuth,
+  requirePlatformAdmin(),
+  async (req, res) => {
+    const { tenantId } = req.params;
+    const parsed = templateSettingsSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid body" });
+
+    const updates: Record<string, boolean> = {};
+    if (parsed.data.templateGearboxEnabled !== undefined) updates.templateGearboxEnabled = parsed.data.templateGearboxEnabled;
+    if (parsed.data.templateEngineEnabled  !== undefined) updates.templateEngineEnabled  = parsed.data.templateEngineEnabled;
+    if (parsed.data.templateTiresEnabled   !== undefined) updates.templateTiresEnabled   = parsed.data.templateTiresEnabled;
+
+    if (Object.keys(updates).length === 0) return res.status(400).json({ error: "Nothing to update" });
+
+    const [updated] = await db.update(tenants).set(updates).where(eq(tenants.id, tenantId)).returning({
+      templateGearboxEnabled: tenants.templateGearboxEnabled,
+      templateEngineEnabled: tenants.templateEngineEnabled,
+      templateTiresEnabled: tenants.templateTiresEnabled,
+    });
+    if (!updated) return res.status(404).json({ error: "Tenant not found" });
+
+    console.log(`[Admin] Template settings updated for tenant ${tenantId}:`, updates);
+    res.json({ ok: true, ...updated });
+  }
+);
+
 router.post(
   "/tenants/:tenantId/restrict",
   requireAuth,

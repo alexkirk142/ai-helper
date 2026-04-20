@@ -82,6 +82,16 @@ function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
     ? "\n\nУтром приеду на работу, скину Вам подходящий вариант 👍"
     : "";
 
+  if (leadType === "tires" && (tenant as any).templateTiresEnabled === false) {
+    return `Здравствуйте! Получили вашу заявку. Свяжемся с вами в ближайшее время 👍${oohSuffix}`;
+  }
+  if (leadType === "engine" && (tenant as any).templateEngineEnabled === false) {
+    return `Здравствуйте! Получили вашу заявку. Свяжемся с вами в ближайшее время 👍${oohSuffix}`;
+  }
+  if (leadType === "gearbox" && (tenant as any).templateGearboxEnabled === false) {
+    return `Здравствуйте! Получили вашу заявку. Свяжемся с вами в ближайшее время 👍${oohSuffix}`;
+  }
+
   if (leadType === "tires") {
     const lines: string[] = [];
     if (data.tireSeason)   lines.push(`🌦 Сезон: ${data.tireSeason}`);

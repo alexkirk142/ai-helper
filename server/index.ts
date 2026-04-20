@@ -212,7 +212,13 @@ app.use((req, res, next) => {
           ALTER TABLE telegram_sessions
             ADD COLUMN IF NOT EXISTS tg_role TEXT NOT NULL DEFAULT 'both';
         `);
-        log("DB column check: auto_reply_enabled + tg_role OK", "startup");
+        await pool.query(`
+          ALTER TABLE tenants
+            ADD COLUMN IF NOT EXISTS template_gearbox_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            ADD COLUMN IF NOT EXISTS template_engine_enabled  BOOLEAN NOT NULL DEFAULT TRUE,
+            ADD COLUMN IF NOT EXISTS template_tires_enabled   BOOLEAN NOT NULL DEFAULT TRUE;
+        `);
+        log("DB column check: auto_reply_enabled + tg_role + template flags OK", "startup");
       } catch (err: any) {
         log(`DB column migration warning: ${err.message}`, "startup");
       }

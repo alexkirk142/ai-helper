@@ -60,6 +60,12 @@ function useTenantAutoPartsFlag(tenantId: string) {
   });
 }
 
+interface TemplateSettings {
+  templateGearboxEnabled: boolean;
+  templateEngineEnabled: boolean;
+  templateTiresEnabled: boolean;
+}
+
 function TenantRow({ tenant }: { tenant: TenantSearchResult }) {
   const { toast } = useToast();
   const { data: flags, isLoading: flagsLoading } = useTenantAutoPartsFlag(tenant.id);
@@ -84,44 +90,92 @@ function TenantRow({ tenant }: { tenant: TenantSearchResult }) {
       });
     },
     onError: (err: any) => {
-      toast({
-        title: "Ошибка",
-        description: err.message || "Не удалось изменить флаг",
-        variant: "destructive",
-      });
+      toast({ title: "Ошибка", description: err.message || "Не удалось изменить флаг", variant: "destructive" });
     },
   });
 
+  // Template settings
+  const { data: tmplData, isLoading: tmplLoading } = useQuery<TemplateSettings>({
+    queryKey: ["/api/admin/tenants/template-settings", tenant.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/tenants/${tenant.id}/template-settings`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+
+  const templateMutation = useMutation({
+    mutationFn: async (patch: Partial<TemplateSettings>) =>
+      apiRequest("PATCH", `/api/admin/tenants/${tenant.id}/template-settings`, patch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/tenants/template-settings", tenant.id] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Ошибка", description: err.message || "Не удалось изменить шаблон", variant: "destructive" });
+    },
+  });
+
+  const templates = [
+    { key: "templateGearboxEnabled" as const, label: "КПП" },
+    { key: "templateEngineEnabled"  as const, label: "ДВС" },
+    { key: "templateTiresEnabled"   as const, label: "Шины" },
+  ];
+
   return (
     <div
-      className="flex items-center justify-between p-4 rounded-md bg-muted/50"
+      className="p-4 rounded-md bg-muted/50 space-y-3"
       data-testid={`row-tenant-${tenant.id}`}
     >
-      <div className="flex items-center gap-4 min-w-0">
-        <Building2 className="h-5 w-5 text-muted-foreground shrink-0" />
-        <div className="min-w-0">
-          <p className="font-medium truncate">{tenant.name}</p>
-          <div className="flex items-center gap-2 mt-0.5">
-            <Badge variant={STATUS_VARIANTS[tenant.status] ?? "outline"} className="text-xs">
-              {STATUS_LABELS[tenant.status] ?? tenant.status}
-            </Badge>
-            <span className="text-xs text-muted-foreground">
-              Подписка: {tenant.subscriptionStatus}
-            </span>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4 min-w-0">
+          <Building2 className="h-5 w-5 text-muted-foreground shrink-0" />
+          <div className="min-w-0">
+            <p className="font-medium truncate">{tenant.name}</p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <Badge variant={STATUS_VARIANTS[tenant.status] ?? "outline"} className="text-xs">
+                {STATUS_LABELS[tenant.status] ?? tenant.status}
+              </Badge>
+              <span className="text-xs text-muted-foreground">
+                Подписка: {tenant.subscriptionStatus}
+              </span>
+            </div>
           </div>
         </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <span className="text-sm text-muted-foreground">Автозапчасти</span>
+          {flagsLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          ) : (
+            <Switch
+              checked={isEnabled}
+              onCheckedChange={(checked) => toggleMutation.mutate(checked)}
+              disabled={toggleMutation.isPending}
+              data-testid={`switch-auto-parts-${tenant.id}`}
+            />
+          )}
+        </div>
       </div>
-      <div className="flex items-center gap-3 shrink-0">
-        <span className="text-sm text-muted-foreground">Автозапчасти</span>
-        {flagsLoading ? (
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+
+      {/* Marquiz template toggles */}
+      <div className="flex items-center gap-4 pt-2 border-t border-border/40">
+        <span className="text-xs text-muted-foreground shrink-0">Шаблоны Marquiz:</span>
+        {tmplLoading ? (
+          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
         ) : (
-          <Switch
-            checked={isEnabled}
-            onCheckedChange={(checked) => toggleMutation.mutate(checked)}
-            disabled={toggleMutation.isPending}
-            data-testid={`switch-auto-parts-${tenant.id}`}
-          />
+          <div className="flex items-center gap-5">
+            {templates.map(({ key, label }) => (
+              <label key={key} className="flex items-center gap-1.5 cursor-pointer select-none">
+                <Switch
+                  checked={tmplData?.[key] ?? true}
+                  onCheckedChange={(checked) => templateMutation.mutate({ [key]: checked })}
+                  disabled={templateMutation.isPending}
+                  className="scale-75 origin-left"
+                />
+                <span className="text-xs">{label}</span>
+              </label>
+            ))}
+          </div>
         )}
       </div>
     </div>
