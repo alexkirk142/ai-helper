@@ -15,6 +15,12 @@ export interface MarquizLeadJobData {
   engineType: string;
   engineVolume: string;
   engineModel: string;
+  // Tires fields
+  tireSeason: string;   // Летние / Зимние / Всесезонные
+  tireMethod: string;   // По авто / По размеру
+  tireWidth: string;    // 215
+  tireHeight: string;   // 65
+  tireDiameter: string; // R16
   // Common
   carInfo: string;
   vin: string;

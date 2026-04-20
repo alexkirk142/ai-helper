@@ -65,8 +65,10 @@ function isWorkingHours(tenant: Tenant): boolean {
 }
 
 /** Detect lead type by quiz name or filled fields */
-function detectLeadType(data: MarquizLeadJobData): "engine" | "gearbox" {
+function detectLeadType(data: MarquizLeadJobData): "engine" | "gearbox" | "tires" {
   const qn = data.quizName.toLowerCase();
+  if (qn.includes("шин") || qn.includes("резин") || qn.includes("колес")) return "tires";
+  if (data.tireSeason || data.tireWidth || data.tireDiameter) return "tires";
   if (qn.includes("двигател") || qn.includes("мотор")) return "engine";
   if (data.engineType || data.engineVolume || data.engineModel) return "engine";
   return "gearbox";
@@ -79,6 +81,25 @@ function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
   const oohSuffix = afterHours
     ? "\n\nУтром приеду на работу, скину Вам подходящий вариант 👍"
     : "";
+
+  if (leadType === "tires") {
+    const lines: string[] = [];
+    if (data.tireSeason)   lines.push(`🌦 Сезон: ${data.tireSeason}`);
+    if (data.city)         lines.push(`📍 Город: ${data.city}`);
+
+    const bySize = data.tireMethod?.toLowerCase().includes("размер");
+
+    if (bySize && (data.tireWidth || data.tireHeight || data.tireDiameter)) {
+      const size = [data.tireWidth, data.tireHeight, data.tireDiameter].filter(Boolean).join("/");
+      lines.unshift(`🔧 Размер: ${size}`);
+      const details = lines.length > 0 ? `\n\n${lines.join("\n")}` : "";
+      return `Здравствуйте! Получили вашу заявку на подбор шин.${details}\n\nПодберём подходящие варианты и свяжемся с вами в ближайшее время 👍${oohSuffix}`;
+    } else {
+      if (data.carInfo) lines.unshift(`🚗 Автомобиль: ${data.carInfo}`);
+      const details = lines.length > 0 ? `\n\n${lines.join("\n")}` : "";
+      return `Здравствуйте! Получили вашу заявку на подбор шин.${details}\n\nПодберём подходящие варианты и свяжемся с вами в ближайшее время 👍${oohSuffix}`;
+    }
+  }
 
   if (leadType === "engine") {
     const lines: string[] = [];

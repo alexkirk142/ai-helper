@@ -171,6 +171,27 @@ router.post("/", async (req, res) => {
       findAnswer(answers, "город", "ваш город") ||
       findField(legacyFields, "город");
 
+    // ── Tires fields ───────────────────────────────────────────────────────
+    const tireSeason =
+      findAnswer(answers, "сезон", "комплект шин") ||
+      findField(legacyFields, "сезон");
+
+    const tireMethod =
+      findAnswer(answers, "удобнее подобрать", "способ подбора", "как подобрать") ||
+      findField(legacyFields, "удобнее подобрать");
+
+    const tireWidth =
+      findAnswer(answers, "ширина") ||
+      findField(legacyFields, "ширина");
+
+    const tireHeight =
+      findAnswer(answers, "высота") ||
+      findField(legacyFields, "высота");
+
+    const tireDiameter =
+      findAnswer(answers, "диаметр") ||
+      findField(legacyFields, "диаметр");
+
     // MAX phone — dedicated quiz field named "max" or similar
     const maxPhoneRaw =
       findAnswer(answers, "max") ||
@@ -207,6 +228,11 @@ router.post("/", async (req, res) => {
       engineType,
       engineVolume,
       engineModel,
+      tireSeason,
+      tireMethod,
+      tireWidth,
+      tireHeight,
+      tireDiameter,
       carInfo,
       vin,
       city,
