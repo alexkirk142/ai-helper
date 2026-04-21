@@ -5,6 +5,22 @@ import { and, eq, sql } from "drizzle-orm";
 import type { ParsedIncomingMessage, ParsedAttachment } from "../services/channel-adapter";
 import { processIncomingMessageFull } from "../services/inbound-message-handler";
 import { storage } from "../storage";
+import IORedis from "ioredis";
+
+/** Redis client shared for MAX status signaling (lazy init) */
+let _statusRedis: IORedis | null = null;
+function getStatusRedis(): IORedis | null {
+  if (_statusRedis) return _statusRedis;
+  const url = process.env.REDIS_URL;
+  if (!url) return null;
+  try {
+    _statusRedis = new IORedis(url, { maxRetriesPerRequest: null, enableReadyCheck: false });
+    return _statusRedis;
+  } catch { return null; }
+}
+
+/** Key used to signal noAccount status back to the worker */
+export const maxStatusKey = (messageId: string) => `max:status:${messageId}`;
 
 const router = Router();
 
@@ -152,6 +168,17 @@ router.post("/:tenantId/:accountId", async (req, res) => {
     if (payload.typeWebhook === "outgoingMessageStatus") {
       const body = req.body as any;
       console.log(`[MaxPersonalWebhook] outgoingMessageStatus FULL:`, JSON.stringify(body));
+
+      // Signal "noAccount" back to the waiting worker via Redis
+      if (body.status === "noAccount" && body.idMessage) {
+        const redis = getStatusRedis();
+        if (redis) {
+          const key = maxStatusKey(String(body.idMessage));
+          await redis.set(key, "noAccount", "EX", 30).catch(() => {});
+          console.log(`[MaxPersonalWebhook] Signalled noAccount for msgId=${body.idMessage}`);
+        }
+      }
+
       return res.json({ ok: true });
     }
 

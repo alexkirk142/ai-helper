@@ -6,7 +6,7 @@ import { maxPersonalAccounts } from "../../shared/schema";
 import { getRedisConnectionConfig } from "../services/message-queue";
 import type { MarquizLeadJobData } from "../services/marquiz-lead-queue";
 import { MaxPersonalAdapter } from "../services/max-personal-adapter";
-import { maxGreenApiAdapter } from "../services/max-green-api-adapter";
+import { maxStatusKey } from "../routes/max-personal-webhook";
 import { telegramClientManager } from "../services/telegram-client-manager";
 import { storage } from "../storage";
 import type { Tenant } from "../../shared/schema";
@@ -298,13 +298,6 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     const chatId = toMaxChatId(data.maxPhone);
     console.log(`[MarquizWorker] Trying MAX account: ${account.label ?? account.accountId}`);
 
-    // Pre-check: is this phone registered in MAX? Avoids async "noAccount" status.
-    const isRegistered = await maxGreenApiAdapter.checkWhatsapp(account.idInstance, account.apiTokenInstance, data.maxPhone);
-    if (!isRegistered) {
-      console.warn(`[MarquizWorker] Phone ${data.maxPhone} not registered in MAX — skipping MAX`);
-      return { success: false, error: "noAccount" };
-    }
-
     let customer = await storage.getCustomerByExternalId(tenantId, "max_personal", chatId);
     if (!customer) {
       customer = await storage.createCustomer(
@@ -320,7 +313,6 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     const result = await maxPersonalAdapter.sendMessageForTenant(tenantId, chatId, text, undefined, account.accountId);
 
     if (!result.success) {
-      // Roll back conversation status so it doesn't pollute the list if we fallback
       await storage.updateConversation(conversation.id, tenantId, { status: "failed_delivery" });
       await storage.createMessage(
         { conversationId: conversation.id, role: "assistant", content: text,
@@ -330,12 +322,48 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
       return { success: false, error: result.error };
     }
 
+    // ── Async noAccount detection via webhook signal ──────────────────────────
+    // GREEN-API doesn't return "noAccount" synchronously — it comes back as an
+    // outgoingMessageStatus webhook a couple of seconds after the send.
+    // We mark this message as "pending" in Redis, then wait a few seconds for
+    // the webhook handler to overwrite it with "noAccount" if needed.
+    const msgId = result.externalMessageId;
+    let noAccountDetected = false;
+
+    if (msgId) {
+      const statusKey = maxStatusKey(msgId);
+      await redis.set(statusKey, "pending", "EX", 30).catch(() => {});
+      console.log(`[MarquizWorker] MAX message sent (id=${msgId}), waiting 4s for noAccount signal…`);
+
+      await new Promise<void>((r) => setTimeout(r, 4000));
+
+      const signal = await redis.get(statusKey).catch(() => null);
+      console.log(`[MarquizWorker] Redis signal for ${msgId}: ${signal ?? "(none)"}`);
+
+      if (signal === "noAccount") {
+        noAccountDetected = true;
+        await redis.del(statusKey).catch(() => {});
+      }
+    }
+
+    if (noAccountDetected) {
+      // Roll back so the conversation doesn't sit in the list while we retry via Telegram
+      await storage.updateConversation(conversation.id, tenantId, { status: "failed_delivery" });
+      await storage.createMessage(
+        { conversationId: conversation.id, role: "assistant", content: text,
+          metadata: { source: "marquiz_autoresponse", accountId: account.accountId, failureReason: "noAccount" } },
+        tenantId,
+      );
+      console.warn(`[MarquizWorker] noAccount signal received — falling back to Telegram`);
+      return { success: false, error: "noAccount" };
+    }
+
     await storage.createMessage(
       { conversationId: conversation.id, role: "assistant", content: text,
-        metadata: { source: "marquiz_autoresponse", accountId: account.accountId, externalMessageId: result.externalMessageId ?? null } },
+        metadata: { source: "marquiz_autoresponse", accountId: account.accountId, externalMessageId: msgId ?? null } },
       tenantId,
     );
-    console.log(`[MarquizWorker] Done via MAX — account=${account.accountId}, externalMsgId=${result.externalMessageId}`);
+    console.log(`[MarquizWorker] Done via MAX — account=${account.accountId}, externalMsgId=${msgId}`);
     return { success: true };
   };
 
