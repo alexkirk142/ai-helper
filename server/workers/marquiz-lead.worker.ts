@@ -6,6 +6,7 @@ import { maxPersonalAccounts } from "../../shared/schema";
 import { getRedisConnectionConfig } from "../services/message-queue";
 import type { MarquizLeadJobData } from "../services/marquiz-lead-queue";
 import { MaxPersonalAdapter } from "../services/max-personal-adapter";
+import { maxGreenApiAdapter } from "../services/max-green-api-adapter";
 import { telegramClientManager } from "../services/telegram-client-manager";
 import { storage } from "../storage";
 import type { Tenant } from "../../shared/schema";
@@ -296,6 +297,13 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
 
     const chatId = toMaxChatId(data.maxPhone);
     console.log(`[MarquizWorker] Trying MAX account: ${account.label ?? account.accountId}`);
+
+    // Pre-check: is this phone registered in MAX? Avoids async "noAccount" status.
+    const isRegistered = await maxGreenApiAdapter.checkWhatsapp(account.idInstance, account.apiTokenInstance, data.maxPhone);
+    if (!isRegistered) {
+      console.warn(`[MarquizWorker] Phone ${data.maxPhone} not registered in MAX — skipping MAX`);
+      return { success: false, error: "noAccount" };
+    }
 
     let customer = await storage.getCustomerByExternalId(tenantId, "max_personal", chatId);
     if (!customer) {

@@ -120,6 +120,34 @@ export class MaxGreenApiAdapter {
     }
   }
 
+  /**
+   * Checks whether a phone number is registered in MAX (WhatsApp).
+   * Returns true if the number exists, false if not.
+   * Uses GREEN-API checkWhatsapp endpoint.
+   */
+  async checkWhatsapp(
+    idInstance: string,
+    token: string,
+    phoneNumber: string,
+  ): Promise<boolean> {
+    // Strip all non-digits and leading +
+    const digits = phoneNumber.replace(/\D/g, "");
+    const url = `${BASE_URL(idInstance)}/checkWhatsapp/${token}`;
+    try {
+      const res = await fetchWithTimeout(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phoneNumber: digits }),
+      }, 10000);
+      if (!res.ok) return false;
+      const data = await res.json() as { existsWhatsapp?: boolean };
+      return data.existsWhatsapp === true;
+    } catch {
+      // If check fails (network, timeout) — assume exists to not block delivery
+      return true;
+    }
+  }
+
   async sendMessage(
     idInstance: string,
     token: string,
