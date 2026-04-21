@@ -1625,7 +1625,7 @@ class TelegramClientManager {
         const result = await resolverConn.client.sendMessage(peer, { message: text });
         resolverConn.lastActivity = new Date();
         console.log(`[TelegramClientManager] importContactAndSend (single): sent to ${userId}, msgId=${result.id}`);
-        return { success: true, userId, firstName, username, accountId: resolverConn.accountId, externalMessageId: result.id.toString() } as any;
+        return { success: true, userId, firstName, username, accountId: resolverConn.accountId, channelId: resolverConn.channelId, externalMessageId: result.id.toString() } as any;
       } catch (err: any) {
         console.error(`[TelegramClientManager] importContactAndSend single send failed: ${err.message}`);
         return { success: false, error: err.message };
@@ -1713,7 +1713,7 @@ class TelegramClientManager {
       const result = await senderConn.client.sendMessage(peer, { message: text });
       senderConn.lastActivity = new Date();
       console.log(`[TelegramClientManager] importContactAndSend (sender): sent to ${userId}, msgId=${result.id}`);
-      return { success: true, userId, firstName, username, accountId: senderConn.accountId, externalMessageId: result.id.toString() } as any;
+      return { success: true, userId, firstName, username, accountId: senderConn.accountId, channelId: senderConn.channelId, externalMessageId: result.id.toString() } as any;
     } catch (err: any) {
       console.error(`[TelegramClientManager] importContactAndSend sender send failed: ${err.message}`);
       return { success: false, error: err.message };

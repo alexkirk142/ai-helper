@@ -231,25 +231,35 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     const tgResult = await telegramClientManager.importContactAndSend(tenantId, phone, text);
 
     if (tgResult.success && tgResult.userId) {
+      const senderAccountId = (tgResult as any).accountId ?? null;
+      const senderChannelId = (tgResult as any).channelId ?? null;
+
       let customer = await storage.getCustomerByExternalId(tenantId, "telegram_personal", tgResult.userId);
       if (!customer) {
         customer = await storage.createCustomer(
           { tenantId, channel: "telegram_personal", externalId: tgResult.userId, phone,
             name: data.clientName || tgResult.firstName || null,
-            metadata: { ...commonMeta, telegramUsername: tgResult.username ?? null, channelAccountId: (tgResult as any).accountId ?? null } },
+            metadata: { ...commonMeta, telegramUsername: tgResult.username ?? null, channelAccountId: senderAccountId } },
           tenantId,
         );
         console.log(`[MarquizWorker] TG customer created: ${customer.id}`);
       }
+      // Pin conversation to the SENDER's channel so the outbound handler always
+      // routes operator replies through the sender, not the resolver.
+      // Without this, the client might reply to the resolver (which gets notified
+      // by Telegram's importContacts), causing effectiveChannelId to resolve to
+      // the resolver's channelId and sending operator replies from the resolver.
       const conversation = await storage.createConversation(
-        { tenantId, customerId: customer.id, status: "active", mode: "learning" }, tenantId,
+        { tenantId, customerId: customer.id, status: "active", mode: "learning",
+          ...(senderChannelId ? { channelId: senderChannelId } : {}) },
+        tenantId,
       );
       await storage.createMessage(
         { conversationId: conversation.id, role: "assistant", content: text,
-          metadata: { source: "marquiz_autoresponse", channel: "telegram_personal", accountId: (tgResult as any).accountId ?? null } },
+          metadata: { source: "marquiz_autoresponse", channel: "telegram_personal", accountId: senderAccountId } },
         tenantId,
       );
-      console.log(`[MarquizWorker] Done via Telegram phone — userId=${tgResult.userId}`);
+      console.log(`[MarquizWorker] Done via Telegram phone — userId=${tgResult.userId}, channelId=${senderChannelId}`);
     }
     return tgResult;
   };
@@ -257,7 +267,12 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   // Helper: send via Telegram by username
   const sendViaTelegramByUsername = async () => {
     const tgAccounts = await storage.getTelegramAccountsByTenant(tenantId);
-    const tgAccount = tgAccounts.find(a => a.status === "active" && a.isEnabled);
+    // Prefer sender/both accounts — avoid using resolver-only accounts for client-facing sends
+    const tgAccount =
+      tgAccounts.find(a => a.status === "active" && a.isEnabled && (a as any).tgRole === "sender") ??
+      tgAccounts.find(a => a.status === "active" && a.isEnabled && (a as any).tgRole === "both") ??
+      tgAccounts.find(a => a.status === "active" && a.isEnabled && (a as any).tgRole !== "resolver") ??
+      tgAccounts.find(a => a.status === "active" && a.isEnabled);
     if (!tgAccount) return { success: false, error: "No active Telegram account" };
 
     console.log(`[MarquizWorker] Telegram username @${data.telegramUsername} via account ${tgAccount.id}`);
@@ -275,7 +290,9 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
         console.log(`[MarquizWorker] TG customer created: ${customer.id}`);
       }
       const conversation = await storage.createConversation(
-        { tenantId, customerId: customer.id, status: "active", mode: "learning" }, tenantId,
+        { tenantId, customerId: customer.id, status: "active", mode: "learning",
+          ...((tgAccount as any).channelId ? { channelId: (tgAccount as any).channelId } : {}) },
+        tenantId,
       );
       await storage.createMessage(
         { conversationId: conversation.id, role: "assistant", content: text,
