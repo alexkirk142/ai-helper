@@ -322,12 +322,23 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
       return { success: false, error: result.error };
     }
 
+    // ── Save message to DB FIRST so that outgoingAPIMessageReceived webhook can
+    // look it up by externalMessageId and persist maxInternalId on the customer.
+    // This must happen BEFORE the 4-second wait — otherwise the webhook fires
+    // during the wait, getCustomerByOutboundMessageId returns null, maxInternalId
+    // is never saved, and the customer's reply creates a duplicate conversation.
+    const msgId = result.externalMessageId;
+    const savedMessage = await storage.createMessage(
+      { conversationId: conversation.id, role: "assistant", content: text,
+        metadata: { source: "marquiz_autoresponse", accountId: account.accountId, externalMessageId: msgId ?? null } },
+      tenantId,
+    );
+
     // ── Async noAccount detection via webhook signal ──────────────────────────
     // GREEN-API doesn't return "noAccount" synchronously — it comes back as an
     // outgoingMessageStatus webhook a couple of seconds after the send.
     // We mark this message as "pending" in Redis, then wait a few seconds for
     // the webhook handler to overwrite it with "noAccount" if needed.
-    const msgId = result.externalMessageId;
     let noAccountDetected = false;
 
     if (msgId) {
@@ -349,20 +360,13 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     if (noAccountDetected) {
       // Roll back so the conversation doesn't sit in the list while we retry via Telegram
       await storage.updateConversation(conversation.id, tenantId, { status: "failed_delivery" });
-      await storage.createMessage(
-        { conversationId: conversation.id, role: "assistant", content: text,
-          metadata: { source: "marquiz_autoresponse", accountId: account.accountId, failureReason: "noAccount" } },
-        tenantId,
-      );
+      await storage.updateMessage(savedMessage.id, tenantId, {
+        metadata: { source: "marquiz_autoresponse", accountId: account.accountId, failureReason: "noAccount" },
+      }).catch(() => {});
       console.warn(`[MarquizWorker] noAccount signal received — falling back to Telegram`);
       return { success: false, error: "noAccount" };
     }
 
-    await storage.createMessage(
-      { conversationId: conversation.id, role: "assistant", content: text,
-        metadata: { source: "marquiz_autoresponse", accountId: account.accountId, externalMessageId: msgId ?? null } },
-      tenantId,
-    );
     console.log(`[MarquizWorker] Done via MAX — account=${account.accountId}, externalMsgId=${msgId}`);
     return { success: true };
   };
