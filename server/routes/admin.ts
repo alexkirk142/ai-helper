@@ -1986,7 +1986,7 @@ router.get(
 
 // ============ MAX PERSONAL (GREEN-API) ADMIN ROUTES ============
 
-const MAX_PERSONAL_ACCOUNTS_LIMIT = 5;
+const MAX_PERSONAL_ACCOUNTS_LIMIT = 50;
 
 const maxPersonalAddSchema = z.object({
   idInstance: z.string().min(1),
