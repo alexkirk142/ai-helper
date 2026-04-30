@@ -189,15 +189,27 @@ export default function Conversations() {
   });
 
   const sendManualMutation = useMutation({
-    mutationFn: async ({ content, file, role = "owner" }: { content: string; file?: File; role?: string }) => {
-      if (file) {
-        const formData = new FormData();
-        formData.append("content", content);
-        formData.append("file", file);
-        formData.append("role", role);
-        return apiRequest("POST", `/api/conversations/${selectedId}/messages`, formData);
+    mutationFn: async ({ content, files, role = "owner" }: { content: string; files?: File[]; role?: string }) => {
+      const sendOne = (text: string, file?: File) => {
+        if (file) {
+          const formData = new FormData();
+          formData.append("content", text);
+          formData.append("file", file);
+          formData.append("role", role);
+          return apiRequest("POST", `/api/conversations/${selectedId}/messages`, formData);
+        }
+        return apiRequest("POST", `/api/conversations/${selectedId}/messages`, { content: text, role });
+      };
+
+      if (!files || files.length === 0) {
+        return sendOne(content);
       }
-      return apiRequest("POST", `/api/conversations/${selectedId}/messages`, { content, role });
+
+      // Send text + first file together, then each remaining file without text
+      await sendOne(content, files[0]);
+      for (let i = 1; i < files.length; i++) {
+        await sendOne("", files[i]);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations", selectedId] });
@@ -842,7 +854,7 @@ export default function Conversations() {
               onEdit={(id, text) => editMutation.mutate({ suggestionId: id, editedText: text })}
               onReject={(id) => rejectMutation.mutate(id)}
               onEscalate={(id) => escalateMutation.mutate(id)}
-              onSendManual={(content, file) => sendManualMutation.mutate({ content, file })}
+              onSendManual={(content, files) => sendManualMutation.mutate({ content, files })}
               onMuteToggle={(convId, muted) => muteMutation.mutate({ conversationId: convId, muted })}
               onPhoneClick={handlePhoneClick}
               isLoading={detailLoading}

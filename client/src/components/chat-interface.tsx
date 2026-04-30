@@ -43,7 +43,7 @@ interface ChatInterfaceProps {
   onEdit: (suggestionId: string, editedText: string) => void;
   onReject: (suggestionId: string) => void;
   onEscalate: (suggestionId: string) => void;
-  onSendManual: (content: string, file?: File) => void;
+  onSendManual: (content: string, files?: File[]) => void;
   onMuteToggle?: (conversationId: string, muted: boolean) => void;
   onPhoneClick?: (phoneNumber: string) => void;
   isLoading?: boolean;
@@ -367,8 +367,8 @@ export function ChatInterface({
   const [showSources, setShowSources] = useState(false);
   const [showCsatDialog, setShowCsatDialog] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [filePreviews, setFilePreviews] = useState<Record<string, string>>({}); // file.name+size → objectURL
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevConversationId = useRef<string | null>(null);
@@ -458,43 +458,61 @@ export function ChatInterface({
   const usedSources = (suggestion?.usedSources || []) as UsedSource[];
   const explanations = (Array.isArray(suggestion?.explanations) ? suggestion.explanations : []) as string[];
 
+  const fileKey = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
+
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(e.clipboardData.files);
-    const imageFile = files.find((f) => f.type.startsWith("image/"));
-    if (imageFile) {
+    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+    if (imageFiles.length > 0) {
       e.preventDefault();
-      if (filePreviewUrl) URL.revokeObjectURL(filePreviewUrl);
-      setSelectedFile(imageFile);
-      setFilePreviewUrl(URL.createObjectURL(imageFile));
+      setSelectedFiles((prev) => [...prev, ...imageFiles]);
+      setFilePreviews((prev) => {
+        const next = { ...prev };
+        imageFiles.forEach((f) => { next[fileKey(f)] = URL.createObjectURL(f); });
+        return next;
+      });
     }
     // No image in clipboard — let default text-paste proceed
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null;
-    if (!file) return;
-    setSelectedFile(file);
-    if (file.type.startsWith("image/")) {
-      const url = URL.createObjectURL(file);
-      setFilePreviewUrl(url);
-    } else {
-      setFilePreviewUrl(null);
-    }
-    // Reset input so same file can be re-selected
+    const newFiles = Array.from(e.target.files ?? []);
+    if (!newFiles.length) return;
+    setSelectedFiles((prev) => [...prev, ...newFiles]);
+    setFilePreviews((prev) => {
+      const next = { ...prev };
+      newFiles.forEach((f) => {
+        if (f.type.startsWith("image/")) next[fileKey(f)] = URL.createObjectURL(f);
+      });
+      return next;
+    });
     e.target.value = "";
   };
 
-  const clearFile = () => {
-    if (filePreviewUrl) URL.revokeObjectURL(filePreviewUrl);
-    setSelectedFile(null);
-    setFilePreviewUrl(null);
+  const removeFile = (index: number) => {
+    setSelectedFiles((prev) => {
+      const removed = prev[index];
+      const key = fileKey(removed);
+      setFilePreviews((p) => {
+        const next = { ...p };
+        if (next[key]) { URL.revokeObjectURL(next[key]); delete next[key]; }
+        return next;
+      });
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const clearFiles = () => {
+    Object.values(filePreviews).forEach((url) => URL.revokeObjectURL(url));
+    setSelectedFiles([]);
+    setFilePreviews({});
   };
 
   const handleSendManual = () => {
-    if (!manualMessage.trim() && !selectedFile) return;
-    onSendManual(manualMessage, selectedFile ?? undefined);
+    if (!manualMessage.trim() && selectedFiles.length === 0) return;
+    onSendManual(manualMessage, selectedFiles.length > 0 ? selectedFiles : undefined);
     setManualMessage("");
-    clearFile();
+    clearFiles();
   };
 
   const handleApproveEdit = () => {
@@ -885,45 +903,56 @@ export function ChatInterface({
 
       {/* Manual Message Input */}
       <div className="border-t p-4">
-        {/* File preview strip */}
-        {selectedFile && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border bg-muted/50 p-2">
-            {filePreviewUrl ? (
-              <img
-                src={filePreviewUrl}
-                alt="preview"
-                className="h-14 w-14 rounded object-cover shrink-0"
-              />
-            ) : (
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded bg-muted">
-                <Paperclip className="h-5 w-5 text-muted-foreground" />
-              </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{selectedFile.name}</p>
-              <p className="text-xs text-muted-foreground">
-                {selectedFile.size < 1024 * 1024
-                  ? `${(selectedFile.size / 1024).toFixed(1)} KB`
-                  : `${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB`}
-              </p>
-            </div>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="shrink-0 h-7 w-7"
-              onClick={clearFile}
-              data-testid="button-clear-file"
+        {/* Multi-file preview strip */}
+        {selectedFiles.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2 rounded-lg border bg-muted/50 p-2">
+            {selectedFiles.map((file, idx) => {
+              const key = fileKey(file);
+              const preview = filePreviews[key];
+              return (
+                <div key={key + idx} className="relative group">
+                  {preview ? (
+                    <img
+                      src={preview}
+                      alt={file.name}
+                      className="h-16 w-16 rounded object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-16 w-16 flex-col items-center justify-center rounded bg-muted text-center px-1">
+                      <Paperclip className="h-4 w-4 text-muted-foreground" />
+                      <span className="mt-0.5 text-[10px] leading-tight text-muted-foreground line-clamp-2 break-all">
+                        {file.name}
+                      </span>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="absolute -top-1.5 -right-1.5 hidden group-hover:flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-destructive-foreground"
+                    onClick={() => removeFile(idx)}
+                    title="Удалить"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </div>
+              );
+            })}
+            {/* Clear all */}
+            <button
+              type="button"
+              className="self-start ml-auto text-xs text-muted-foreground hover:text-foreground underline"
+              onClick={clearFiles}
             >
-              <X className="h-4 w-4" />
-            </Button>
+              Очистить
+            </button>
           </div>
         )}
 
         <div className="flex gap-2">
-          {/* Hidden file input */}
+          {/* Hidden file input — multiple allowed */}
           <input
             ref={fileInputRef}
             type="file"
+            multiple
             accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
             className="hidden"
             onChange={handleFileSelect}
@@ -932,12 +961,17 @@ export function ChatInterface({
           <Button
             size="icon"
             variant="ghost"
-            className="shrink-0"
+            className="shrink-0 relative"
             onClick={() => fileInputRef.current?.click()}
-            title="Прикрепить файл"
+            title="Прикрепить файл(ы)"
             data-testid="button-attach-file"
           >
             <Paperclip className="h-4 w-4" />
+            {selectedFiles.length > 1 && (
+              <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold">
+                {selectedFiles.length}
+              </span>
+            )}
           </Button>
           <Textarea
             placeholder="Введите сообщение вручную..."
@@ -956,15 +990,15 @@ export function ChatInterface({
           <Button
             size="icon"
             onClick={handleSendManual}
-            disabled={!manualMessage.trim() && !selectedFile}
+            disabled={!manualMessage.trim() && selectedFiles.length === 0}
             data-testid="button-send-manual"
           >
             <Send className="h-4 w-4" />
           </Button>
         </div>
-        {!selectedFile && (
+        {selectedFiles.length === 0 && (
           <p className="mt-1.5 text-xs text-muted-foreground">
-            💡 Вставьте фото из буфера обмена (Ctrl+V) или нажмите <Paperclip className="inline h-3 w-3" />
+            💡 Вставьте фото из буфера обмена (Ctrl+V) или нажмите <Paperclip className="inline h-3 w-3" /> для выбора нескольких файлов
           </p>
         )}
       </div>
