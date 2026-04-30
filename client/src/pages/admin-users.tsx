@@ -273,7 +273,7 @@ export default function AdminUsers() {
   });
 
   const maxPersonalAccList = maxPersonalData?.accounts ?? [];
-  const maxPersonalAtLimit = maxPersonalAccList.length >= 5;
+  const maxPersonalAtLimit = maxPersonalAccList.length >= 50;
 
   const addMaxPersonalMutation = useMutation({
     mutationFn: async ({ idInstance, apiTokenInstance, label }: { idInstance: string; apiTokenInstance: string; label?: string }) => {
@@ -949,13 +949,13 @@ export default function AdminUsers() {
                                     ))}
 
                                     {maxPersonalAtLimit && (
-                                      <p className="text-xs text-muted-foreground">Максимум 5 аккаунтов достигнут</p>
+                                      <p className="text-xs text-muted-foreground">Максимум 50 аккаунтов достигнут</p>
                                     )}
 
                                     {!maxPersonalAtLimit && (maxPersonalShowForm || maxPersonalAccList.length === 0) && (
                                       <div className="rounded-md border p-3 space-y-2 bg-muted/30">
                                         <p className="text-xs text-muted-foreground font-medium">
-                                          Добавить аккаунт ({maxPersonalAccList.length}/5 использовано)
+                                          Добавить аккаунт ({maxPersonalAccList.length}/50 использовано)
                                         </p>
                                         <div className="space-y-1">
                                           <Label className="text-xs">Instance ID</Label>
