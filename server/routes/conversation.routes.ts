@@ -306,8 +306,27 @@ router.post(
           if (ch) { effectiveChannelType = ch; break; }
         }
       }
-      const effectiveChannelId =
+      let effectiveChannelId: string | undefined =
         conversation.channelId || ((lastCustomerMsg?.metadata as any)?.channelId as string | undefined);
+      // Fallback: scan all messages for a channelId hint (covers Telegram conversations where
+      // conversation.channelId was not set and last customer message lacks it).
+      if (!effectiveChannelId) {
+        for (const msg of conversation.messages) {
+          const cid = (msg.metadata as any)?.channelId as string | undefined;
+          if (cid) { effectiveChannelId = cid; break; }
+        }
+      }
+      // Last resort for telegram_personal: query for an active sender/both account.
+      if (!effectiveChannelId && effectiveChannelType === "telegram_personal") {
+        try {
+          const tgAccounts = await storage.getTelegramAccountsByTenant(conversation.tenantId);
+          const senderAccount = tgAccounts.find(a => a.tgRole === "sender" || a.tgRole === "both");
+          if (senderAccount?.channelId) {
+            effectiveChannelId = senderAccount.channelId;
+            console.log(`[OutboundHandler] Resolved telegram channelId from account role: ${effectiveChannelId}`);
+          }
+        } catch {}
+      }
       // For multi-account channels (max_personal): prefer accountId from last customer msg,
       // then fall back to any message that carries one (e.g. the initial outbound message).
       const effectiveAccountId: string | undefined =
