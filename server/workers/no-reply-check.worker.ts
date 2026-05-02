@@ -41,10 +41,11 @@ async function processNoReplyCheck(job: Job<NoReplyCheckJobData>): Promise<void>
 
   const messages = await storage.getMessagesByConversation(conversationId, tenantId);
 
-  // Check if any "user" (customer) message exists after the initial assistant message
+  // Check if any customer message exists after the initial assistant message.
+  // Inbound messages are saved with role="customer" (not "user").
   const firstAssistantIdx = messages.findIndex((m) => m.role === "assistant");
   const hasCustomerReply = firstAssistantIdx >= 0
-    ? messages.some((m, idx) => idx > firstAssistantIdx && m.role === "user")
+    ? messages.some((m, idx) => idx > firstAssistantIdx && (m.role === "customer" || m.role === "user"))
     : false;
 
   if (hasCustomerReply) {
