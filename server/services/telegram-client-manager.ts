@@ -85,13 +85,23 @@ class TelegramClientManager {
     console.log("[TelegramClientManager] Initializing multi-account...");
 
     try {
-      const accounts = await storage.getActiveTelegramAccounts();
-      console.log(`[TelegramClientManager] Found ${accounts.length} active Telegram accounts`);
+      // Use getReconnectableTelegramAccounts so accounts that were set to
+      // "disconnected" or "error" during a previous deploy (AUTH_KEY_DUPLICATED)
+      // are still picked up and reconnected. Only truly revoked accounts
+      // (isEnabled=false set by fatal error handler) are skipped.
+      const accounts = await storage.getReconnectableTelegramAccounts();
+      console.log(`[TelegramClientManager] Found ${accounts.length} Telegram accounts to reconnect`);
 
       for (const account of accounts) {
         if (!account.sessionString) {
           console.log(`[TelegramClientManager] Account ${account.id}: no session, skipping`);
           continue;
+        }
+
+        // Reset non-fatal statuses so the account is considered active and can be reconnected.
+        if (account.status !== "active") {
+          console.log(`[TelegramClientManager] Account ${account.id} has status="${account.status}" — resetting to "active" for reconnect`);
+          await storage.updateTelegramAccount(account.id, { status: "active", lastError: null as any }).catch(() => {});
         }
 
         try {

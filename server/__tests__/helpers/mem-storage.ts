@@ -1500,6 +1500,10 @@ export class MemStorage implements IStorage {
     return Array.from(this.telegramAccountsMap.values()).filter(a => a.status === "active" && a.isEnabled);
   }
 
+  async getReconnectableTelegramAccounts(): Promise<TelegramSession[]> {
+    return Array.from(this.telegramAccountsMap.values()).filter(a => a.isEnabled && !!a.sessionString);
+  }
+
   async createTelegramAccount(data: InsertTelegramSession): Promise<TelegramSession> {
     const id = randomUUID();
     const now = new Date();

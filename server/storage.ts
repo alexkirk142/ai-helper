@@ -274,6 +274,7 @@ export interface IStorage {
   getTelegramAccountsByTenant(tenantId: string): Promise<TelegramSession[]>;
   getTelegramAccountById(id: string): Promise<TelegramSession | undefined>;
   getActiveTelegramAccounts(): Promise<TelegramSession[]>;
+  getReconnectableTelegramAccounts(): Promise<TelegramSession[]>;
   createTelegramAccount(data: InsertTelegramSession): Promise<TelegramSession>;
   updateTelegramAccount(id: string, data: Partial<InsertTelegramSession>): Promise<TelegramSession | undefined>;
   deleteTelegramAccount(id: string): Promise<boolean>;

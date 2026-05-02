@@ -1666,6 +1666,19 @@ export class DatabaseStorage implements IStorage {
     return row ? this.decryptTelegramSessionRow(row) : undefined;
   }
 
+  async getReconnectableTelegramAccounts(): Promise<TelegramSession[]> {
+    // Fetch all accounts that have a session string and are NOT permanently revoked.
+    // Used on server startup so that accounts set to "disconnected"/"error" during a
+    // previous deploy are still picked up and reconnected.
+    const rows = await db.select().from(telegramSessions)
+      .where(and(
+        eq(telegramSessions.isEnabled, true),
+      ));
+    return rows
+      .filter(r => !!r.sessionString)
+      .map(r => this.decryptTelegramSessionRow(r));
+  }
+
   async getActiveTelegramAccounts(): Promise<TelegramSession[]> {
     const rows = await db.select().from(telegramSessions)
       .where(and(
