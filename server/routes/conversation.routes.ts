@@ -16,6 +16,7 @@ import { recordTrainingSample, getTrainingSamples, exportTrainingSamples, type T
 import { addToLearningQueue } from "../services/learning-score-service";
 import { sanitizeString, sanitizeForLog } from "../utils/sanitizer";
 import type { ParsedAttachment } from "../services/channel-adapter";
+import { sendEscalationBotMessage, CHANNEL_LABELS } from "../services/escalation-bot";
 
 // Multer instance for optional file uploads — memory storage, max 50 MB
 const messageUpload = multer({
@@ -1814,6 +1815,80 @@ router.patch("/api/admin/learning-queue/:conversationId/review", requireAuth, re
   } catch (error) {
     console.error("Error updating learning queue item:", error);
     res.status(500).json({ error: "Failed to update learning queue item" });
+  }
+});
+
+// ============ CONVERSATION SUMMARY (ESCALATION BOT) ============
+
+router.post("/api/conversations/:id/send-summary", requireAuth, requirePermission("MANAGE_CONVERSATIONS"), async (req: Request, res: Response) => {
+  try {
+    const summaryUser = await getUserForConversations(req.userId ?? "");
+    if (!summaryUser?.tenantId) {
+      return res.status(403).json({ error: "User not associated with a tenant" });
+    }
+
+    const conversationId = req.params.id;
+    const conversation = await storage.getConversationWithCustomer(conversationId, summaryUser.tenantId);
+    if (!conversation) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    const tenant = await storage.getTenant(summaryUser.tenantId);
+    if (!tenant) {
+      return res.status(404).json({ error: "Tenant not found" });
+    }
+
+    const botToken = process.env.TELEGRAM_ESCALATION_BOT_TOKEN;
+    if (!botToken) {
+      return res.status(400).json({ error: "Telegram escalation bot not configured" });
+    }
+
+    const chatId = tenant.escalationChatId?.trim();
+    if (!chatId) {
+      return res.status(400).json({ error: "Escalation chat ID not configured for this tenant" });
+    }
+
+    const messages = await storage.getMessagesByConversation(conversationId, summaryUser.tenantId);
+    const customer = conversation.customer;
+
+    const customerName = customer?.name || "Неизвестный клиент";
+    const customerPhone = customer?.phone || "—";
+    const customerChannel = customer?.channel || "—";
+    const createdAt = new Date(conversation.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" });
+
+    const recentMessages = messages.slice(-15);
+    const msgLines = recentMessages.map((m) => {
+      const time = new Date(m.createdAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+      const role = m.role === "assistant" ? "🤖 Оператор/AI" : "👤 Клиент";
+      const text = (m.content || "").slice(0, 200);
+      return `${role} [${time}]: ${text}`;
+    }).join("\n");
+
+    const summaryText = [
+      `📋 *Выжимка диалога*`,
+      ``,
+      `👤 Клиент: ${customerName}`,
+      `📱 Телефон: ${customerPhone}`,
+      `📡 Канал: ${CHANNEL_LABELS[customerChannel] ?? customerChannel}`,
+      `📅 Начало: ${createdAt}`,
+      ``,
+      `💬 *Последние сообщения:*`,
+      msgLines || "Сообщений нет",
+      ``,
+      `📌 Статус: ${conversation.status}`,
+    ].join("\n");
+
+    try {
+      await sendEscalationBotMessage(botToken, chatId, summaryText);
+    } catch (tgErr: any) {
+      console.error(`[SendSummary] Telegram API error: ${tgErr.message}`);
+      return res.status(502).json({ error: tgErr.message });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error sending summary:", error);
+    res.status(500).json({ error: "Failed to send summary" });
   }
 });
 

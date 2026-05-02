@@ -10,6 +10,8 @@ import { maxStatusKey } from "../routes/max-personal-webhook";
 import { telegramClientManager } from "../services/telegram-client-manager";
 import { storage } from "../storage";
 import type { Tenant } from "../../shared/schema";
+import { notifyFailedLead } from "../services/escalation-bot";
+import { scheduleNoReplyCheck } from "../services/no-reply-check-queue";
 
 const QUEUE_NAME = "marquiz_leads";
 const ROTATION_KEY_PREFIX = "marquiz:rotation:";
@@ -260,6 +262,13 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
         tenantId,
       );
       console.log(`[MarquizWorker] Done via Telegram phone — userId=${tgResult.userId}, channelId=${senderChannelId}`);
+      await scheduleNoReplyCheck({
+        conversationId: conversation.id,
+        tenantId,
+        channel: "telegram_personal",
+        clientName: data.clientName || null,
+        phone: phone || null,
+      });
     }
     return tgResult;
   };
@@ -300,6 +309,13 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
         tenantId,
       );
       console.log(`[MarquizWorker] Done via Telegram username — @${data.telegramUsername}`);
+      await scheduleNoReplyCheck({
+        conversationId: conversation.id,
+        tenantId,
+        channel: "telegram_personal",
+        clientName: data.clientName || null,
+        phone: phone || null,
+      });
     }
     return tgResult;
   };
@@ -385,6 +401,13 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     }
 
     console.log(`[MarquizWorker] Done via MAX — account=${account.accountId}, externalMsgId=${msgId}`);
+    await scheduleNoReplyCheck({
+      conversationId: conversation.id,
+      tenantId,
+      channel: "max_personal",
+      clientName: data.clientName || null,
+      phone: phone || null,
+    });
     return { success: true };
   };
 
@@ -405,7 +428,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
       console.warn(`[MarquizWorker] Telegram phone send failed (${r.error})`);
     }
     console.warn(`[MarquizWorker] Client chose Telegram but all methods failed — saving as failed lead`);
-    await saveFailedLead(data, tenantId, phone, commonMeta, "telegram_failed");
+    await saveFailedLead(data, tenantId, phone, commonMeta, "telegram_failed", tenant);
     return;
   }
 
@@ -414,7 +437,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     const r = await sendViaMAX();
     if (r.success) return;
     console.warn(`[MarquizWorker] Client chose MAX but send failed (${r.error}) — saving as failed lead`);
-    await saveFailedLead(data, tenantId, phone, commonMeta, r.error === "No valid MAX phone" ? "max_no_phone" : "max_send_failed");
+    await saveFailedLead(data, tenantId, phone, commonMeta, r.error === "No valid MAX phone" ? "max_no_phone" : "max_send_failed", tenant);
     return;
   }
 
@@ -422,7 +445,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   // No channel preference — try MAX first, then Telegram if MAX fails.
   if (!hasPhone && !data.telegramUsername) {
     console.warn(`[MarquizWorker] No contact info — saving as failed lead`);
-    await saveFailedLead(data, tenantId, phone, commonMeta, "no_contact_info");
+    await saveFailedLead(data, tenantId, phone, commonMeta, "no_contact_info", tenant);
     return;
   }
 
@@ -445,7 +468,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   }
 
   console.warn(`[MarquizWorker] All channels failed — saving as failed lead`);
-  await saveFailedLead(data, tenantId, phone, commonMeta, "all_channels_failed");
+  await saveFailedLead(data, tenantId, phone, commonMeta, "all_channels_failed", tenant);
 }
 
 // ---------------------------------------------------------------------------
@@ -463,6 +486,7 @@ async function saveFailedLead(
   phone: string,
   commonMeta: Record<string, unknown>,
   failureReason: string,
+  tenant?: Tenant,
 ): Promise<void> {
   try {
     const externalId = `failed:${normalizePhone(data.phone || data.maxPhone || Date.now().toString())}`;
@@ -509,6 +533,26 @@ async function saveFailedLead(
     );
 
     console.log(`[MarquizWorker] Saved failed lead — conversationId=${conversation.id}, reason=${failureReason}`);
+
+    // Notify via escalation bot if configured
+    try {
+      const botToken = process.env.TELEGRAM_ESCALATION_BOT_TOKEN;
+      const chatId = (tenant as any)?.escalationChatId?.trim();
+      if (botToken && chatId) {
+        await notifyFailedLead({
+          clientName: data.clientName || null,
+          phone: phone || null,
+          telegramUsername: data.telegramUsername || null,
+          preferredChannel: data.preferredChannel,
+          failureReason,
+          botToken,
+          chatId,
+        });
+        console.log(`[MarquizWorker] Escalation bot notified about failed lead`);
+      }
+    } catch (botErr: any) {
+      console.error(`[MarquizWorker] Failed to send escalation bot notification: ${botErr.message}`);
+    }
   } catch (err: any) {
     console.error(`[MarquizWorker] Failed to save failed lead: ${err.message}`);
   }

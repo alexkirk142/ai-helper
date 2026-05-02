@@ -90,6 +90,7 @@ export const patchTenantSchema = z.object({
   autoReplyOutsideHours: z.boolean().optional(),
   escalationEmail: z.union([z.string().email().max(254), z.literal(""), z.null()]).optional(),
   escalationTelegram: z.union([z.string().max(100), z.literal(""), z.null()]).optional(),
+  escalationChatId: z.union([z.string().max(100), z.literal(""), z.null()]).optional(),
   allowDiscounts: z.boolean().optional(),
   maxDiscountPercent: z.number().int().min(0).max(100).optional(),
   templates: z.record(z.string()).optional(),

@@ -2753,6 +2753,7 @@ const settingsFormSchema = z.object({
   autoReplyOutsideHours: z.boolean(),
   escalationEmail: z.string().email().optional().or(z.literal("")),
   escalationTelegram: z.string().optional(),
+  escalationChatId: z.string().optional(),
   allowDiscounts: z.boolean(),
   maxDiscountPercent: z.coerce.number().min(0).max(100),
 });
@@ -3983,6 +3984,7 @@ export default function Settings() {
       autoReplyOutsideHours: true,
       escalationEmail: "",
       escalationTelegram: "",
+      escalationChatId: "",
       allowDiscounts: false,
       maxDiscountPercent: 0,
     },
@@ -3999,6 +4001,7 @@ export default function Settings() {
           autoReplyOutsideHours: tenant.autoReplyOutsideHours ?? true,
           escalationEmail: tenant.escalationEmail || "",
           escalationTelegram: tenant.escalationTelegram || "",
+          escalationChatId: (tenant as any).escalationChatId || "",
           allowDiscounts: tenant.allowDiscounts ?? false,
           maxDiscountPercent: tenant.maxDiscountPercent || 0,
         }
@@ -4024,6 +4027,7 @@ export default function Settings() {
       ...data,
       escalationEmail: data.escalationEmail?.trim() || null,
       escalationTelegram: (data as any).escalationTelegram?.trim() || null,
+      escalationChatId: (data as any).escalationChatId?.trim() || null,
     };
     updateMutation.mutate(cleaned as SettingsFormValues);
   };
@@ -4386,6 +4390,49 @@ export default function Settings() {
                         type="submit"
                         disabled={updateMutation.isPending}
                         data-testid="button-save-automation"
+                      >
+                        <Save className="mr-2 h-4 w-4" />
+                        Сохранить
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Бот эскалаций — выжимка диалога</CardTitle>
+                    <CardDescription>
+                      ID чата в Telegram, куда бот будет отправлять выжимку диалога по нажатию кнопки оператором.
+                      Добавьте бота эскалаций в нужный чат и вставьте сюда его chat_id.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <FormField
+                      control={form.control}
+                      name="escalationChatId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Chat ID чата для выжимок</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="-1001234567890"
+                              {...field}
+                              data-testid="input-escalation-chat-id"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Например: -1001234567890 (группа/канал) или 123456789 (личный чат).
+                            Узнать ID можно через @userinfobot в Telegram.
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <div className="flex justify-end pt-2">
+                      <Button
+                        type="submit"
+                        disabled={updateMutation.isPending}
+                        data-testid="button-save-escalation-chat"
                       >
                         <Save className="mr-2 h-4 w-4" />
                         Сохранить

@@ -90,6 +90,8 @@ export const tenants = pgTable("tenants", {
   templateGearboxEnabled: boolean("template_gearbox_enabled").notNull().default(true),
   templateEngineEnabled: boolean("template_engine_enabled").notNull().default(true),
   templateTiresEnabled: boolean("template_tires_enabled").notNull().default(true),
+  // Telegram escalation bot: chat ID where conversation summaries are sent
+  escalationChatId: text("escalation_chat_id"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 

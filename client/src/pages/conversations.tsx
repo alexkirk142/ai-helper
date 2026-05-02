@@ -188,6 +188,19 @@ export default function Conversations() {
     },
   });
 
+  const sendSummaryMutation = useMutation({
+    mutationFn: async (conversationId: string) => {
+      return apiRequest("POST", `/api/conversations/${conversationId}/send-summary`, {});
+    },
+    onSuccess: () => {
+      toast({ title: "Выжимка отправлена в Telegram" });
+    },
+    onError: (error: any) => {
+      const msg = error?.message || "Не удалось отправить выжимку";
+      toast({ title: msg, variant: "destructive" });
+    },
+  });
+
   const sendManualMutation = useMutation({
     mutationFn: async ({ content, files, role = "owner" }: { content: string; files?: File[]; role?: string }) => {
       const sendOne = (text: string, file?: File) => {
@@ -857,6 +870,8 @@ export default function Conversations() {
               onSendManual={(content, files) => sendManualMutation.mutate({ content, files })}
               onMuteToggle={(convId, muted) => muteMutation.mutate({ conversationId: convId, muted })}
               onPhoneClick={handlePhoneClick}
+              onSendSummary={(convId) => sendSummaryMutation.mutate(convId)}
+              isSendingSummary={sendSummaryMutation.isPending}
               isLoading={detailLoading}
             />
             {/* Desktop customer panel button */}

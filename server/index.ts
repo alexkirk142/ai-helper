@@ -32,10 +32,12 @@ import { pool } from "./db";
 import { closeQueue } from "./services/message-queue";
 import { closeVehicleLookupQueue } from "./services/vehicle-lookup-queue";
 import { closePriceLookupQueue } from "./services/price-lookup-queue";
+import { closeNoReplyCheckQueue } from "./services/no-reply-check-queue";
 import { startVehicleLookupWorker } from "./workers/vehicle-lookup.worker";
 import { startPriceLookupWorker } from "./workers/price-lookup.worker";
 import { startWorker as startMessageSendWorker } from "./workers/message-send.worker";
 import { startMarquizLeadWorker } from "./workers/marquiz-lead.worker";
+import { startNoReplyCheckWorker } from "./workers/no-reply-check.worker";
 import type { Worker } from "bullmq";
 import * as fs from "fs";
 import { spawn, ChildProcess } from "child_process";
@@ -48,6 +50,7 @@ let vehicleLookupWorker: Worker | null = null;
 let priceLookupWorker: Worker | null = null;
 let messageSendWorker: Worker | null = null;
 let marquizLeadWorker: Worker | null = null;
+let noReplyCheckWorker: Worker | null = null;
 
 // Prevent gramjs internal timeouts and other unhandled rejections from crashing the process
 process.on("unhandledRejection", (reason: unknown) => {
@@ -218,7 +221,11 @@ app.use((req, res, next) => {
             ADD COLUMN IF NOT EXISTS template_engine_enabled  BOOLEAN NOT NULL DEFAULT TRUE,
             ADD COLUMN IF NOT EXISTS template_tires_enabled   BOOLEAN NOT NULL DEFAULT TRUE;
         `);
-        log("DB column check: auto_reply_enabled + tg_role + template flags OK", "startup");
+        await pool.query(`
+          ALTER TABLE tenants
+            ADD COLUMN IF NOT EXISTS escalation_chat_id TEXT;
+        `);
+        log("DB column check: auto_reply_enabled + tg_role + template flags + escalation_chat_id OK", "startup");
       } catch (err: any) {
         log(`DB column migration warning: ${err.message}`, "startup");
       }
@@ -255,6 +262,7 @@ app.use((req, res, next) => {
       priceLookupWorker = await startPriceLookupWorker();
       messageSendWorker = await startMessageSendWorker();
       marquizLeadWorker = startMarquizLeadWorker();
+      noReplyCheckWorker = startNoReplyCheckWorker();
       log("BullMQ workers started", "startup");
 
       // Auto-restore Telegram Personal sessions in background — must not block worker startup
@@ -437,6 +445,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     closeQueue(),
     closeVehicleLookupQueue(),
     closePriceLookupQueue(),
+    closeNoReplyCheckQueue(),
   ]);
   log("BullMQ queues closed", "shutdown");
 

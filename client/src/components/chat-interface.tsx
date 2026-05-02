@@ -29,6 +29,7 @@ import {
   Paperclip,
   BellOff,
   Bell,
+  ClipboardList,
 } from "lucide-react";
 import { CsatDialog } from "@/components/csat-dialog";
 import { cn } from "@/lib/utils";
@@ -46,6 +47,8 @@ interface ChatInterfaceProps {
   onSendManual: (content: string, files?: File[]) => void;
   onMuteToggle?: (conversationId: string, muted: boolean) => void;
   onPhoneClick?: (phoneNumber: string) => void;
+  onSendSummary?: (conversationId: string) => void;
+  isSendingSummary?: boolean;
   isLoading?: boolean;
 }
 
@@ -359,6 +362,8 @@ export function ChatInterface({
   onSendManual,
   onMuteToggle,
   onPhoneClick,
+  onSendSummary,
+  isSendingSummary,
   isLoading,
 }: ChatInterfaceProps) {
   const [manualMessage, setManualMessage] = useState("");
@@ -561,6 +566,24 @@ export function ChatInterface({
               Оценить
             </Button>
           )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => onSendSummary?.(conversation.id)}
+                disabled={isSendingSummary}
+                data-testid="button-send-summary"
+              >
+                <ClipboardList className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Отправить выжимку диалога в Telegram
+            </TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
