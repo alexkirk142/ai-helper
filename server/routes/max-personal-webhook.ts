@@ -116,6 +116,8 @@ router.post("/:tenantId/:accountId", async (req, res) => {
       console.log(`[MaxPersonalWebhook] outgoingAPIMessageReceived full senderData:`, JSON.stringify(payload.senderData));
       const numericChatId = payload.senderData?.chatId;
       const senderSelf = payload.senderData?.sender;
+      // chatName is the RECIPIENT's display name in MAX (the client's name)
+      const chatName = payload.senderData?.chatName?.trim() || null;
       const idMessage = payload.idMessage;
 
       if (numericChatId && idMessage) {
@@ -146,14 +148,27 @@ router.post("/:tenantId/:accountId", async (req, res) => {
               const isPhoneBased = /^\d+$/.test(oldLocal) && oldLocal.length > localPart.length;
 
               if (isPhoneBased) {
+                const existingMeta = (customer.metadata as Record<string, unknown>) ?? {};
+                const updates: Record<string, unknown> = {};
+
                 // Save the numeric MAX internal ID in metadata for inbound message matching.
                 // Do NOT replace externalId — the phone-based chatId is required for sendMessage.
-                const existingMeta = (customer.metadata as Record<string, unknown>) ?? {};
                 if (existingMeta.maxInternalId !== localPart) {
-                  await storage.updateCustomer(customer.id, tenantId, {
-                    metadata: { ...existingMeta, maxInternalId: localPart },
-                  });
+                  updates.metadata = { ...existingMeta, maxInternalId: localPart };
                   console.log(`[MaxPersonalWebhook] Saved MAX internal ID for customer ${customer.id}: maxInternalId=${localPart} (externalId kept as ${customer.externalId})`);
+                } else {
+                  updates.metadata = existingMeta;
+                }
+
+                // Update the customer's display name from chatName if they have none.
+                // MAX provides the client's real display name on every outgoing message echo.
+                if (chatName && !customer.name) {
+                  updates.name = chatName;
+                  console.log(`[MaxPersonalWebhook] Updated customer ${customer.id} name from MAX chatName: "${chatName}"`);
+                }
+
+                if (Object.keys(updates).length > 0) {
+                  await storage.updateCustomer(customer.id, tenantId, updates as any);
                 }
               }
             }

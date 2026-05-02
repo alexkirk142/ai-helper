@@ -246,6 +246,11 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
           tenantId,
         );
         console.log(`[MarquizWorker] TG customer created: ${customer.id}`);
+      } else if (!customer.name && tgResult.firstName) {
+        // Customer exists but has no name — fill in from Telegram profile
+        await storage.updateCustomer(customer.id, tenantId, { name: tgResult.firstName });
+        customer = { ...customer, name: tgResult.firstName };
+        console.log(`[MarquizWorker] TG customer ${customer.id} name updated from Telegram: "${tgResult.firstName}"`);
       }
       // Pin conversation to the SENDER's channel so the outbound handler always
       // routes operator replies through the sender, not the resolver.
@@ -298,6 +303,11 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
           tenantId,
         );
         console.log(`[MarquizWorker] TG customer created: ${customer.id}`);
+      } else if (!customer.name && tgResult.firstName) {
+        // Customer exists but has no name — fill in from Telegram profile
+        await storage.updateCustomer(customer.id, tenantId, { name: tgResult.firstName });
+        customer = { ...customer, name: tgResult.firstName };
+        console.log(`[MarquizWorker] TG customer ${customer.id} name updated from Telegram: "${tgResult.firstName}"`);
       }
       const conversation = await storage.createConversation(
         { tenantId, customerId: customer.id, status: "active", mode: "learning",

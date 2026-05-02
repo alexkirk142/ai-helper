@@ -139,6 +139,20 @@ export async function handleIncomingMessage(
       metadata: { remoteJid },
     }, tenant.id);
     console.log(`[InboundHandler] Created new customer: ${customer.id} for ${parsed.channel}:${parsed.externalUserId}${isLid ? " (LID contact)" : ""}`);
+  } else if (!customer.name) {
+    // Customer already exists but has no name (created by outgoing auto-response before client replied).
+    // Fill in the name from the inbound message metadata — the channel always carries the sender's
+    // display name (pushName from WhatsApp/MAX, firstName from Telegram).
+    const inboundName = (parsed.metadata?.pushName as string) ||
+                        (parsed.metadata?.firstName as string) ||
+                        (parsed.metadata?.senderName as string) ||
+                        (parsed.metadata?.contactName as string) ||
+                        null;
+    if (inboundName) {
+      await storage.updateCustomer(customer.id, tenant.id, { name: inboundName });
+      customer = { ...customer, name: inboundName };
+      console.log(`[InboundHandler] Updated customer ${customer.id} name from inbound message: "${inboundName}"`);
+    }
   }
 
   const allConversations = await storage.getConversationsByTenant(tenant.id);
