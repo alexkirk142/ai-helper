@@ -191,22 +191,33 @@ class TelegramClientManager {
       }
     }
 
-    // Part 2: detect orphaned accounts — active in DB but absent from connections
-    // map AND not already scheduled for reconnect. This handles the case where the
-    // process restarted without initialize() completing (e.g. migration error on the
-    // previous boot) or where all reconnect attempts silently gave up.
+    // Part 2: detect orphaned accounts — present in DB (enabled + has session) but absent
+    // from the connections map AND not already scheduled for reconnect. This handles:
+    //   a) process restarted without initialize() completing (e.g. migration error)
+    //   b) scheduleReconnect gave up after MAX_RECONNECT_ATTEMPTS and set status="error"
+    // We intentionally use getReconnectableTelegramAccounts (not getActiveTelegramAccounts)
+    // so that accounts whose status was set to "disconnected" or "error" by the reconnect
+    // loop are also picked up here — otherwise they'd be permanently stuck after exhausting
+    // all retries.
     try {
       const isEnabled = await featureFlagService.isEnabled("TELEGRAM_PERSONAL_CHANNEL_ENABLED");
       if (!isEnabled) return;
 
-      const accounts = await storage.getActiveTelegramAccounts();
+      const accounts = await storage.getReconnectableTelegramAccounts();
       for (const account of accounts) {
         if (!account.sessionString) continue;
         const connectionKey = `${account.tenantId}:${account.id}`;
         const alreadyConnected = this.connections.has(connectionKey);
         const hasPendingTimer = this.reconnectTimers.has(connectionKey);
         if (!alreadyConnected && !hasPendingTimer) {
-          console.log(`[TelegramClientManager] Heartbeat detected orphaned account ${connectionKey} — triggering reconnect`);
+          console.log(`[TelegramClientManager] Heartbeat detected orphaned account ${connectionKey} (status=${account.status}) — resetting and reconnecting`);
+          // Reset status so scheduleReconnect gets a fresh attempts counter and
+          // the UI shows the account is being reconnected (not stuck in "error").
+          if (account.status !== "active") {
+            storage.updateTelegramAccount(account.id, { status: "active", lastError: null }).catch(() => {});
+          }
+          // Reset the persisted retry counter so the account gets a full set of fresh attempts.
+          this.reconnectCounts.delete(connectionKey);
           // Fire-and-forget; errors are handled inside connectAccount via scheduleReconnect
           this.connectAccount(account.tenantId, account.id, account.channelId, account.sessionString)
             .catch((err: any) => console.error(`[TelegramClientManager] Heartbeat reconnect failed for ${connectionKey}:`, err.message));
@@ -756,13 +767,18 @@ class TelegramClientManager {
     const attempts = (this.reconnectCounts.get(connectionKey) ?? 0) + 1;
     this.reconnectCounts.set(connectionKey, attempts);
 
-    const isAuthKeyDuplicated = errorMessage?.includes("AUTH_KEY_DUPLICATED") ?? false;
+    // connect() timed out most often means AUTH_KEY_DUPLICATED caused gramJS to hang internally
+    // (it doesn't always surface the error immediately — sometimes it just stalls until we cancel it).
+    // Treat it identically to AUTH_KEY_DUPLICATED: never give up, use slow retries after fast ones.
+    const isAuthKeyDuplicated =
+      (errorMessage?.includes("AUTH_KEY_DUPLICATED") || errorMessage?.includes("timed out")) ?? false;
 
-    // AUTH_KEY_DUPLICATED is ALWAYS a transient error caused by deploy overlap (old container still running).
+    // AUTH_KEY_DUPLICATED (and connect timeouts, which are usually caused by it) is ALWAYS a transient
+    // error caused by deploy overlap (old container still running).
     // After MAX_DUPLICATE_FAST_ATTEMPTS fast retries, switch to slow 5-min retries — never give up entirely.
     if (isAuthKeyDuplicated && attempts > TelegramClientManager.MAX_DUPLICATE_FAST_ATTEMPTS) {
       console.warn(
-        `[TelegramClientManager] AUTH_KEY_DUPLICATED still present after ${attempts} attempts for ${connectionKey}. ` +
+        `[TelegramClientManager] Transient connection error (${errorMessage}) still present after ${attempts} attempts for ${connectionKey}. ` +
         `Old container likely still running. Switching to slow retry every ${TelegramClientManager.SLOW_RETRY_DELAY_MS / 60000}min.`
       );
       // Reset counter so the cycle can repeat if needed, but mark disconnected in DB for UI visibility
@@ -770,7 +786,7 @@ class TelegramClientManager {
       if (!connection.accountId.startsWith("legacy_")) {
         storage.updateTelegramAccount(connection.accountId, {
           status: "disconnected",
-          lastError: "AUTH_KEY_DUPLICATED — old deployment still running, will retry automatically",
+          lastError: `${errorMessage} — old deployment likely still running, will retry automatically`,
         }).catch(() => {});
       }
 
