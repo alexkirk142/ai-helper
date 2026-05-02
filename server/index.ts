@@ -150,10 +150,14 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      const isConversationsRoute =
+      const isSilentRoute =
         path === "/api/conversations" ||
-        /^\/api\/conversations\/[^/]+$/.test(path);
-      if (capturedJsonResponse && !isConversationsRoute) {
+        path === "/api/failed-leads" ||
+        /^\/api\/conversations\/[^/]+$/.test(path) ||
+        /^\/api\/conversations\/[^/]+\/messages/.test(path) ||
+        /^\/api\/customers\/[^/]+$/.test(path) ||
+        /^\/api\/escalations/.test(path);
+      if (capturedJsonResponse && !isSilentRoute) {
         logLine += ` :: ${JSON.stringify(sanitizeForLog(capturedJsonResponse))}`;
       }
 
