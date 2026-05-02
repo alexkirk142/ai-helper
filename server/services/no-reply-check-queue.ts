@@ -50,12 +50,17 @@ export async function scheduleNoReplyCheck(data: NoReplyCheckJobData): Promise<v
   }
 
   try {
-    const jobId = `no_reply:${data.conversationId}`;
+    // Use a unique jobId per conversation to deduplicate concurrent schedules for the same
+    // conversation (e.g. if MAX and Telegram both succeed for the same lead).
+    // We append a epoch-minute so that if a previous check was silently skipped (e.g. bot
+    // token was not yet configured), a new check can still be scheduled after the next deploy.
+    const minute = Math.floor(Date.now() / 60000);
+    const jobId = `no_reply:${data.conversationId}:${minute}`;
     await queue.add("no_reply_check", data, {
       delay: NO_REPLY_DELAY_MS,
-      jobId, // deduplicate by conversation
+      jobId,
     });
-    console.log(`[NoReplyCheckQueue] Scheduled no-reply check for conversation ${data.conversationId} in 15 min`);
+    console.log(`[NoReplyCheckQueue] Scheduled no-reply check for conversation ${data.conversationId} in 15 min (jobId=${jobId})`);
   } catch (error: any) {
     console.error("[NoReplyCheckQueue] Failed to schedule:", error.message);
   }

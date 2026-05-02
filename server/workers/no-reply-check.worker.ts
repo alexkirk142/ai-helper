@@ -19,8 +19,23 @@ async function processNoReplyCheck(job: Job<NoReplyCheckJobData>): Promise<void>
   const botToken = await getSecret({ scope: "global", keyName: "TELEGRAM_ESCALATION_BOT_TOKEN" });
   const chatId = (tenant as any).escalationChatId?.trim();
 
-  if (!botToken || !chatId) {
-    console.log(`[NoReplyCheckWorker] Escalation bot not configured for tenant ${tenantId} — skipping`);
+  if (!botToken) {
+    console.warn(`[NoReplyCheckWorker] TELEGRAM_ESCALATION_BOT_TOKEN not configured — no-reply notification skipped for conversation ${conversationId}`);
+    return;
+  }
+  if (!chatId) {
+    console.warn(`[NoReplyCheckWorker] escalationChatId not set for tenant ${tenantId} — no-reply notification skipped`);
+    return;
+  }
+
+  // Check conversation is still active — if it was closed or failed, no notification needed
+  const conversation = await storage.getConversation(conversationId, tenantId);
+  if (!conversation) {
+    console.log(`[NoReplyCheckWorker] Conversation ${conversationId} not found — skipping`);
+    return;
+  }
+  if (conversation.status === "failed_delivery" || conversation.status === "closed") {
+    console.log(`[NoReplyCheckWorker] Conversation ${conversationId} has status=${conversation.status} — no notification needed`);
     return;
   }
 
@@ -28,16 +43,16 @@ async function processNoReplyCheck(job: Job<NoReplyCheckJobData>): Promise<void>
 
   // Check if any "user" (customer) message exists after the initial assistant message
   const firstAssistantIdx = messages.findIndex((m) => m.role === "assistant");
-  const hasCustomerReply = messages.some(
-    (m, idx) => idx > firstAssistantIdx && m.role === "user",
-  );
+  const hasCustomerReply = firstAssistantIdx >= 0
+    ? messages.some((m, idx) => idx > firstAssistantIdx && m.role === "user")
+    : false;
 
   if (hasCustomerReply) {
     console.log(`[NoReplyCheckWorker] Customer replied in conversation ${conversationId} — no notification needed`);
     return;
   }
 
-  console.log(`[NoReplyCheckWorker] No reply in conversation ${conversationId} — sending escalation notification`);
+  console.log(`[NoReplyCheckWorker] No reply in conversation ${conversationId} (channel=${channel}) — sending escalation notification`);
 
   try {
     await notifyNoReply({
