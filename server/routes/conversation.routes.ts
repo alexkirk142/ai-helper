@@ -17,6 +17,7 @@ import { addToLearningQueue } from "../services/learning-score-service";
 import { sanitizeString, sanitizeForLog } from "../utils/sanitizer";
 import type { ParsedAttachment } from "../services/channel-adapter";
 import { sendEscalationBotMessage, CHANNEL_LABELS } from "../services/escalation-bot";
+import { getSecret } from "../services/secret-resolver";
 
 // Multer instance for optional file uploads — memory storage, max 50 MB
 const messageUpload = multer({
@@ -1838,7 +1839,7 @@ router.post("/api/conversations/:id/send-summary", requireAuth, requirePermissio
       return res.status(404).json({ error: "Tenant not found" });
     }
 
-    const botToken = process.env.TELEGRAM_ESCALATION_BOT_TOKEN;
+    const botToken = await getSecret({ scope: "global", keyName: "TELEGRAM_ESCALATION_BOT_TOKEN" });
     if (!botToken) {
       return res.status(400).json({ error: "Telegram escalation bot not configured" });
     }

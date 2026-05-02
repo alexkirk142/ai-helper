@@ -12,6 +12,7 @@ import { storage } from "../storage";
 import type { Tenant } from "../../shared/schema";
 import { notifyFailedLead } from "../services/escalation-bot";
 import { scheduleNoReplyCheck } from "../services/no-reply-check-queue";
+import { getSecret } from "../services/secret-resolver";
 
 const QUEUE_NAME = "marquiz_leads";
 const ROTATION_KEY_PREFIX = "marquiz:rotation:";
@@ -536,7 +537,7 @@ async function saveFailedLead(
 
     // Notify via escalation bot if configured
     try {
-      const botToken = process.env.TELEGRAM_ESCALATION_BOT_TOKEN;
+      const botToken = await getSecret({ scope: "global", keyName: "TELEGRAM_ESCALATION_BOT_TOKEN" });
       const chatId = (tenant as any)?.escalationChatId?.trim();
       if (botToken && chatId) {
         await notifyFailedLead({

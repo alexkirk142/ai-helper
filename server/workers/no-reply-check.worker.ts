@@ -3,6 +3,7 @@ import { getRedisConnectionConfig } from "../services/message-queue";
 import type { NoReplyCheckJobData } from "../services/no-reply-check-queue";
 import { storage } from "../storage";
 import { notifyNoReply } from "../services/escalation-bot";
+import { getSecret } from "../services/secret-resolver";
 
 async function processNoReplyCheck(job: Job<NoReplyCheckJobData>): Promise<void> {
   const { conversationId, tenantId, channel, clientName, phone } = job.data;
@@ -15,7 +16,7 @@ async function processNoReplyCheck(job: Job<NoReplyCheckJobData>): Promise<void>
     return;
   }
 
-  const botToken = process.env.TELEGRAM_ESCALATION_BOT_TOKEN;
+  const botToken = await getSecret({ scope: "global", keyName: "TELEGRAM_ESCALATION_BOT_TOKEN" });
   const chatId = (tenant as any).escalationChatId?.trim();
 
   if (!botToken || !chatId) {
