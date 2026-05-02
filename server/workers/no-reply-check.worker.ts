@@ -60,6 +60,7 @@ async function processNoReplyCheck(job: Job<NoReplyCheckJobData>): Promise<void>
       clientName: clientName ?? null,
       phone: phone ?? null,
       channel,
+      leadInfo: job.data.leadInfo ?? null,
       botToken,
       chatId,
     });

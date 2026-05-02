@@ -274,6 +274,21 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
         channel: "telegram_personal",
         clientName: data.clientName || null,
         phone: phone || null,
+        leadInfo: {
+          quizName: data.quizName || null,
+          carInfo: data.carInfo || null,
+          vin: data.vin || null,
+          city: data.city || null,
+          gearboxType: data.gearboxType || null,
+          engineType: data.engineType || null,
+          engineVolume: data.engineVolume || null,
+          engineModel: data.engineModel || null,
+          tireSeason: data.tireSeason || null,
+          tireMethod: data.tireMethod || null,
+          tireWidth: data.tireWidth || null,
+          tireHeight: data.tireHeight || null,
+          tireDiameter: data.tireDiameter || null,
+        },
       });
     }
     return tgResult;
@@ -326,6 +341,21 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
         channel: "telegram_personal",
         clientName: data.clientName || null,
         phone: phone || null,
+        leadInfo: {
+          quizName: data.quizName || null,
+          carInfo: data.carInfo || null,
+          vin: data.vin || null,
+          city: data.city || null,
+          gearboxType: data.gearboxType || null,
+          engineType: data.engineType || null,
+          engineVolume: data.engineVolume || null,
+          engineModel: data.engineModel || null,
+          tireSeason: data.tireSeason || null,
+          tireMethod: data.tireMethod || null,
+          tireWidth: data.tireWidth || null,
+          tireHeight: data.tireHeight || null,
+          tireDiameter: data.tireDiameter || null,
+        },
       });
     }
     return tgResult;
@@ -418,6 +448,21 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
       channel: "max_personal",
       clientName: data.clientName || null,
       phone: phone || null,
+      leadInfo: {
+        quizName: data.quizName || null,
+        carInfo: data.carInfo || null,
+        vin: data.vin || null,
+        city: data.city || null,
+        gearboxType: data.gearboxType || null,
+        engineType: data.engineType || null,
+        engineVolume: data.engineVolume || null,
+        engineModel: data.engineModel || null,
+        tireSeason: data.tireSeason || null,
+        tireMethod: data.tireMethod || null,
+        tireWidth: data.tireWidth || null,
+        tireHeight: data.tireHeight || null,
+        tireDiameter: data.tireDiameter || null,
+      },
     });
     return { success: true };
   };
@@ -556,6 +601,21 @@ async function saveFailedLead(
           telegramUsername: data.telegramUsername || null,
           preferredChannel: data.preferredChannel,
           failureReason,
+          leadInfo: {
+            quizName: data.quizName || null,
+            carInfo: data.carInfo || null,
+            vin: data.vin || null,
+            city: data.city || null,
+            gearboxType: data.gearboxType || null,
+            engineType: data.engineType || null,
+            engineVolume: data.engineVolume || null,
+            engineModel: data.engineModel || null,
+            tireSeason: data.tireSeason || null,
+            tireMethod: data.tireMethod || null,
+            tireWidth: data.tireWidth || null,
+            tireHeight: data.tireHeight || null,
+            tireDiameter: data.tireDiameter || null,
+          },
           botToken,
           chatId,
         });

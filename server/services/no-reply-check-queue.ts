@@ -1,5 +1,6 @@
 import { Queue } from "bullmq";
 import { getRedisConnectionConfig } from "./message-queue";
+import type { LeadInfo } from "./escalation-bot";
 
 export interface NoReplyCheckJobData {
   conversationId: string;
@@ -8,6 +9,8 @@ export interface NoReplyCheckJobData {
   channel: string;
   clientName?: string | null;
   phone?: string | null;
+  /** Marquiz lead application data to enrich escalation notifications */
+  leadInfo?: LeadInfo | null;
 }
 
 const QUEUE_NAME = "no_reply_check";
