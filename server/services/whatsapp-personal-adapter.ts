@@ -821,6 +821,19 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
             }
             
             authSessions.delete(tenantId);
+          } else if (!session.reconnecting) {
+            // Pairing code accepted — Baileys dropped the connection to re-auth.
+            // Hand off to startAuth which handles reconnect with back-off correctly.
+            session.status = "connecting";
+            session.reconnecting = true;
+            const delay = 3000 + Math.min((session.reconnectAttempts || 0) * 2000, 10000);
+            console.log(`[WhatsAppPersonal] Phone auth: reconnecting after pairing in ${delay}ms for tenant ${tenantId}`);
+            setTimeout(() => {
+              WhatsAppPersonalAdapter.startAuth(tenantId, true).catch((err) => {
+                console.error(`[WhatsAppPersonal] Phone auth auto-reconnect failed:`, err);
+                session.reconnecting = false;
+              });
+            }, delay);
           }
         } else if (connection === "open") {
           session.status = "connected";

@@ -409,7 +409,10 @@ router.get("/api/channels/personal-status", requireAuth, requireTenant, async (r
       ),
     );
 
-    res.json({ telegram_personal: tgConnected, max_personal: mpRows.length > 0 });
+    const { WhatsAppPersonalAdapter } = await import("../services/whatsapp-personal-adapter");
+    const waConnected = WhatsAppPersonalAdapter.isConnected(tenantId);
+
+    res.json({ telegram_personal: tgConnected, max_personal: mpRows.length > 0, whatsapp_personal: waConnected });
   } catch (error: any) {
     console.error("Error fetching personal channel status:", error);
     res.status(500).json({ error: "Failed to fetch channel status" });

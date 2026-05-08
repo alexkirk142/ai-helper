@@ -45,7 +45,7 @@ export default function Conversations() {
 
   // "Новый диалог" modal state
   const [newDialogOpen, setNewDialogOpen] = useState(false);
-  const [newDialogChannel, setNewDialogChannel] = useState<"telegram_personal" | "max_personal" | "">("");
+  const [newDialogChannel, setNewDialogChannel] = useState<"telegram_personal" | "max_personal" | "whatsapp_personal" | "">("");
   const [newDialogPhone, setNewDialogPhone] = useState("");
   const [newDialogMessage, setNewDialogMessage] = useState("");
   const [newDialogPhoneError, setNewDialogPhoneError] = useState("");
@@ -128,7 +128,7 @@ export default function Conversations() {
     ).length;
   }, [conversations]);
 
-  const { data: personalChannelStatus } = useQuery<{ telegram_personal: boolean; max_personal: boolean }>({
+  const { data: personalChannelStatus } = useQuery<{ telegram_personal: boolean; max_personal: boolean; whatsapp_personal: boolean }>({
     queryKey: ["/api/channels/personal-status"],
     staleTime: 60_000,
   });
@@ -298,6 +298,19 @@ export default function Conversations() {
     },
   });
 
+  const deleteMessageMutation = useMutation({
+    mutationFn: async ({ conversationId, messageId }: { conversationId: string; messageId: string }) => {
+      const res = await apiRequest("DELETE", `/api/conversations/${conversationId}/messages/${messageId}`);
+      if (!res.ok) throw new Error("Failed to delete message");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations", selectedId] });
+    },
+    onError: () => {
+      toast({ title: "Не удалось удалить сообщение", variant: "destructive" });
+    },
+  });
+
   const startPhoneConversationMutation = useMutation({
     mutationFn: async (phoneNumber: string) => {
       const response = await apiRequest("POST", `/api/telegram-personal/start-conversation`, { phoneNumber });
@@ -379,6 +392,31 @@ export default function Conversations() {
     },
   });
 
+  const startWhatsAppPersonalConversationMutation = useMutation({
+    mutationFn: async (data: { phoneNumber: string; initialMessage?: string }) => {
+      const response = await apiRequest("POST", "/api/whatsapp-personal/start-conversation", data);
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || "Не удалось начать диалог");
+      return json as { conversationId: string };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+      setNewDialogOpen(false);
+      setNewDialogPhone("");
+      setNewDialogMessage("");
+      setNewDialogChannel("");
+      setNewDialogPhoneError("");
+      if (data.conversationId) {
+        setSelectedId(data.conversationId);
+        setMobileShowChat(true);
+        toast({ title: "Диалог открыт" });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Не удалось начать диалог", description: error.message, variant: "destructive" });
+    },
+  });
+
   const validatePhone = (value: string): boolean => {
     const digits = value.replace(/\D/g, "");
     if (digits.length < 10 || digits.length > 15) {
@@ -402,17 +440,24 @@ export default function Conversations() {
         phoneNumber: newDialogPhone.trim(),
         initialMessage: newDialogMessage.trim() || undefined,
       });
+    } else if (newDialogChannel === "whatsapp_personal") {
+      startWhatsAppPersonalConversationMutation.mutate({
+        phoneNumber: newDialogPhone.trim(),
+        initialMessage: newDialogMessage.trim() || undefined,
+      });
     }
   };
 
   const newDialogPending =
     startMaxPersonalConversationMutation.isPending ||
-    startTelegramPersonalConversationMutation.isPending;
+    startTelegramPersonalConversationMutation.isPending ||
+    startWhatsAppPersonalConversationMutation.isPending;
 
   const connectedPersonalChannels = [
     personalChannelStatus?.telegram_personal && "telegram_personal",
     personalChannelStatus?.max_personal && "max_personal",
-  ].filter(Boolean) as Array<"telegram_personal" | "max_personal">;
+    personalChannelStatus?.whatsapp_personal && "whatsapp_personal",
+  ].filter(Boolean) as Array<"telegram_personal" | "max_personal" | "whatsapp_personal">;
 
   const handleNewDialogOpen = () => {
     setNewDialogPhone("");
@@ -781,7 +826,7 @@ export default function Conversations() {
           <div className="flex flex-col gap-4 py-2">
             {connectedPersonalChannels.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                Нет подключённых каналов. Подключите Telegram Personal или MAX Personal в настройках.
+                Нет подключённых каналов. Подключите Telegram Personal, MAX Personal или WhatsApp Personal в настройках.
               </p>
             ) : (
               <>
@@ -791,7 +836,7 @@ export default function Conversations() {
                     <Select
                       value={newDialogChannel}
                       onValueChange={(v) => {
-                        setNewDialogChannel(v as "telegram_personal" | "max_personal");
+                        setNewDialogChannel(v as "telegram_personal" | "max_personal" | "whatsapp_personal");
                         setNewDialogMaxAccountId("");
                       }}
                     >
@@ -804,6 +849,9 @@ export default function Conversations() {
                         )}
                         {connectedPersonalChannels.includes("max_personal") && (
                           <SelectItem value="max_personal">MAX Personal</SelectItem>
+                        )}
+                        {connectedPersonalChannels.includes("whatsapp_personal") && (
+                          <SelectItem value="whatsapp_personal">WhatsApp Personal</SelectItem>
                         )}
                       </SelectContent>
                     </Select>
@@ -996,6 +1044,7 @@ export default function Conversations() {
               onMuteToggle={(convId, muted) => muteMutation.mutate({ conversationId: convId, muted })}
               onPhoneClick={handlePhoneClick}
               onSendSummary={(convId) => sendSummaryMutation.mutate(convId)}
+              onDeleteMessage={(msgId) => selectedId && deleteMessageMutation.mutate({ conversationId: selectedId, messageId: msgId })}
               isSendingSummary={sendSummaryMutation.isPending}
               isLoading={detailLoading}
             />
