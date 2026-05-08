@@ -1635,10 +1635,12 @@ async function runDeploy(): Promise<void> {
     }
   }
 
-  function runCmd(cmd: string, args: string[], label: string): Promise<void> {
+  function runCmd(cmd: string, args: string[], label: string, extraEnv?: Record<string, string>): Promise<void> {
     return new Promise((resolve, reject) => {
       addLog(`\n▶ ${label}`);
-      const proc = spawn(cmd, args, { cwd, shell: true, env: { ...process.env, CI: "true" } });
+      // Strip NODE_ENV=production so npm ci installs devDependencies (needed for tsx build)
+      const { NODE_ENV: _drop, ...baseEnv } = process.env as Record<string, string>;
+      const proc = spawn(cmd, args, { cwd, shell: true, env: { ...baseEnv, CI: "true", ...extraEnv } });
       proc.stdout.on("data", (d) => addLog(d.toString()));
       proc.stderr.on("data", (d) => addLog(d.toString()));
       proc.on("close", (code) => {
