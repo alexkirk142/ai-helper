@@ -389,12 +389,8 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     const result = await maxPersonalAdapter.sendMessageForTenant(tenantId, chatId, text, undefined, account.accountId);
 
     if (!result.success) {
-      await storage.updateConversation(conversation.id, tenantId, { status: "failed_delivery" });
-      await storage.createMessage(
-        { conversationId: conversation.id, role: "assistant", content: text,
-          metadata: { source: "marquiz_autoresponse", accountId: account.accountId, failureReason: `MAX send failed: ${result.error}` } },
-        tenantId,
-      );
+      // Hard-delete — no message was ever sent, nothing should appear in the list.
+      await storage.deleteConversation(conversation.id, tenantId).catch(() => {});
       return { success: false, error: result.error };
     }
 
@@ -434,12 +430,11 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     }
 
     if (noAccountDetected) {
-      // Roll back so the conversation doesn't sit in the list while we retry via Telegram
-      await storage.updateConversation(conversation.id, tenantId, { status: "failed_delivery" });
-      await storage.updateMessage(savedMessage.id, tenantId, {
-        metadata: { source: "marquiz_autoresponse", accountId: account.accountId, failureReason: "noAccount" },
-      }).catch(() => {});
-      console.warn(`[MarquizWorker] noAccount signal received — falling back to Telegram`);
+      // Hard-delete so the conversation never appears in the main list.
+      // saveFailedLead (called by the router) will create a proper marquiz_failed record.
+      await storage.deleteMessage(savedMessage.id, tenantId).catch(() => {});
+      await storage.deleteConversation(conversation.id, tenantId).catch(() => {});
+      console.warn(`[MarquizWorker] noAccount signal received — conversation deleted, falling back to saveFailedLead`);
       return { success: false, error: "noAccount" };
     }
 
