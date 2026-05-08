@@ -1053,8 +1053,15 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
   }> {
     const sessionDir = path.join(AUTH_DIR, tenantId);
 
-    if (!fs.existsSync(sessionDir)) {
-      return { success: false, connected: false, error: "No saved session" };
+    // Check if we have credentials — either on FS or in DB
+    const hasLocalSession = fs.existsSync(sessionDir) && fs.readdirSync(sessionDir).length > 0;
+    if (!hasLocalSession) {
+      // Try to restore from DB first so startAuth can use the credentials
+      const restoredFromDb = await restoreSessionFromDb(tenantId, sessionDir);
+      if (!restoredFromDb) {
+        return { success: false, connected: false, error: "No saved session" };
+      }
+      console.log(`[WhatsAppPersonal] Restored session files from DB for tenant ${tenantId}`);
     }
 
     const existingSession = authSessions.get(tenantId);

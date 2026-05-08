@@ -313,48 +313,69 @@ async function waitForPodzamenu(timeoutMs: number): Promise<void> {
   log("Podzamenu did not respond within timeout, proceeding anyway", "startup");
 }
 
-// Restore saved WhatsApp Personal sessions on server start
-// Maps file system folder "default" to the actual database tenant UUID
+// Restore saved WhatsApp Personal sessions on server start.
+// Collects tenant IDs from BOTH the file system and the DB so sessions
+// survive container restarts where the FS is ephemeral.
 async function restoreWhatsAppSessions(realTenantId: string) {
   const sessionsDir = "./whatsapp_sessions";
-  
-  if (!fs.existsSync(sessionsDir)) {
-    return;
-  }
-  
+
+  const tenantIds = new Set<string>();
+
+  // ── 1. Collect from file system (if directory exists) ───────────────────
   try {
     // Migrate "default" folder to real tenant UUID if needed
     const defaultPath = `${sessionsDir}/default`;
     const realPath = `${sessionsDir}/${realTenantId}`;
-    
     if (fs.existsSync(defaultPath) && !fs.existsSync(realPath)) {
       log(`Migrating WhatsApp session from 'default' to '${realTenantId}'`, "whatsapp");
       fs.renameSync(defaultPath, realPath);
     }
-    
-    const tenantDirs = fs.readdirSync(sessionsDir);
-    
-    for (const tenantId of tenantDirs) {
-      const tenantPath = `${sessionsDir}/${tenantId}`;
-      if (fs.statSync(tenantPath).isDirectory()) {
-        log(`Restoring WhatsApp session for tenant: ${tenantId}`, "whatsapp");
-        
-        try {
-          const result = await WhatsAppPersonalAdapter.restoreSession(tenantId);
-          if (result.connected) {
-            log(`WhatsApp session restored for ${tenantId}: ${result.user?.phone || 'connected'}`, "whatsapp");
-          } else if (result.error?.includes("Session expired")) {
-            log(`WhatsApp session expired for ${tenantId}, needs re-auth`, "whatsapp");
-          } else {
-            log(`WhatsApp session restore failed for ${tenantId}: ${result.error}`, "whatsapp");
-          }
-        } catch (err: any) {
-          log(`Failed to restore WhatsApp session for ${tenantId}: ${err.message}`, "whatsapp");
+
+    if (fs.existsSync(sessionsDir)) {
+      for (const entry of fs.readdirSync(sessionsDir)) {
+        if (fs.statSync(`${sessionsDir}/${entry}`).isDirectory()) {
+          tenantIds.add(entry);
         }
       }
     }
   } catch (err: any) {
-    log(`Error scanning WhatsApp sessions: ${err.message}`, "whatsapp");
+    log(`Error scanning WhatsApp session dirs: ${err.message}`, "whatsapp");
+  }
+
+  // ── 2. Collect from DB (handles ephemeral FS after container restart) ───
+  try {
+    const { db: dbInstance } = await import("./db");
+    const { whatsappAuthSessions } = await import("@shared/schema");
+    const rows = await dbInstance.select({ tenantId: whatsappAuthSessions.tenantId }).from(whatsappAuthSessions);
+    for (const row of rows) {
+      tenantIds.add(row.tenantId);
+    }
+    if (rows.length > 0) {
+      log(`Found ${rows.length} WhatsApp session(s) in DB`, "whatsapp");
+    }
+  } catch (err: any) {
+    log(`Error reading WhatsApp sessions from DB: ${err.message}`, "whatsapp");
+  }
+
+  // ── 3. Restore each tenant (startAuth will restore FS from DB if needed) ─
+  for (const tenantId of tenantIds) {
+    log(`Restoring WhatsApp session for tenant: ${tenantId}`, "whatsapp");
+    try {
+      const result = await WhatsAppPersonalAdapter.restoreSession(tenantId);
+      if (result.connected) {
+        log(`WhatsApp session restored for ${tenantId}: ${result.user?.phone || "connected"}`, "whatsapp");
+      } else if (result.error?.includes("Session expired")) {
+        log(`WhatsApp session expired for ${tenantId}, needs re-auth`, "whatsapp");
+      } else {
+        log(`WhatsApp session restoring in background for ${tenantId}`, "whatsapp");
+      }
+    } catch (err: any) {
+      log(`Failed to restore WhatsApp session for ${tenantId}: ${err.message}`, "whatsapp");
+    }
+  }
+
+  if (tenantIds.size === 0) {
+    log("No saved WhatsApp sessions found", "whatsapp");
   }
 }
 
