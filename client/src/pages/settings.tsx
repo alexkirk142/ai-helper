@@ -78,7 +78,7 @@ import {
   Check,
   ExternalLink,
 } from "lucide-react";
-import { useBillingStatus, isSubscriptionRequired } from "@/hooks/use-billing";
+import { useBillingStatus, useAiBillingStatus, isSubscriptionRequired } from "@/hooks/use-billing";
 import { useAutoPartsEnabled } from "@/hooks/useAutoPartsEnabled";
 import { SubscriptionPaywall, ChannelPaywallOverlay, SubscriptionBadge } from "@/components/subscription-paywall";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -393,6 +393,7 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
 
         <div className="flex justify-end pt-4">
           <Button
+            type="button"
             onClick={handleSave}
             disabled={updateMutation.isPending}
             data-testid="button-save-decision-settings"
@@ -625,6 +626,7 @@ function HumanDelaySettings() {
 
         <div className="flex justify-end pt-4">
           <Button
+            type="button"
             onClick={handleSave}
             disabled={updateMutation.isPending}
             data-testid="button-save-human-delay-settings"
@@ -838,6 +840,7 @@ function TrainingPoliciesSettings({ autoPartsEnabled = false }: TrainingPolicies
 
         <div className="flex justify-end pt-4">
           <Button
+            type="button"
             onClick={handleSave}
             disabled={updateMutation.isPending}
             data-testid="button-save-training-policies"
@@ -4202,9 +4205,31 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+function AiSubscriptionRequired() {
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed p-12 text-center">
+      <Bot className="h-12 w-12 text-muted-foreground opacity-40" />
+      <div className="space-y-1">
+        <p className="text-base font-medium">Требуется подписка AI Ассистент</p>
+        <p className="text-sm text-muted-foreground">
+          Эти настройки доступны только при активной подписке на AI Ассистент.
+        </p>
+      </div>
+      <a
+        href="/extensions"
+        className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+      >
+        Перейти к расширениям
+      </a>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const autoPartsEnabled = useAutoPartsEnabled();
+  const { data: aiBilling } = useAiBillingStatus();
+  const hasAiAccess = aiBilling?.canAccess ?? false;
 
   const { data: tenant, isLoading } = useQuery<Tenant>({
     queryKey: ["/api/tenant"],
@@ -4503,7 +4528,7 @@ export default function Settings() {
 
             {/* Tab 2: AI Агент */}
             <TabsContent value="ai-agent">
-              <div className="space-y-6">
+              {!hasAiAccess ? <AiSubscriptionRequired /> : <div className="space-y-6">
                 <CompanyAgentCard autoPartsEnabled={autoPartsEnabled} />
 
                 <Card>
@@ -4604,12 +4629,12 @@ export default function Settings() {
                 </Card>
 
                 <AIAgentSettingsCard />
-              </div>
+              </div>}
             </TabsContent>
 
             {/* Tab 3: Автоматизация */}
             <TabsContent value="automation">
-              <div className="space-y-6">
+              {!hasAiAccess ? <AiSubscriptionRequired /> : <div className="space-y-6">
                 <Card>
                   <CardHeader>
                     <CardTitle>Скидки</CardTitle>
@@ -4722,17 +4747,17 @@ export default function Settings() {
 
                 <DecisionEngineSettings autoPartsEnabled={autoPartsEnabled} />
                 <HumanDelaySettings />
-              </div>
+              </div>}
             </TabsContent>
 
             {/* Tab 4: Обучение AI */}
             <TabsContent value="ai-training">
-              <div className="space-y-6">
+              {!hasAiAccess ? <AiSubscriptionRequired /> : <div className="space-y-6">
                 <p className="text-sm text-muted-foreground">
                   Эти настройки влияют на качество AI со временем — как агент обучается на реальных разговорах
                 </p>
                 <TrainingPoliciesSettings autoPartsEnabled={autoPartsEnabled} />
-              </div>
+              </div>}
             </TabsContent>
 
             {/* Tab 5: Шаблоны и Оплата */}
