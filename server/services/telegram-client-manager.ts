@@ -1,7 +1,9 @@
 import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { NewMessage, NewMessageEvent } from "telegram/events";
-import { CustomFile } from "telegram/client/uploads";
+import * as os from "os";
+import * as path from "path";
+import * as fs from "fs/promises";
 // Native BigInt is used throughout — no big-integer library needed.
 import { storage } from "../storage";
 import { getSecret } from "./secret-resolver";
@@ -1166,24 +1168,36 @@ class TelegramClientManager {
 
       const forceDocument = !mimeType.startsWith("image/") && !mimeType.startsWith("video/");
 
-      const file = new CustomFile(fileName, buffer.length, "", buffer);
+      // Write buffer to a temp file so gramJS reads it by path.
+      // Passing a Buffer via CustomFile fails in CJS bundles because esbuild creates
+      // a second copy of the CustomFile class, breaking gramJS's instanceof check.
+      // Use a temp file with a safe ASCII name; the real filename is set via attributes.
+      const tmpExt = path.extname(fileName).replace(/[^a-zA-Z0-9.]/g, "") || "";
+      const tmpPath = path.join(os.tmpdir(), `tg_upload_${Date.now()}_${Math.random().toString(36).slice(2)}${tmpExt}`);
+      try {
+        await fs.writeFile(tmpPath, buffer);
 
-      const result = await connection.client.sendFile(entity, {
-        file,
-        caption: caption || undefined,
-        forceDocument,
-        workers: 1,
-      });
+        const result = await connection.client.sendFile(entity, {
+          file: tmpPath,
+          caption: caption || undefined,
+          forceDocument,
+          workers: 1,
+          // Preserve the original filename as the Telegram document attribute
+          attributes: forceDocument ? [new Api.DocumentAttributeFilename({ fileName })] : undefined,
+        });
 
-      connection.lastActivity = new Date();
-      const msgId = result.id.toString();
-      console.log(`[TelegramClientManager] File sent to ${externalConversationId}, msgId=${msgId}`);
+        connection.lastActivity = new Date();
+        const msgId = result.id.toString();
+        console.log(`[TelegramClientManager] File sent to ${externalConversationId}, msgId=${msgId}`);
 
-      return {
-        success: true,
-        externalMessageId: msgId,
-        accountId: connection.accountId,
-      };
+        return {
+          success: true,
+          externalMessageId: msgId,
+          accountId: connection.accountId,
+        };
+      } finally {
+        await fs.unlink(tmpPath).catch(() => {});
+      }
     } catch (error: any) {
       console.error(`[TelegramClientManager] sendFileMessage error: ${error.message}`);
       return { success: false, error: error.message };

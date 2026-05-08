@@ -2123,6 +2123,8 @@ function WhatsAppPersonalCard({ channelStatuses, featureFlags, toggleChannelMuta
   const [isLoading, setIsLoading] = useState(false);
   const [connectedUser, setConnectedUser] = useState<{ id: string; name: string; phone: string } | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [pairingCodeSecondsLeft, setPairingCodeSecondsLeft] = useState<number | null>(null);
+  const pairingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const whatsappPersonalStatus = channelStatuses?.find(c => c.channel === "whatsapp_personal");
   const whatsappPersonalEnabled = featureFlags?.WHATSAPP_PERSONAL_CHANNEL_ENABLED ?? false;
@@ -2132,6 +2134,28 @@ function WhatsAppPersonalCard({ channelStatuses, featureFlags, toggleChannelMuta
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
     }
+  };
+
+  const stopPairingTimer = () => {
+    if (pairingTimerRef.current) {
+      clearInterval(pairingTimerRef.current);
+      pairingTimerRef.current = null;
+    }
+    setPairingCodeSecondsLeft(null);
+  };
+
+  const startPairingTimer = () => {
+    stopPairingTimer();
+    setPairingCodeSecondsLeft(28);
+    pairingTimerRef.current = setInterval(() => {
+      setPairingCodeSecondsLeft(prev => {
+        if (prev === null || prev <= 1) {
+          stopPairingTimer();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
   };
 
   const startAuth = async () => {
@@ -2180,6 +2204,7 @@ function WhatsAppPersonalCard({ channelStatuses, featureFlags, toggleChannelMuta
           refetch();
         } else if (result.pairingCode) {
           setPairingCode(result.pairingCode);
+          startPairingTimer();
           setAuthStatus("pairing_code_ready");
           pollIntervalRef.current = setInterval(checkAuth, 2000);
         }
@@ -2241,8 +2266,14 @@ function WhatsAppPersonalCard({ channelStatuses, featureFlags, toggleChannelMuta
     }
   };
 
-  const cancelAuth = () => {
+  const cancelAuth = async () => {
     stopPolling();
+    stopPairingTimer();
+    try {
+      await apiRequest("POST", "/api/whatsapp-personal/cancel-auth", {});
+    } catch {
+      // игнорируем ошибку — UI сбрасывается в любом случае
+    }
     setAuthStatus("disconnected");
     setQrDataUrl(null);
     setPairingCode(null);
@@ -2250,7 +2281,10 @@ function WhatsAppPersonalCard({ channelStatuses, featureFlags, toggleChannelMuta
   };
 
   useEffect(() => {
-    return () => stopPolling();
+    return () => {
+      stopPolling();
+      stopPairingTimer();
+    };
   }, []);
 
   const isConnected = whatsappPersonalStatus?.connected || authStatus === "connected";
@@ -2422,7 +2456,7 @@ function WhatsAppPersonalCard({ channelStatuses, featureFlags, toggleChannelMuta
                     Отсканируйте QR-код в приложении WhatsApp
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Код обновляется автоматически каждые 20 сек
+                    Код обновляется автоматически. Страница обновляет статус каждые 2 сек
                   </p>
                 </div>
                 <div className="flex justify-center">
@@ -2447,6 +2481,23 @@ function WhatsAppPersonalCard({ channelStatuses, featureFlags, toggleChannelMuta
                       <div className="text-4xl font-mono font-bold tracking-widest bg-muted p-4 rounded-lg" data-testid="text-pairing-code">
                         {pairingCode.slice(0, 4)}-{pairingCode.slice(4)}
                       </div>
+                      {pairingCodeSecondsLeft !== null && (
+                        <div className={`text-sm ${pairingCodeSecondsLeft <= 10 ? "text-red-500" : "text-muted-foreground"}`}>
+                          {pairingCodeSecondsLeft > 0
+                            ? `Код действителен ещё ${pairingCodeSecondsLeft} сек`
+                            : "Код истёк — запросите новый"}
+                        </div>
+                      )}
+                      {pairingCodeSecondsLeft === 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={startAuthWithPhone}
+                          disabled={isLoading}
+                        >
+                          Запросить новый код
+                        </Button>
+                      )}
                       <div className="text-xs text-muted-foreground space-y-1">
                         <p>1. Откройте WhatsApp - Настройки - Связанные устройства</p>
                         <p>2. Нажмите "Привязать устройство"</p>

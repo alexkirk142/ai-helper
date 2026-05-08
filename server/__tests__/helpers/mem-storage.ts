@@ -841,6 +841,10 @@ export class MemStorage implements IStorage {
     return updated;
   }
 
+  async deleteMessage(id: string, _tenantId: string): Promise<boolean> {
+    return this.messages.delete(id);
+  }
+
   async getMessagesBySuggestionId(suggestionId: string): Promise<Message[]> {
     return Array.from(this.messages.values())
       .filter((m) => {

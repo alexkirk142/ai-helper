@@ -30,6 +30,7 @@ import {
   BellOff,
   Bell,
   ClipboardList,
+  Trash2,
 } from "lucide-react";
 import { CsatDialog } from "@/components/csat-dialog";
 import { cn } from "@/lib/utils";
@@ -48,6 +49,7 @@ interface ChatInterfaceProps {
   onMuteToggle?: (conversationId: string, muted: boolean) => void;
   onPhoneClick?: (phoneNumber: string) => void;
   onSendSummary?: (conversationId: string) => void;
+  onDeleteMessage?: (messageId: string) => void;
   isSendingSummary?: boolean;
   isLoading?: boolean;
 }
@@ -314,13 +316,18 @@ function AttachmentRenderer({
               target="_blank"
               rel="noopener noreferrer"
               className={cn(
-                "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-opacity hover:opacity-80",
-                isCustomer ? "bg-background/30" : "bg-primary-foreground/10",
+                "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-opacity hover:opacity-80 border",
+                isCustomer
+                  ? "bg-background/40 border-border/40"
+                  : "bg-background/20 border-border/30",
               )}
             >
-              <Download className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate max-w-[180px] font-medium">{label}</span>
-              {subtitle && <span className="shrink-0 text-xs opacity-60">{subtitle}</span>}
+              <FileText className="h-4 w-4 shrink-0 opacity-80" />
+              <div className="min-w-0">
+                <div className="truncate max-w-[200px] font-medium leading-tight">{label}</div>
+                {subtitle && <div className="text-xs opacity-60 leading-tight">{subtitle}</div>}
+              </div>
+              <Download className="h-3.5 w-3.5 shrink-0 ml-auto opacity-60" />
             </a>
           );
         }
@@ -363,6 +370,7 @@ export function ChatInterface({
   onMuteToggle,
   onPhoneClick,
   onSendSummary,
+  onDeleteMessage,
   isSendingSummary,
   isLoading,
 }: ChatInterfaceProps) {
@@ -633,7 +641,7 @@ export function ChatInterface({
               <div
                 key={message.id}
                 className={cn(
-                  "flex gap-3",
+                  "flex gap-3 group",
                   message.role !== "customer" && "flex-row-reverse"
                 )}
               >
@@ -694,6 +702,15 @@ export function ChatInterface({
                     })}
                   </span>
                 </div>
+                {onDeleteMessage && (message.role === "owner" || message.role === "assistant") && (
+                  <button
+                    onClick={() => onDeleteMessage(message.id)}
+                    className="self-center opacity-0 group-hover:opacity-100 transition-opacity shrink-0 p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    title="Удалить сообщение"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
             ))}
             <div ref={messagesEndRef} />

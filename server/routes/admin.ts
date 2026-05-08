@@ -1609,6 +1609,133 @@ router.post(
 );
 
 // ============================================
+// GITHUB DEPLOY
+// ============================================
+
+interface DeployState {
+  status: "idle" | "running" | "success" | "error";
+  log: string[];
+  startedAt?: string;
+  finishedAt?: string;
+  commitBefore?: string;
+  commitAfter?: string;
+}
+
+let deployState: DeployState = { status: "idle", log: [] };
+
+async function runDeploy(): Promise<void> {
+  const { spawn } = await import("child_process");
+  const cwd = process.cwd();
+
+  function addLog(line: string) {
+    const trimmed = line.toString().trimEnd();
+    if (trimmed) {
+      console.log("[Deploy]", trimmed);
+      deployState.log.push(trimmed);
+    }
+  }
+
+  function runCmd(cmd: string, args: string[], label: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      addLog(`\n▶ ${label}`);
+      const proc = spawn(cmd, args, { cwd, shell: true, env: { ...process.env, CI: "true" } });
+      proc.stdout.on("data", (d) => addLog(d.toString()));
+      proc.stderr.on("data", (d) => addLog(d.toString()));
+      proc.on("close", (code) => {
+        if (code === 0) { addLog(`✓ ${label} — готово`); resolve(); }
+        else reject(new Error(`${label} завершился с кодом ${code}`));
+      });
+    });
+  }
+
+  try {
+    // Capture commit before
+    const { execSync } = await import("child_process");
+    try {
+      deployState.commitBefore = execSync("git log -1 --format=\"%h %s\"", { cwd }).toString().trim();
+    } catch { /* ignore */ }
+
+    await runCmd("git", ["fetch", "origin"], "git fetch origin");
+    await runCmd("git", ["reset", "--hard", "origin/master"], "git reset --hard origin/master");
+    await runCmd("npm", ["ci"], "npm ci (установка зависимостей)");
+    await runCmd("npm", ["run", "build"], "npm run build");
+    await runCmd("npx", ["drizzle-kit", "push", "--force"], "drizzle-kit push (миграции БД)");
+
+    try {
+      deployState.commitAfter = execSync("git log -1 --format=\"%h %s\"", { cwd }).toString().trim();
+    } catch { /* ignore */ }
+
+    deployState.status = "success";
+    deployState.finishedAt = new Date().toISOString();
+    addLog("\n✅ Деплой завершён успешно! Перезапускаю сервисы...");
+
+    // Restart PM2 after a short delay so the response can be delivered
+    setTimeout(() => {
+      spawn("pm2", ["restart", "ecosystem.config.cjs", "--update-env"], {
+        cwd, shell: true, detached: true, stdio: "ignore",
+      }).unref();
+    }, 2000);
+  } catch (err: any) {
+    deployState.status = "error";
+    deployState.finishedAt = new Date().toISOString();
+    addLog(`\n❌ Ошибка деплоя: ${err.message}`);
+    console.error("[Deploy] Failed:", err);
+  }
+}
+
+router.post(
+  "/deploy",
+  requireAuth,
+  requirePlatformOwner(),
+  auditAdminAction("github_deploy"),
+  async (req, res) => {
+    if (deployState.status === "running") {
+      return res.status(409).json({ error: "Деплой уже запущен" });
+    }
+    deployState = { status: "running", log: [], startedAt: new Date().toISOString() };
+    deployState.log.push("🚀 Запуск деплоя из GitHub (ветка master)...");
+    runDeploy().catch(console.error);
+    res.json({ ok: true, message: "Деплой запущен" });
+  }
+);
+
+router.get(
+  "/deploy/status",
+  requireAuth,
+  requirePlatformOwner(),
+  (req, res) => {
+    res.json(deployState);
+  }
+);
+
+router.get(
+  "/deploy/git-info",
+  requireAuth,
+  requirePlatformOwner(),
+  async (req, res) => {
+    try {
+      const { execSync } = await import("child_process");
+      const cwd = process.cwd();
+      const local = execSync("git log -1 --format=\"%h|%s|%ai\"", { cwd }).toString().trim();
+      let origin = "";
+      try {
+        execSync("git fetch origin master --dry-run", { cwd, timeout: 5000, stdio: "pipe" });
+        origin = execSync("git log -1 origin/master --format=\"%h|%s|%ai\"", { cwd }).toString().trim();
+      } catch { /* offline or no remote */ }
+      const [localHash, localMsg, localDate] = local.split("|");
+      const [originHash, originMsg, originDate] = (origin || local).split("|");
+      res.json({
+        local: { hash: localHash, message: localMsg, date: localDate },
+        origin: { hash: originHash, message: originMsg, date: originDate },
+        hasUpdate: !!origin && originHash !== localHash,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// ============================================
 // PROXY MANAGEMENT
 // ============================================
 

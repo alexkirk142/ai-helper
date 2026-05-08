@@ -127,6 +127,7 @@ export interface IStorage {
   getMessagesByConversationPaginated(conversationId: string, tenantId: string, cursor?: string, limit?: number): Promise<{ messages: Message[]; nextCursor: string | null }>;
   createMessage(message: InsertMessage & { createdAt?: Date }, tenantId: string): Promise<Message>;
   updateMessage(id: string, tenantId: string, data: Partial<InsertMessage>): Promise<Message | undefined>;
+  deleteMessage(id: string, tenantId: string): Promise<boolean>;
   getMessagesBySuggestionId(suggestionId: string, tenantId: string): Promise<Message[]>;
 
   // Products
