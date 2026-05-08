@@ -7,11 +7,11 @@ import {
   Package,
   Settings,
   AlertTriangle,
-  Bot,
   BarChart3,
   Building2,
   XCircle,
 } from "lucide-react";
+import { BrandLogoIcon, BRAND_NAME, BRAND_TAGLINE } from "@/components/brand-logo";
 import { useAuth } from "@/hooks/use-auth";
 import {
   Sidebar,
@@ -94,12 +94,10 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="p-4">
         <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-            <Bot className="h-5 w-5 text-primary-foreground" />
-          </div>
+          <BrandLogoIcon size={32} />
           <div className="flex flex-col">
-            <span className="text-sm font-semibold">AI Sales Operator</span>
-            <span className="text-xs text-muted-foreground">Умная автоматизация</span>
+            <span className="text-sm font-semibold">{BRAND_NAME}</span>
+            <span className="text-xs text-muted-foreground">{BRAND_TAGLINE}</span>
           </div>
         </Link>
       </SidebarHeader>

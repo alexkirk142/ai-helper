@@ -12,7 +12,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { useNotifications } from "@/hooks/use-notifications";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Bot, MessageSquare, Brain, Shield } from "lucide-react";
+import { Loader2, MessageSquare, Brain, Shield } from "lucide-react";
+import { BrandLogoIcon, BRAND_NAME } from "@/components/brand-logo";
 import { wsClient } from "@/lib/websocket";
 
 // Route-based code splitting: each page is loaded only when the user navigates to it.
@@ -120,8 +121,8 @@ function LandingPage() {
       <header className="border-b">
         <div className="container mx-auto flex h-16 items-center justify-between gap-4 px-4">
           <div className="flex items-center gap-2">
-            <Bot className="h-6 w-6 text-primary" />
-            <span className="text-lg font-semibold">AI Sales Operator</span>
+            <BrandLogoIcon size={28} />
+            <span className="text-lg font-semibold">{BRAND_NAME}</span>
           </div>
           <div className="flex items-center gap-4">
             <ThemeToggle />

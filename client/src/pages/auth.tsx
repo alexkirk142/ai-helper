@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Bot, Loader2, Mail, Lock, Eye, EyeOff, ArrowLeft, CheckCircle2 } from "lucide-react";
+import { Loader2, Mail, Lock, Eye, EyeOff, ArrowLeft, CheckCircle2 } from "lucide-react";
+import { BrandLogoIcon, BRAND_NAME } from "@/components/brand-logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -27,8 +28,8 @@ function AuthLayout({ children }: { children: React.ReactNode }) {
       <header className="border-b">
         <div className="container mx-auto flex h-16 items-center justify-between gap-4 px-4">
           <a href="/" className="flex items-center gap-2" data-testid="link-home">
-            <Bot className="h-6 w-6 text-primary" />
-            <span className="text-lg font-semibold" data-testid="text-brand">AI Sales Operator</span>
+            <BrandLogoIcon size={28} />
+            <span className="text-lg font-semibold" data-testid="text-brand">{BRAND_NAME}</span>
           </a>
           <ThemeToggle />
         </div>

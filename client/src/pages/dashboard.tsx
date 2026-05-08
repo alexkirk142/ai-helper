@@ -37,7 +37,7 @@ export default function Dashboard() {
       <div>
         <h1 className="text-3xl font-semibold">Панель управления</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Обзор работы AI Sales Operator
+          Обзор работы NexusChat
         </p>
       </div>
 

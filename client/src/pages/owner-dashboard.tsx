@@ -58,7 +58,7 @@ export default function OwnerDashboard() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold" data-testid="text-owner-dashboard-title">Панель владельца</h1>
           <p className="text-muted-foreground" data-testid="text-owner-dashboard-description">
-            Управление платформой AI Sales Operator
+            Управление платформой NexusChat
           </p>
         </div>
         

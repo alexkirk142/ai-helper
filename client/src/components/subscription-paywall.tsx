@@ -114,7 +114,7 @@ export function SubscriptionPaywall({
           <CardContent className="pt-6">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="font-semibold text-lg">AI Sales Operator Pro</h3>
+                <h3 className="font-semibold text-lg">NexusChat Pro</h3>
                 <p className="text-sm text-muted-foreground">Полный доступ ко всем функциям</p>
               </div>
               <div className="text-right">

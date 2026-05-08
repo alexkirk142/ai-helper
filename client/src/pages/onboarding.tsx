@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { BrandLogoIcon } from "@/components/brand-logo";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -435,7 +436,7 @@ export default function Onboarding() {
 
   const handleComplete = async () => {
     await completeStepMutation.mutateAsync({ step: "REVIEW", answers: { confirmed: true } });
-    toast({ title: "Настройка завершена! Добро пожаловать в AI Sales Operator." });
+    toast({ title: "Настройка завершена! Добро пожаловать в NexusChat." });
     setLocation("/");
   };
 
@@ -467,10 +468,10 @@ export default function Onboarding() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
       <div className="w-full max-w-2xl space-y-6">
         <div className="text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary">
-            <Bot className="h-8 w-8 text-primary-foreground" />
+          <div className="mx-auto flex h-16 w-16 items-center justify-center">
+            <BrandLogoIcon size={64} />
           </div>
-          <h1 className="mt-4 text-3xl font-semibold">Добро пожаловать в AI Sales Operator</h1>
+          <h1 className="mt-4 text-3xl font-semibold">Добро пожаловать в NexusChat</h1>
           <p className="mt-2 text-muted-foreground">
             Настроим вашего ИИ-помощника за несколько минут
           </p>
