@@ -899,7 +899,14 @@ export default function Conversations() {
                   )}
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="new-dialog-message">Первое сообщение <span className="text-muted-foreground">(необязательно)</span></Label>
+                  <Label htmlFor="new-dialog-message">
+                    Первое сообщение{" "}
+                    {newDialogChannel === "whatsapp_personal" ? (
+                      <span className="text-destructive">*</span>
+                    ) : (
+                      <span className="text-muted-foreground">(необязательно)</span>
+                    )}
+                  </Label>
                   <Textarea
                     id="new-dialog-message"
                     placeholder="Введите сообщение..."
@@ -907,6 +914,9 @@ export default function Conversations() {
                     value={newDialogMessage}
                     onChange={(e) => setNewDialogMessage(e.target.value)}
                   />
+                  {newDialogChannel === "whatsapp_personal" && !newDialogMessage.trim() && (
+                    <p className="text-xs text-muted-foreground">WhatsApp требует первое сообщение для начала диалога</p>
+                  )}
                 </div>
               </>
             )}
@@ -917,7 +927,12 @@ export default function Conversations() {
             </Button>
             <Button
               onClick={handleNewDialogSubmit}
-              disabled={newDialogPending || connectedPersonalChannels.length === 0 || !newDialogChannel}
+              disabled={
+                newDialogPending ||
+                connectedPersonalChannels.length === 0 ||
+                !newDialogChannel ||
+                (newDialogChannel === "whatsapp_personal" && !newDialogMessage.trim())
+              }
             >
               {newDialogPending ? "Создание..." : "Начать диалог"}
             </Button>

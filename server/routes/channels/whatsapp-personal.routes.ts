@@ -218,6 +218,11 @@ router.post(
         return res.status(400).json({ error: "Неверный формат номера телефона" });
       }
 
+      // WhatsApp requires a first message to actually create the conversation on the recipient's device
+      if (!initialMessage || !String(initialMessage).trim()) {
+        return res.status(400).json({ error: "Для WhatsApp необходимо первое сообщение" });
+      }
+
       const { WhatsAppPersonalAdapter: WAP } = await import(
         "../../services/whatsapp-personal-adapter"
       );
