@@ -1719,7 +1719,7 @@ router.get(
       const local = execSync("git log -1 --format=\"%h|%s|%ai\"", { cwd }).toString().trim();
       let origin = "";
       try {
-        execSync("git fetch origin master --dry-run", { cwd, timeout: 5000, stdio: "pipe" });
+        execSync("git fetch origin master", { cwd, timeout: 10000, stdio: "pipe" });
         origin = execSync("git log -1 origin/master --format=\"%h|%s|%ai\"", { cwd }).toString().trim();
       } catch { /* offline or no remote */ }
       const [localHash, localMsg, localDate] = local.split("|");
