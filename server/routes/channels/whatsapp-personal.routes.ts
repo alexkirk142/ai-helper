@@ -9,9 +9,22 @@ const router = Router();
 
 // ── /api/whatsapp-personal ────────────────────────────────────────────────────
 
-router.post("/api/whatsapp-personal/start-auth", requireAuth, requirePermission("MANAGE_CHANNELS"), requireActiveSubscription, requireTenant, async (req: Request, res: Response) => {
+router.post("/api/whatsapp-personal/start-auth", requireAuth, requirePermission("MANAGE_CHANNELS"), requireActiveSubscription, requireActiveTenant, requireTenant, async (req: Request, res: Response) => {
   try {
     const tenantId = req.tenantId!;
+
+    const fraudCheck = await fraudDetectionService.validateChannelConnection(
+      tenantId,
+      "whatsapp_personal",
+      { whatsapp_personal: { method: "qr" } }
+    );
+
+    if (!fraudCheck.allowed) {
+      return res.status(403).json({
+        error: fraudCheck.message,
+        code: "FRAUD_DETECTED"
+      });
+    }
 
     const { WhatsAppPersonalAdapter: WAP } = await import("../../services/whatsapp-personal-adapter");
     const result = await WAP.startAuth(tenantId);
@@ -125,6 +138,25 @@ router.post("/api/whatsapp-personal/check-auth", requireAuth, requirePermission(
   }
 });
 
+router.post("/api/whatsapp-personal/cancel-auth", requireAuth, requirePermission("MANAGE_CHANNELS"), requireTenant, async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.tenantId!;
+    const { WhatsAppPersonalAdapter: WAP } = await import("../../services/whatsapp-personal-adapter");
+    const authCheck = await WAP.checkAuth(tenantId);
+    if (
+      authCheck.status === "qr_ready" ||
+      authCheck.status === "pairing_code_ready" ||
+      authCheck.status === "connecting"
+    ) {
+      await WAP.logout(tenantId);
+    }
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error("Error cancelling WhatsApp Personal auth:", error);
+    res.status(500).json({ error: error.message || "Failed to cancel auth" });
+  }
+});
+
 router.post("/api/whatsapp-personal/logout", requireAuth, requirePermission("MANAGE_CHANNELS"), requireTenant, async (req: Request, res: Response) => {
   try {
     const tenantId = req.tenantId!;
@@ -164,4 +196,149 @@ router.get("/api/whatsapp-personal/status", requireAuth, requirePermission("MANA
   }
 });
 
+router.post(
+  "/api/whatsapp-personal/start-conversation",
+  requireAuth,
+  requirePermission("MANAGE_CHANNELS"),
+  requireActiveSubscription,
+  requireActiveTenant,
+  requireTenant,
+  async (req: Request, res: Response) => {
+    try {
+      const tenantId = req.tenantId!;
+
+      const { phoneNumber, initialMessage } = req.body;
+
+      if (!phoneNumber) {
+        return res.status(400).json({ error: "Номер телефона обязателен" });
+      }
+
+      const cleanDigits = String(phoneNumber).replace(/\D/g, "");
+      if (cleanDigits.length < 10 || cleanDigits.length > 15) {
+        return res.status(400).json({ error: "Неверный формат номера телефона" });
+      }
+
+      const { WhatsAppPersonalAdapter: WAP } = await import(
+        "../../services/whatsapp-personal-adapter"
+      );
+
+      if (!WAP.isConnected(tenantId)) {
+        return res.status(400).json({ error: "WhatsApp Personal не подключён" });
+      }
+
+      const recipientJid = `${cleanDigits}@s.whatsapp.net`;
+
+      const { storage } = await import("../../storage");
+      let customer = await storage.getCustomerByExternalId(tenantId, "whatsapp_personal", recipientJid);
+
+      if (!customer) {
+        try {
+          customer = await storage.createCustomer(
+            {
+              tenantId,
+              externalId: recipientJid,
+              name: `WhatsApp +${cleanDigits}`,
+              channel: "whatsapp_personal",
+              phone: `+${cleanDigits}`,
+              metadata: {},
+            },
+            tenantId
+          );
+        } catch (e: any) {
+          customer = await storage.getCustomerByExternalId(tenantId, "whatsapp_personal", recipientJid);
+          if (!customer) throw e;
+        }
+      }
+
+      const allConversations = await storage.getConversationsByTenant(tenantId);
+      let conversation = allConversations.find(
+        (c) =>
+          c.customerId === customer!.id &&
+          (c.status === "active" || c.status === "pending")
+      );
+
+      if (!conversation) {
+        conversation = await storage.createConversation(
+          {
+            tenantId,
+            customerId: customer.id,
+            status: "active",
+            mode: "learning",
+          },
+          tenantId
+        );
+      }
+
+      if (initialMessage && String(initialMessage).trim()) {
+        const trimmed = String(initialMessage).trim();
+        const adapter = new WAP(tenantId);
+
+        const sendResult = await adapter.sendMessage(recipientJid, trimmed);
+
+        if (sendResult.success) {
+          await storage.createMessage(
+            {
+              conversationId: conversation.id,
+              role: "assistant",
+              content: trimmed,
+              metadata: {
+                isOutbound: true,
+                externalMessageId: sendResult.externalMessageId ?? null,
+                channel: "whatsapp_personal",
+                recipientJid,
+              },
+            },
+            tenantId
+          );
+          console.log(
+            `[WhatsAppPersonal] start-conversation: sent initial message to ${recipientJid}`
+          );
+        } else {
+          console.error(
+            `[WhatsAppPersonal] start-conversation: failed to send initial message: ${sendResult.error}`
+          );
+        }
+      }
+
+      res.json({ success: true, conversationId: conversation.id });
+    } catch (error: any) {
+      console.error("Error starting WhatsApp Personal conversation:", error);
+      res.status(500).json({ error: error.message || "Failed to start conversation" });
+    }
+  }
+);
+
+router.get(
+  "/api/whatsapp-personal/media/:tenantId/:messageId",
+  requireAuth,
+  requireTenant,
+  async (req: Request, res: Response) => {
+    try {
+      const { tenantId, messageId } = req.params;
+
+      const requestTenantId = req.tenantId!;
+      if (tenantId !== requestTenantId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const { getFromMediaCache } = await import("../../services/whatsapp-personal-adapter");
+      const media = getFromMediaCache(tenantId, decodeURIComponent(messageId));
+
+      if (!media) {
+        return res.status(404).json({ error: "Media not found or expired" });
+      }
+
+      res.set("Content-Type", media.mimeType);
+      res.set("Content-Length", String(media.buffer.length));
+      res.set("Content-Disposition", `inline; filename="${media.fileName}"`);
+      res.set("Cache-Control", "private, max-age=3600");
+      res.send(media.buffer);
+    } catch (error: any) {
+      console.error("Error serving WhatsApp Personal media:", error);
+      res.status(500).json({ error: "Failed to serve media" });
+    }
+  }
+);
+
 export default router;
+

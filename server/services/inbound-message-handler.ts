@@ -451,10 +451,31 @@ export async function processIncomingMessageFull(
         const safeUrls = imageAttachments.map((a) => logSafeUrl(a.url ?? ""));
         console.log(`[InboundHandler] No text — classifying ${imageAttachments.length} image(s): ${safeUrls.join(", ")}`);
 
-        // Resolve Telegram media proxy paths to base64 data URLs
+        // Resolve channel media proxy paths to base64 data URLs
         const resolvedAttachments = await Promise.all(
           imageAttachments.map(async (att) => {
             const url = att.url ?? "";
+
+            // ── WhatsApp Personal media ───────────────────────────────────────
+            const waMatch = url.match(/^\/api\/whatsapp-personal\/media\/([^/]+)\/([^/]+)$/);
+            if (waMatch) {
+              const [, waTenantId, waMessageId] = waMatch;
+              try {
+                const { getFromMediaCache } = await import("./whatsapp-personal-adapter");
+                const media = getFromMediaCache(waTenantId, decodeURIComponent(waMessageId));
+                if (media && media.buffer.length > 0) {
+                  const mimeType = media.mimeType || "image/jpeg";
+                  const dataUrl = `data:${mimeType};base64,${media.buffer.toString("base64")}`;
+                  console.log(`[InboundHandler] Resolved WA Personal media → data URL (${media.buffer.length} bytes)`);
+                  return { ...att, url: dataUrl };
+                }
+              } catch (waErr: any) {
+                console.warn(`[InboundHandler] Failed to resolve WA Personal media for OCR: ${waErr.message}`);
+              }
+              return att;
+            }
+
+            // ── Telegram Personal media ───────────────────────────────────────
             const match = url.match(/^\/api\/telegram-personal\/media\/([^/]+)\/([^/]+)\/(\d+)$/);
             if (!match) return att;
             const [, accountId, chatId, msgId] = match;

@@ -38,6 +38,68 @@ interface AuthSession {
 }
 
 const authSessions = new Map<string, AuthSession>();
+const processedHistoryIds = new Map<string, Set<string>>();
+const authInProgress = new Set<string>();
+
+// Медиа-кэш: tenantId → Map<messageId, { buffer: Buffer; mimeType: string; fileName: string }>
+// Ограничен 100 записями на тенант для защиты памяти
+const mediaCache = new Map<string, Map<string, { buffer: Buffer; mimeType: string; fileName: string }>>();
+
+const MAX_MEDIA_CACHE_PER_TENANT = 100;
+
+function addToMediaCache(
+  tenantId: string,
+  messageId: string,
+  buffer: Buffer,
+  mimeType: string,
+  fileName: string
+): void {
+  let cache = mediaCache.get(tenantId);
+  if (!cache) {
+    cache = new Map();
+    mediaCache.set(tenantId, cache);
+  }
+  if (cache.size >= MAX_MEDIA_CACHE_PER_TENANT) {
+    const firstKey = cache.keys().next().value;
+    if (firstKey) cache.delete(firstKey);
+  }
+  cache.set(messageId, { buffer, mimeType, fileName });
+}
+
+export function getFromMediaCache(
+  tenantId: string,
+  messageId: string
+): { buffer: Buffer; mimeType: string; fileName: string } | undefined {
+  return mediaCache.get(tenantId)?.get(messageId);
+}
+
+async function transcribeAudio(buffer: Buffer, mimeType: string): Promise<string | null> {
+  try {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return null;
+
+    const { OpenAI } = await import("openai");
+    const openai = new OpenAI({ apiKey });
+
+    const ext = mimeType.includes("ogg") ? "ogg" : mimeType.includes("mp4") ? "mp4" : "mp3";
+    const file = new File([buffer], `audio.${ext}`, { type: mimeType });
+
+    const transcription = await openai.audio.transcriptions.create({
+      file: file as any,
+      model: "whisper-1",
+      language: "ru",
+    });
+
+    const text = transcription.text?.trim();
+    if (!text) return null;
+
+    console.log(`[WhatsAppPersonal] Whisper transcription: "${text.substring(0, 80)}"`);
+    return text;
+  } catch (error: any) {
+    console.warn(`[WhatsAppPersonal] Whisper transcription failed: ${error.message}`);
+    return null;
+  }
+}
 
 export class WhatsAppPersonalAdapter implements ChannelAdapter {
   readonly name: ChannelType = "whatsapp_personal";
@@ -88,6 +150,72 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
     }
   }
 
+  async sendMediaMessage(
+    externalConversationId: string,
+    buffer: Buffer,
+    mimetype: string,
+    fileName: string,
+    caption?: string
+  ): Promise<ChannelSendResult> {
+    const isEnabled = await featureFlagService.isEnabled("WHATSAPP_PERSONAL_CHANNEL_ENABLED");
+    if (!isEnabled) {
+      return { success: false, error: "WhatsApp Personal channel disabled" };
+    }
+
+    const session = authSessions.get(this.tenantId);
+    if (!session?.socket || session.status !== "connected") {
+      return { success: false, error: "Not connected to WhatsApp" };
+    }
+
+    try {
+      const jid = externalConversationId.includes("@")
+        ? externalConversationId
+        : `${externalConversationId}@s.whatsapp.net`;
+
+      let messagePayload: any;
+
+      if (mimetype.startsWith("image/")) {
+        messagePayload = {
+          image: buffer,
+          mimetype,
+          caption: caption || "",
+        };
+      } else if (mimetype.startsWith("video/")) {
+        messagePayload = {
+          video: buffer,
+          mimetype,
+          caption: caption || "",
+        };
+      } else if (mimetype.startsWith("audio/")) {
+        const isVoiceNote = mimetype === "audio/ogg" || mimetype.includes("ogg");
+        messagePayload = {
+          audio: buffer,
+          mimetype: isVoiceNote ? "audio/ogg; codecs=opus" : mimetype,
+          ptt: isVoiceNote,
+        };
+      } else {
+        messagePayload = {
+          document: buffer,
+          mimetype,
+          fileName: fileName || "file",
+          caption: caption || "",
+        };
+      }
+
+      const result = await session.socket.sendMessage(jid, messagePayload);
+
+      console.log(`[WhatsAppPersonal] Media sent (${mimetype}) to ${externalConversationId}`);
+      return {
+        success: true,
+        externalMessageId: result?.key?.id || `wap_media_${Date.now()}`,
+        timestamp: new Date(),
+      };
+    } catch (error: any) {
+      console.error("[WhatsAppPersonal] sendMediaMessage error:", error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
   parseIncomingMessage(rawPayload: unknown): ParsedIncomingMessage | null {
     try {
       if (!rawPayload || typeof rawPayload !== "object") {
@@ -122,11 +250,11 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
         text = messageContent.conversation;
       } else if (messageContent?.extendedTextMessage?.text) {
         text = messageContent.extendedTextMessage.text;
-      } else if (messageContent?.imageMessage?.caption) {
+      } else if (messageContent?.imageMessage) {
         text = messageContent.imageMessage.caption || "[Image]";
-      } else if (messageContent?.videoMessage?.caption) {
+      } else if (messageContent?.videoMessage) {
         text = messageContent.videoMessage.caption || "[Video]";
-      } else if (messageContent?.documentMessage?.caption) {
+      } else if (messageContent?.documentMessage) {
         text = messageContent.documentMessage.caption || "[Document]";
       } else if (messageContent?.audioMessage) {
         text = "[Audio]";
@@ -221,12 +349,217 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
     }
   }
 
+  private static async _downloadMediaIfPresent(
+    msg: any,
+    parsed: ParsedIncomingMessage,
+    tenantId: string,
+    session: AuthSession | undefined
+  ): Promise<import("./channel-adapter.types").ParsedAttachment | null> {
+    const messageContent = msg.message;
+    if (!messageContent || !session?.socket) return null;
+
+    let mimeType = "";
+    let fileName = "";
+    let attachmentType: import("./channel-adapter.types").ParsedAttachment["type"] = "document";
+
+    if (messageContent.imageMessage) {
+      mimeType = messageContent.imageMessage.mimetype || "image/jpeg";
+      fileName = "image.jpg";
+      attachmentType = "image";
+    } else if (messageContent.videoMessage) {
+      mimeType = messageContent.videoMessage.mimetype || "video/mp4";
+      fileName = messageContent.videoMessage.fileName || "video.mp4";
+      attachmentType = "video";
+    } else if (messageContent.audioMessage) {
+      mimeType = messageContent.audioMessage.mimetype || "audio/ogg";
+      fileName = "audio.ogg";
+      attachmentType = messageContent.audioMessage.ptt ? "voice" : "audio";
+    } else if (messageContent.documentMessage) {
+      mimeType = messageContent.documentMessage.mimetype || "application/octet-stream";
+      fileName = messageContent.documentMessage.fileName || "document";
+      attachmentType = "document";
+    } else {
+      return null;
+    }
+
+    try {
+      const baileys = await getBaileys();
+      const { downloadMediaMessage } = baileys;
+      const buffer = await downloadMediaMessage(
+        msg,
+        "buffer",
+        {},
+        {
+          logger: pino({ level: "silent" }),
+          reuploadRequest: session.socket.updateMediaMessage,
+        }
+      ) as Buffer;
+
+      if (!buffer || buffer.length === 0) {
+        console.warn(`[WhatsAppPersonal] Empty media buffer for message ${parsed.externalMessageId}`);
+        return null;
+      }
+
+      addToMediaCache(tenantId, parsed.externalMessageId, buffer, mimeType, fileName);
+
+      const mediaUrl = `/api/whatsapp-personal/media/${encodeURIComponent(tenantId)}/${encodeURIComponent(parsed.externalMessageId)}`;
+      console.log(`[WhatsAppPersonal] Media downloaded (${buffer.length} bytes), cached as ${parsed.externalMessageId}`);
+
+      // Транскрипция голосового сообщения
+      let voiceTranscription: string | null = null;
+      if (attachmentType === "voice" || attachmentType === "audio") {
+        voiceTranscription = await transcribeAudio(buffer, mimeType);
+      }
+
+      return {
+        type: attachmentType,
+        url: mediaUrl,
+        mimeType,
+        fileName,
+        fileSize: buffer.length,
+        duration: messageContent.audioMessage?.seconds,
+        _transcription: voiceTranscription,
+      } as any;
+    } catch (error: any) {
+      console.warn(`[WhatsAppPersonal] Media download failed for ${parsed.externalMessageId}: ${error.message}`);
+      return null;
+    }
+  }
+
+  private static _attachMessageHandlers(socket: WASocket, tenantId: string): void {
+    socket.ev.on("messages.upsert", async ({ messages, type }) => {
+      console.log(`[WhatsAppPersonal] messages.upsert event: type=${type}, count=${messages.length}`);
+
+      if (type !== "notify") {
+        console.log(`[WhatsAppPersonal] Skipping non-notify event type: ${type}`);
+        return;
+      }
+
+      for (const msg of messages) {
+        console.log(`[WhatsAppPersonal] Processing message:`, JSON.stringify({
+          fromMe: msg.key?.fromMe,
+          remoteJid: msg.key?.remoteJid,
+          id: msg.key?.id,
+          hasMessage: !!msg.message,
+        }));
+
+        if (msg.key.fromMe) {
+          console.log(`[WhatsAppPersonal] Skipping own message`);
+          continue;
+        }
+
+        const adapter = new WhatsAppPersonalAdapter(tenantId);
+        const parsed = adapter.parseIncomingMessage(msg);
+
+        console.log(`[WhatsAppPersonal] Parsed result:`, parsed ? JSON.stringify(sanitizeForLog(parsed)) : "null");
+
+        if (parsed) {
+          try {
+            // Скачать медиа если есть вложение
+            const session = authSessions.get(tenantId);
+            const mediaAttachment = await WhatsAppPersonalAdapter._downloadMediaIfPresent(
+              msg,
+              parsed,
+              tenantId,
+              session
+            );
+            if (mediaAttachment) {
+              parsed.attachments = [mediaAttachment];
+            }
+
+            // Если есть транскрипция голоса — заменить [Audio] на реальный текст
+            if (
+              mediaAttachment &&
+              (mediaAttachment.type === "voice" || mediaAttachment.type === "audio")
+            ) {
+              const transcription = (mediaAttachment as any)._transcription as string | undefined;
+              if (transcription) {
+                parsed.text = transcription;
+                console.log(`[WhatsAppPersonal] Replaced [Audio] with Whisper transcription: "${transcription.substring(0, 60)}"`);
+              }
+            }
+
+            messageBus.emitIncomingMessage(tenantId, null, parsed);
+            console.log(`[WhatsAppPersonal] Message emitted for tenant ${tenantId}`);
+          } catch (error) {
+            console.error("[WhatsAppPersonal] Message processing error:", error);
+          }
+        }
+      }
+    });
+
+    socket.ev.on("messaging-history.set", async ({ chats, messages, isLatest }) => {
+      console.log(`[WhatsAppPersonal] History sync: ${chats?.length || 0} chats, ${messages?.length || 0} messages, isLatest: ${isLatest}`);
+
+      if (!messages || messages.length === 0) {
+        console.log(`[WhatsAppPersonal] No messages in history sync`);
+        return;
+      }
+
+      const messagesByChat = new Map<string, any[]>();
+      for (const msg of messages) {
+        const jid = msg.key?.remoteJid;
+        if (!jid || msg.key?.fromMe) continue;
+
+        if (!messagesByChat.has(jid)) {
+          messagesByChat.set(jid, []);
+        }
+        messagesByChat.get(jid)!.push(msg);
+      }
+
+      const sortedChats = Array.from(messagesByChat.entries())
+        .map(([jid, msgs]) => ({
+          jid,
+          messages: msgs,
+          lastMessageTime: Math.max(...msgs.map((m: any) => (m.messageTimestamp || 0) * 1000))
+        }))
+        .sort((a, b) => b.lastMessageTime - a.lastMessageTime)
+        .slice(0, 3);
+
+      console.log(`[WhatsAppPersonal] Processing ${sortedChats.length} recent conversations from history`);
+
+      const adapter = new WhatsAppPersonalAdapter(tenantId);
+
+      for (const chat of sortedChats) {
+        const recentMsg = chat.messages.sort((a: any, b: any) =>
+          ((b.messageTimestamp || 0) - (a.messageTimestamp || 0))
+        )[0];
+
+        if (recentMsg) {
+          const parsed = adapter.parseIncomingMessage(recentMsg);
+          if (parsed) {
+            const seen = processedHistoryIds.get(tenantId) ?? new Set<string>();
+            if (seen.has(parsed.externalMessageId)) {
+              console.log(`[WhatsAppPersonal] Skipping duplicate history message ${parsed.externalMessageId}`);
+              continue;
+            }
+            seen.add(parsed.externalMessageId);
+            if (seen.size > 500) seen.clear();
+            processedHistoryIds.set(tenantId, seen);
+
+            try {
+              messageBus.emitIncomingMessage(tenantId, null, parsed);
+              console.log(`[WhatsAppPersonal] History message emitted from ${chat.jid}`);
+            } catch (error) {
+              console.error("[WhatsAppPersonal] History message processing error:", error);
+            }
+          }
+        }
+      }
+    });
+  }
+
   static async startAuth(tenantId: string, isAutoReconnect: boolean = false): Promise<{
     success: boolean;
     qrCode?: string;
     qrDataUrl?: string;
     error?: string;
   }> {
+    if (authInProgress.has(tenantId) && !isAutoReconnect) {
+      console.log(`[WhatsAppPersonal] Auth already in progress for tenant ${tenantId}, skipping`);
+      return { success: false, error: "Authentication already in progress" };
+    }
+    authInProgress.add(tenantId);
     try {
       const existingSession = authSessions.get(tenantId);
       
@@ -370,97 +703,7 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
         }
       });
 
-      socket.ev.on("messages.upsert", async ({ messages, type }) => {
-        console.log(`[WhatsAppPersonal] messages.upsert event: type=${type}, count=${messages.length}`);
-        
-        if (type !== "notify") {
-          console.log(`[WhatsAppPersonal] Skipping non-notify event type: ${type}`);
-          return;
-        }
-
-        for (const msg of messages) {
-          console.log(`[WhatsAppPersonal] Processing message:`, JSON.stringify({
-            fromMe: msg.key?.fromMe,
-            remoteJid: msg.key?.remoteJid,
-            id: msg.key?.id,
-            hasMessage: !!msg.message,
-          }));
-          
-          if (msg.key.fromMe) {
-            console.log(`[WhatsAppPersonal] Skipping own message`);
-            continue;
-          }
-          
-          const adapter = new WhatsAppPersonalAdapter(tenantId);
-          const parsed = adapter.parseIncomingMessage(msg);
-          
-          console.log(`[WhatsAppPersonal] Parsed result:`, parsed ? JSON.stringify(sanitizeForLog(parsed)) : "null");
-          
-          if (parsed) {
-            try {
-              messageBus.emitIncomingMessage(tenantId, null, parsed);
-              console.log(`[WhatsAppPersonal] Message emitted for tenant ${tenantId}`);
-            } catch (error) {
-              console.error("[WhatsAppPersonal] Message processing error:", error);
-            }
-          }
-        }
-      });
-
-      // Load recent conversations on connect (history sync)
-      socket.ev.on("messaging-history.set", async ({ chats, messages, isLatest }) => {
-        console.log(`[WhatsAppPersonal] History sync: ${chats?.length || 0} chats, ${messages?.length || 0} messages, isLatest: ${isLatest}`);
-        
-        if (!messages || messages.length === 0) {
-          console.log(`[WhatsAppPersonal] No messages in history sync`);
-          return;
-        }
-
-        // Group messages by conversation (remoteJid)
-        const messagesByChat = new Map<string, any[]>();
-        for (const msg of messages) {
-          const jid = msg.key?.remoteJid;
-          if (!jid || msg.key?.fromMe) continue;
-          
-          if (!messagesByChat.has(jid)) {
-            messagesByChat.set(jid, []);
-          }
-          messagesByChat.get(jid)!.push(msg);
-        }
-
-        // Get last 3 unique conversations with incoming messages
-        const sortedChats = Array.from(messagesByChat.entries())
-          .map(([jid, msgs]) => ({
-            jid,
-            messages: msgs,
-            lastMessageTime: Math.max(...msgs.map((m: any) => (m.messageTimestamp || 0) * 1000))
-          }))
-          .sort((a, b) => b.lastMessageTime - a.lastMessageTime)
-          .slice(0, 3);
-
-        console.log(`[WhatsAppPersonal] Processing ${sortedChats.length} recent conversations from history`);
-
-        const adapter = new WhatsAppPersonalAdapter(tenantId);
-        
-        for (const chat of sortedChats) {
-          // Get the most recent message from this chat
-          const recentMsg = chat.messages.sort((a: any, b: any) => 
-            ((b.messageTimestamp || 0) - (a.messageTimestamp || 0))
-          )[0];
-          
-          if (recentMsg) {
-            const parsed = adapter.parseIncomingMessage(recentMsg);
-            if (parsed) {
-              try {
-                messageBus.emitIncomingMessage(tenantId, null, parsed);
-                console.log(`[WhatsAppPersonal] History message emitted from ${chat.jid}`);
-              } catch (error) {
-                console.error("[WhatsAppPersonal] History message processing error:", error);
-              }
-            }
-          }
-        }
-      });
+      WhatsAppPersonalAdapter._attachMessageHandlers(socket, tenantId);
 
       await new Promise(resolve => setTimeout(resolve, 2000));
 
@@ -487,6 +730,8 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
     } catch (error: any) {
       console.error("[WhatsAppPersonal] StartAuth error:", error.message);
       return { success: false, error: error.message };
+    } finally {
+      authInProgress.delete(tenantId);
     }
   }
 
@@ -495,6 +740,11 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
     pairingCode?: string;
     error?: string;
   }> {
+    if (authInProgress.has(tenantId)) {
+      console.log(`[WhatsAppPersonal] Auth already in progress for tenant ${tenantId}, skipping`);
+      return { success: false, error: "Authentication already in progress" };
+    }
+    authInProgress.add(tenantId);
     try {
       const cleanPhone = phoneNumber.replace(/[^\d]/g, "");
       
@@ -591,97 +841,7 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
         }
       });
 
-      socket.ev.on("messages.upsert", async ({ messages, type }) => {
-        console.log(`[WhatsAppPersonal] messages.upsert event: type=${type}, count=${messages.length}`);
-        
-        if (type !== "notify") {
-          console.log(`[WhatsAppPersonal] Skipping non-notify event type: ${type}`);
-          return;
-        }
-
-        for (const msg of messages) {
-          console.log(`[WhatsAppPersonal] Processing message:`, JSON.stringify({
-            fromMe: msg.key?.fromMe,
-            remoteJid: msg.key?.remoteJid,
-            id: msg.key?.id,
-            hasMessage: !!msg.message,
-          }));
-          
-          if (msg.key.fromMe) {
-            console.log(`[WhatsAppPersonal] Skipping own message`);
-            continue;
-          }
-          
-          const adapter = new WhatsAppPersonalAdapter(tenantId);
-          const parsed = adapter.parseIncomingMessage(msg);
-          
-          console.log(`[WhatsAppPersonal] Parsed result:`, parsed ? JSON.stringify(sanitizeForLog(parsed)) : "null");
-          
-          if (parsed) {
-            try {
-              messageBus.emitIncomingMessage(tenantId, null, parsed);
-              console.log(`[WhatsAppPersonal] Message emitted for tenant ${tenantId}`);
-            } catch (error) {
-              console.error("[WhatsAppPersonal] Message processing error:", error);
-            }
-          }
-        }
-      });
-
-      // Load recent conversations on connect (history sync) - phone auth
-      socket.ev.on("messaging-history.set", async ({ chats, messages, isLatest }) => {
-        console.log(`[WhatsAppPersonal] Phone auth history sync: ${chats?.length || 0} chats, ${messages?.length || 0} messages, isLatest: ${isLatest}`);
-        
-        if (!messages || messages.length === 0) {
-          console.log(`[WhatsAppPersonal] No messages in history sync`);
-          return;
-        }
-
-        // Group messages by conversation (remoteJid)
-        const messagesByChat = new Map<string, any[]>();
-        for (const msg of messages) {
-          const jid = msg.key?.remoteJid;
-          if (!jid || msg.key?.fromMe) continue;
-          
-          if (!messagesByChat.has(jid)) {
-            messagesByChat.set(jid, []);
-          }
-          messagesByChat.get(jid)!.push(msg);
-        }
-
-        // Get last 3 unique conversations with incoming messages
-        const sortedChats = Array.from(messagesByChat.entries())
-          .map(([jid, msgs]) => ({
-            jid,
-            messages: msgs,
-            lastMessageTime: Math.max(...msgs.map((m: any) => (m.messageTimestamp || 0) * 1000))
-          }))
-          .sort((a, b) => b.lastMessageTime - a.lastMessageTime)
-          .slice(0, 3);
-
-        console.log(`[WhatsAppPersonal] Processing ${sortedChats.length} recent conversations from history`);
-
-        const adapter = new WhatsAppPersonalAdapter(tenantId);
-        
-        for (const chat of sortedChats) {
-          // Get the most recent message from this chat
-          const recentMsg = chat.messages.sort((a: any, b: any) => 
-            ((b.messageTimestamp || 0) - (a.messageTimestamp || 0))
-          )[0];
-          
-          if (recentMsg) {
-            const parsed = adapter.parseIncomingMessage(recentMsg);
-            if (parsed) {
-              try {
-                messageBus.emitIncomingMessage(tenantId, null, parsed);
-                console.log(`[WhatsAppPersonal] History message emitted from ${chat.jid}`);
-              } catch (error) {
-                console.error("[WhatsAppPersonal] History message processing error:", error);
-              }
-            }
-          }
-        }
-      });
+      WhatsAppPersonalAdapter._attachMessageHandlers(socket, tenantId);
 
       await new Promise(resolve => setTimeout(resolve, 1500));
 
@@ -707,6 +867,8 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
     } catch (error: any) {
       console.error("[WhatsAppPersonal] StartAuthWithPhone error:", error.message);
       return { success: false, error: error.message };
+    } finally {
+      authInProgress.delete(tenantId);
     }
   }
 
@@ -762,6 +924,8 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
     }
 
     authSessions.delete(tenantId);
+    processedHistoryIds.delete(tenantId);
+    mediaCache.delete(tenantId);
     console.log(`[WhatsAppPersonal] Logged out tenant ${tenantId}`);
 
     return { success: true };
@@ -774,12 +938,11 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
     error?: string;
   }> {
     const sessionDir = path.join(AUTH_DIR, tenantId);
-    
+
     if (!fs.existsSync(sessionDir)) {
       return { success: false, connected: false, error: "No saved session" };
     }
 
-    // Check if already connected or connecting
     const existingSession = authSessions.get(tenantId);
     if (existingSession?.status === "connected") {
       return {
@@ -789,62 +952,23 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
       };
     }
 
-    // Start auth - don't wait for full connection, Baileys handles reconnection
     WhatsAppPersonalAdapter.startAuth(tenantId).catch(err => {
       console.error(`[WhatsAppPersonal] Restore auth error:`, err);
     });
 
-    // Wait briefly for initial connection (5 seconds max)
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 2; i++) {
       await new Promise(resolve => setTimeout(resolve, 500));
-      
       const session = authSessions.get(tenantId);
       if (session?.status === "connected") {
-        return {
-          success: true,
-          connected: true,
-          user: session.user,
-        };
-      }
-      
-      // If user info is available (from previous session), consider it restoring
-      if (session?.user && (session.reconnecting || session.socket)) {
-        return {
-          success: true,
-          connected: true,
-          user: session.user,
-        };
-      }
-      
-      if (session?.status === "qr_ready") {
-        return {
-          success: false,
-          connected: false,
-          error: "Session expired. Please re-authenticate with QR code.",
-        };
+        return { success: true, connected: true, user: session.user };
       }
     }
 
-    // Check final state - if reconnecting with user info, still consider success
-    const finalSession = authSessions.get(tenantId);
-    if (finalSession?.status === "connected" || (finalSession?.user && finalSession?.socket)) {
-      return {
-        success: true,
-        connected: true,
-        user: finalSession.user,
-      };
-    }
-
-    // If session exists and is trying to reconnect, return success (will connect soon)
-    if (finalSession?.reconnecting && finalSession?.user) {
-      return {
-        success: true,
-        connected: true,
-        user: finalSession.user,
-      };
-    }
-
-    return { success: false, connected: false, error: "Connection timeout - session will auto-reconnect" };
+    return {
+      success: true,
+      connected: false,
+      error: "Session is restoring in background",
+    };
   }
 
   static getConnectedSessions(): string[] {
@@ -860,13 +984,10 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
   static isConnected(tenantId: string): boolean {
     const session = authSessions.get(tenantId);
     if (!session) return false;
-    
-    // Consider connected if status is connected OR if we have user info (was connected before)
-    // and session is reconnecting (temporary disconnect)
+
     if (session.status === "connected") return true;
-    if (session.user && session.reconnecting) return true;
-    if (session.user && session.socket) return true;
-    
+    if (session.user && session.reconnecting === true) return true;
+
     return false;
   }
 
@@ -894,3 +1015,5 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
     };
   }
 }
+
+export const _testOnly_authSessions = authSessions;

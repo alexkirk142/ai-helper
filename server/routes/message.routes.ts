@@ -296,6 +296,39 @@ router.post(
             console.error(`[OutboundHandler] MAX Personal file send error:`, sendError.message);
           }
         }
+
+        if (effectiveChannelType === "whatsapp_personal" && conversation.customer?.externalId) {
+          try {
+            const adapter = new WhatsAppPersonalAdapter(conversation.tenantId);
+            let recipientJid = conversation.customer.externalId;
+            if (!recipientJid.includes("@")) recipientJid = `${recipientJid}@s.whatsapp.net`;
+            const { buffer, mimetype, size } = uploadedFile;
+            const originalname = Buffer.from(uploadedFile.originalname, "latin1").toString("utf8");
+
+            const sendResult = await adapter.sendMediaMessage(
+              recipientJid,
+              buffer,
+              mimetype,
+              originalname,
+              content.trim() || undefined,
+            );
+
+            if (sendResult.success) {
+              outboundAttachment = buildAttachmentMeta(mimetype, originalname, size, {});
+              console.log(`[OutboundHandler] WhatsApp Personal media sent: msgId=${sendResult.externalMessageId}`);
+            } else {
+              console.error(`[OutboundHandler] WhatsApp Personal media send failed: ${sendResult.error}`);
+            }
+          } catch (sendError: any) {
+            console.error(`[OutboundHandler] WhatsApp Personal media send error:`, sendError.message);
+          }
+        }
+      }
+
+      // If a file was uploaded but we failed to send it, return an error immediately
+      // so the client shows a notification and no empty message bubble is saved to DB.
+      if (uploadedFile && role === "owner" && !outboundAttachment) {
+        return res.status(500).json({ error: "Не удалось отправить файл. Попробуйте ещё раз." });
       }
 
       // ── Save message to DB ─────────────────────────────────────────────────
@@ -431,6 +464,33 @@ router.post(
 );
 
 /** Maps MIME type to a ParsedAttachment, merging any extra fields (url, fileId). */
+router.delete("/api/conversations/:id/messages/:msgId", requireAuth, requirePermission("SEND_MESSAGES"), async (req: Request, res: Response) => {
+  try {
+    if (!req.userId || req.userId === "system") {
+      return res.status(403).json({ error: "User authentication required" });
+    }
+    const user = await getUserForConversations(req.userId);
+    if (!user?.tenantId) {
+      return res.status(403).json({ error: "User not associated with a tenant" });
+    }
+
+    const conversation = await storage.getConversation(req.params.id, user.tenantId);
+    if (!conversation) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    const deleted = await storage.deleteMessage(req.params.msgId, user.tenantId);
+    if (!deleted) {
+      return res.status(404).json({ error: "Message not found" });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting message:", error);
+    res.status(500).json({ error: "Failed to delete message" });
+  }
+});
+
 function buildAttachmentMeta(
   mimeType: string,
   fileName: string,
