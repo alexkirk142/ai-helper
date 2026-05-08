@@ -736,6 +736,12 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
           const invalidSessionCodes = [401, 403, 440, DisconnectReason.loggedOut];
           const shouldReconnect = !invalidSessionCodes.includes(statusCode);
           console.log(`[WhatsAppPersonal] Connection closed, statusCode: ${statusCode}, reconnect: ${shouldReconnect}`);
+
+          // Ignore close events triggered by our own socket.end() call during auth setup
+          if (authInProgress.has(tenantId)) {
+            console.log(`[WhatsAppPersonal] Close triggered by our own socket.end(), skipping reconnect for tenant ${tenantId}`);
+            return;
+          }
           
           if (shouldReconnect && !session.reconnecting) {
             console.log(`[WhatsAppPersonal] Auto-reconnecting for tenant ${tenantId}...`);
@@ -743,14 +749,14 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
             session.error = undefined;
             session.reconnecting = true;
             
-            const delay = 3000 + Math.min((session.reconnectAttempts || 0) * 2000, 10000);
+            const delay = 5000 + Math.min((session.reconnectAttempts || 0) * 3000, 15000);
             setTimeout(() => {
               WhatsAppPersonalAdapter.startAuth(tenantId, true).catch(err => {
                 console.error(`[WhatsAppPersonal] Auto-reconnect failed:`, err);
                 session.reconnecting = false;
               });
             }, delay);
-          } else {
+          } else if (!shouldReconnect) {
             session.status = "disconnected";
             session.error = statusCode === 401 ? "Session expired" : 
                            statusCode === 403 ? "Access forbidden" : "Logged out";
@@ -895,7 +901,13 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
           const invalidSessionCodes = [401, 403, 440, DisconnectReason.loggedOut];
           const shouldReconnect = !invalidSessionCodes.includes(statusCode);
           console.log(`[WhatsAppPersonal] Phone auth connection closed, statusCode: ${statusCode}, reconnect: ${shouldReconnect}`);
-          
+
+          // Ignore close events triggered by our own socket.end() call during auth setup
+          if (authInProgress.has(tenantId)) {
+            console.log(`[WhatsAppPersonal] Phone auth close triggered by socket.end(), skipping for tenant ${tenantId}`);
+            return;
+          }
+
           if (!shouldReconnect) {
             session.status = "disconnected";
             session.error = statusCode === 401 ? "Session expired" : 
@@ -914,7 +926,7 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
             // Hand off to startAuth which handles reconnect with back-off correctly.
             session.status = "connecting";
             session.reconnecting = true;
-            const delay = 3000 + Math.min((session.reconnectAttempts || 0) * 2000, 10000);
+            const delay = 5000 + Math.min((session.reconnectAttempts || 0) * 3000, 15000);
             console.log(`[WhatsAppPersonal] Phone auth: reconnecting after pairing in ${delay}ms for tenant ${tenantId}`);
             setTimeout(() => {
               WhatsAppPersonalAdapter.startAuth(tenantId, true).catch((err) => {
