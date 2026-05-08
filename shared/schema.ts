@@ -508,6 +508,14 @@ export const telegramSessions = pgTable("telegram_sessions", {
   tenantIdx: index("telegram_sessions_tenant_idx").on(t.tenantId),
 }));
 
+// ============ WhatsApp Personal Auth Sessions (DB-persisted Baileys state) ============
+export const whatsappAuthSessions = pgTable("whatsapp_auth_sessions", {
+  tenantId: varchar("tenant_id").primaryKey().references(() => tenants.id, { onDelete: "cascade" }),
+  authData: text("auth_data").notNull(), // JSON blob: { files: { [filename]: string (base64) } }
+  phoneNumber: text("phone_number"),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 // ============ PHASE 7: Onboarding State ============
 export const ONBOARDING_STATUS = ["NOT_STARTED", "IN_PROGRESS", "DONE"] as const;
 export type OnboardingStatus = typeof ONBOARDING_STATUS[number];

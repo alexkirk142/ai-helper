@@ -19,6 +19,76 @@ import QRCode from "qrcode";
 
 const AUTH_DIR = "./whatsapp_sessions";
 
+// ── DB-backed session persistence ──────────────────────────────────────────
+// Serialize the entire session directory to JSON (base64 files) and store in
+// the whatsapp_auth_sessions table so credentials survive container restarts.
+
+async function saveSessionToDb(tenantId: string, sessionDir: string): Promise<void> {
+  try {
+    if (!fs.existsSync(sessionDir)) return;
+    const files: Record<string, string> = {};
+    for (const name of fs.readdirSync(sessionDir)) {
+      const fullPath = path.join(sessionDir, name);
+      if (fs.statSync(fullPath).isFile()) {
+        files[name] = fs.readFileSync(fullPath).toString("base64");
+      }
+    }
+    if (Object.keys(files).length === 0) return;
+
+    const { db } = await import("../db");
+    const { whatsappAuthSessions } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+
+    const authData = JSON.stringify({ files });
+    await db
+      .insert(whatsappAuthSessions)
+      .values({ tenantId, authData, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: whatsappAuthSessions.tenantId,
+        set: { authData, updatedAt: new Date() },
+      });
+  } catch (err: any) {
+    console.warn(`[WhatsAppPersonal] saveSessionToDb failed for ${tenantId}:`, err.message);
+  }
+}
+
+async function restoreSessionFromDb(tenantId: string, sessionDir: string): Promise<boolean> {
+  try {
+    const { db } = await import("../db");
+    const { whatsappAuthSessions } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+
+    const rows = await db.select().from(whatsappAuthSessions).where(eq(whatsappAuthSessions.tenantId, tenantId));
+    if (!rows.length || !rows[0].authData) return false;
+
+    const { files } = JSON.parse(rows[0].authData) as { files: Record<string, string> };
+    if (!files || Object.keys(files).length === 0) return false;
+
+    if (!fs.existsSync(sessionDir)) {
+      fs.mkdirSync(sessionDir, { recursive: true });
+    }
+    for (const [name, b64] of Object.entries(files)) {
+      fs.writeFileSync(path.join(sessionDir, name), Buffer.from(b64, "base64"));
+    }
+    console.log(`[WhatsAppPersonal] Restored session from DB for tenant ${tenantId}`);
+    return true;
+  } catch (err: any) {
+    console.warn(`[WhatsAppPersonal] restoreSessionFromDb failed for ${tenantId}:`, err.message);
+    return false;
+  }
+}
+
+async function deleteSessionFromDb(tenantId: string): Promise<void> {
+  try {
+    const { db } = await import("../db");
+    const { whatsappAuthSessions } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.delete(whatsappAuthSessions).where(eq(whatsappAuthSessions.tenantId, tenantId));
+  } catch (err: any) {
+    console.warn(`[WhatsAppPersonal] deleteSessionFromDb failed for ${tenantId}:`, err.message);
+  }
+}
+
 interface AuthSession {
   socket: WASocket | null;
   qrCode: string | null;
@@ -594,8 +664,17 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
         fs.mkdirSync(AUTH_DIR, { recursive: true });
       }
 
+      // Restore from DB if the local session directory is missing (e.g. after container restart)
+      if (!fs.existsSync(sessionDir) || fs.readdirSync(sessionDir).length === 0) {
+        await restoreSessionFromDb(tenantId, sessionDir);
+      }
+
       const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = await getBaileys();
-      const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+      const { state, saveCreds: rawSaveCreds } = await useMultiFileAuthState(sessionDir);
+      const saveCreds = async () => {
+        await rawSaveCreds();
+        await saveSessionToDb(tenantId, sessionDir);
+      };
       const { version, isLatest } = await fetchLatestBaileysVersion();
       
       console.log(`[WhatsAppPersonal] Using Baileys v${version.join(".")}, latest: ${isLatest}`);
@@ -681,6 +760,7 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
               console.log(`[WhatsAppPersonal] Removed invalid session for tenant ${tenantId}`);
             } catch {
             }
+            deleteSessionFromDb(tenantId).catch(() => {});
             
             authSessions.delete(tenantId);
           }
@@ -766,7 +846,11 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
       }
 
       const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = await getBaileys();
-      const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+      const { state, saveCreds: rawSaveCreds } = await useMultiFileAuthState(sessionDir);
+      const saveCreds = async () => {
+        await rawSaveCreds();
+        await saveSessionToDb(tenantId, sessionDir);
+      };
       const { version, isLatest } = await fetchLatestBaileysVersion();
       
       console.log(`[WhatsAppPersonal] Phone auth using Baileys v${version.join(".")}, latest: ${isLatest}`);
@@ -819,6 +903,7 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
               console.log(`[WhatsAppPersonal] Removed invalid phone auth session for tenant ${tenantId}`);
             } catch {
             }
+            deleteSessionFromDb(tenantId).catch(() => {});
             
             authSessions.delete(tenantId);
           } else if (!session.reconnecting) {
@@ -935,6 +1020,7 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
       fs.rmSync(sessionDir, { recursive: true, force: true });
     } catch {
     }
+    deleteSessionFromDb(tenantId).catch(() => {});
 
     authSessions.delete(tenantId);
     processedHistoryIds.delete(tenantId);
