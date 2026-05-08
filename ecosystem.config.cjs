@@ -76,7 +76,7 @@ module.exports = {
       autorestart: true,
       watch: false,
       max_memory_restart: '512M',
-      env: { PORT: '8200', ...envVars },
+      env: { ...envVars, PORT: '8200' },
       error_file: path.join(__dirname, '../logs/podzamenu-error.log'),
       out_file: path.join(__dirname, '../logs/podzamenu-out.log'),
       time: true
