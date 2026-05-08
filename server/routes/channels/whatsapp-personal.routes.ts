@@ -232,6 +232,10 @@ router.post(
       }
 
       const recipientJid = `${cleanDigits}@s.whatsapp.net`;
+      // primaryExternalId is what we use as the customer's externalId.
+      // WhatsApp uses LID-based JIDs for replies, so we must use the LID (if available)
+      // as the primary key — otherwise the inbound reply creates a duplicate customer/conversation.
+      let primaryExternalId = recipientJid;
 
       // Verify the number is registered on WhatsApp before creating a conversation
       const session = WAP.getSession(tenantId);
@@ -241,8 +245,10 @@ router.post(
           if (!result?.exists) {
             return res.status(400).json({ error: `Номер +${cleanDigits} не зарегистрирован в WhatsApp` });
           }
-          // Use the confirmed JID from WhatsApp (may differ, e.g. business accounts)
-          // recipientJid stays as-is; WA will route correctly
+          // Prefer the LID: that's what the recipient uses when they reply
+          if ((result as any).lid) {
+            primaryExternalId = (result as any).lid as string;
+          }
         } catch (e: any) {
           console.warn(`[WhatsAppPersonal] onWhatsApp check failed for ${recipientJid}:`, e.message);
           // Non-fatal: proceed even if check fails
@@ -250,23 +256,28 @@ router.post(
       }
 
       const { storage } = await import("../../storage");
-      let customer = await storage.getCustomerByExternalId(tenantId, "whatsapp_personal", recipientJid);
+
+      // Look up existing customer: try LID first (new), then phone JID (legacy)
+      let customer = await storage.getCustomerByExternalId(tenantId, "whatsapp_personal", primaryExternalId);
+      if (!customer && primaryExternalId !== recipientJid) {
+        customer = await storage.getCustomerByExternalId(tenantId, "whatsapp_personal", recipientJid);
+      }
 
       if (!customer) {
         try {
           customer = await storage.createCustomer(
             {
               tenantId,
-              externalId: recipientJid,
+              externalId: primaryExternalId,
               name: `WhatsApp +${cleanDigits}`,
               channel: "whatsapp_personal",
               phone: `+${cleanDigits}`,
-              metadata: {},
+              metadata: { phoneJid: recipientJid },
             },
             tenantId
           );
         } catch (e: any) {
-          customer = await storage.getCustomerByExternalId(tenantId, "whatsapp_personal", recipientJid);
+          customer = await storage.getCustomerByExternalId(tenantId, "whatsapp_personal", primaryExternalId);
           if (!customer) throw e;
         }
       }

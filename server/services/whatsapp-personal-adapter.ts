@@ -19,6 +19,16 @@ import QRCode from "qrcode";
 
 const AUTH_DIR = "./whatsapp_sessions";
 
+// Suppress Baileys' internal console.log calls that leak Signal Protocol session data
+// (e.g. "Closing session: SessionEntry { _chains: ..., privKey: <Buffer...> }")
+const _origConsoleLog = console.log;
+console.log = (...args: unknown[]) => {
+  const first = args[0];
+  if (typeof first === "string" && first.startsWith("Closing session:")) return;
+  if (first && typeof first === "object" && "_chains" in (first as object)) return;
+  _origConsoleLog(...args);
+};
+
 // ── DB-backed session persistence ──────────────────────────────────────────
 // Serialize the entire session directory to JSON (base64 files) and store in
 // the whatsapp_auth_sessions table so credentials survive container restarts.
@@ -315,25 +325,35 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
       
       let text = "";
       const messageContent = msg.message;
+
+      // Whether this message carries a downloadable media attachment.
+      // Media-only messages (no caption) are still valid and must not be dropped.
+      const hasMedia = !!(
+        messageContent?.imageMessage ||
+        messageContent?.videoMessage ||
+        messageContent?.documentMessage ||
+        messageContent?.audioMessage ||
+        messageContent?.stickerMessage
+      );
       
       if (messageContent?.conversation) {
         text = messageContent.conversation;
       } else if (messageContent?.extendedTextMessage?.text) {
         text = messageContent.extendedTextMessage.text;
       } else if (messageContent?.imageMessage) {
-        text = messageContent.imageMessage.caption || "[Image]";
+        text = messageContent.imageMessage.caption || "";
       } else if (messageContent?.videoMessage) {
-        text = messageContent.videoMessage.caption || "[Video]";
+        text = messageContent.videoMessage.caption || "";
       } else if (messageContent?.documentMessage) {
-        text = messageContent.documentMessage.caption || "[Document]";
+        text = messageContent.documentMessage.caption || messageContent.documentMessage.fileName || "";
       } else if (messageContent?.audioMessage) {
-        text = "[Audio]";
+        text = "";
       } else if (messageContent?.stickerMessage) {
-        text = "[Sticker]";
+        text = "";
       } else if (messageContent?.contactMessage) {
-        text = "[Contact]";
+        text = "[Контакт]";
       } else if (messageContent?.locationMessage) {
-        text = "[Location]";
+        text = "[Локация]";
       } else if (messageContent?.buttonsResponseMessage?.selectedButtonId) {
         text = messageContent.buttonsResponseMessage.selectedDisplayText || messageContent.buttonsResponseMessage.selectedButtonId;
       } else if (messageContent?.listResponseMessage?.singleSelectReply?.selectedRowId) {
@@ -345,17 +365,17 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
         if (ir.nativeFlowResponseMessage?.paramsJson) {
           try {
             const params = JSON.parse(ir.nativeFlowResponseMessage.paramsJson);
-            text = params.id || params.title || "[Interactive Response]";
+            text = params.id || params.title || "";
           } catch {
-            text = "[Interactive Response]";
+            text = "";
           }
         }
       }
       
       console.log("[WhatsAppPersonal] Extracted text:", text ? text.substring(0, 50) : "(empty)");
 
-      if (!text) {
-        console.log("[WhatsAppPersonal] Parse: empty text, returning null");
+      if (!text && !hasMedia) {
+        console.log("[WhatsAppPersonal] Parse: empty text and no media, returning null");
         return null;
       }
 
