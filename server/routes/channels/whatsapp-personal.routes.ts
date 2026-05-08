@@ -233,6 +233,22 @@ router.post(
 
       const recipientJid = `${cleanDigits}@s.whatsapp.net`;
 
+      // Verify the number is registered on WhatsApp before creating a conversation
+      const session = WAP.getSession(tenantId);
+      if (session?.socket) {
+        try {
+          const [result] = await session.socket.onWhatsApp(recipientJid);
+          if (!result?.exists) {
+            return res.status(400).json({ error: `Номер +${cleanDigits} не зарегистрирован в WhatsApp` });
+          }
+          // Use the confirmed JID from WhatsApp (may differ, e.g. business accounts)
+          // recipientJid stays as-is; WA will route correctly
+        } catch (e: any) {
+          console.warn(`[WhatsAppPersonal] onWhatsApp check failed for ${recipientJid}:`, e.message);
+          // Non-fatal: proceed even if check fails
+        }
+      }
+
       const { storage } = await import("../../storage");
       let customer = await storage.getCustomerByExternalId(tenantId, "whatsapp_personal", recipientJid);
 
@@ -302,6 +318,15 @@ router.post(
           console.error(
             `[WhatsAppPersonal] start-conversation: failed to send initial message: ${sendResult.error}`
           );
+          // Clean up the orphaned conversation since the message failed to send
+          try {
+            await storage.deleteConversation(conversation.id, tenantId);
+          } catch {
+            // best-effort cleanup
+          }
+          return res.status(500).json({
+            error: `Не удалось отправить сообщение: ${sendResult.error || "Ошибка WhatsApp"}`,
+          });
         }
       }
 

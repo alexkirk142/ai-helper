@@ -1110,6 +1110,10 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
     return !!session?.user;
   }
 
+  static getSession(tenantId: string): AuthSession | undefined {
+    return authSessions.get(tenantId);
+  }
+
   static getSessionInfo(tenantId: string): { 
     connected: boolean; 
     user?: { id: string; name: string; phone: string };
