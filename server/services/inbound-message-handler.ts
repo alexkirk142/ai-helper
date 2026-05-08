@@ -238,6 +238,20 @@ export async function handleIncomingMessage(
 
 export async function triggerAiSuggestion(conversationId: string, tenantId: string): Promise<void> {
   try {
+    // Gate AI suggestions behind active AI Agent subscription (separate from channels)
+    const { getAiBillingStatus } = await import("./cryptobot-billing");
+    const billing = await getAiBillingStatus(tenantId);
+    if (!billing.canAccess) {
+      console.log(`[AI] Tenant ${tenantId} — no active AI Agent subscription, skipping AI suggestion`);
+      return;
+    }
+
+    const aiEnabled = await featureFlagService.isEnabled("AI_SUGGESTIONS_ENABLED", tenantId);
+    if (!aiEnabled) {
+      console.log(`[AI] Tenant ${tenantId} — AI_SUGGESTIONS_ENABLED=false, skipping`);
+      return;
+    }
+
     const conversation = await storage.getConversationDetail(conversationId, tenantId);
     if (!conversation) {
       console.warn(`[InboundHandler] Conversation not found for AI: ${conversationId}`);

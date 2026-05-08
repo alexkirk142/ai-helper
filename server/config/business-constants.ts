@@ -3,8 +3,11 @@
  * Do NOT hardcode these values in service files.
  */
 
-/** Monthly subscription price in USDT */
+/** Monthly subscription price in USDT (channels access) */
 export const SUBSCRIPTION_PRICE_USDT = 50;
+
+/** Monthly AI Agent subscription price in USDT */
+export const AI_SUBSCRIPTION_PRICE_USDT = 30;
 
 /** Trial period duration in hours */
 export const TRIAL_PERIOD_HOURS = 72;

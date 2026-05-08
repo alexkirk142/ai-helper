@@ -32,6 +32,7 @@ const Onboarding = lazy(() => import("@/pages/onboarding"));
 const Analytics = lazy(() => import("@/pages/analytics"));
 const SecurityStatus = lazy(() => import("@/pages/security-status"));
 const Billing = lazy(() => import("@/pages/billing"));
+const Extensions = lazy(() => import("@/pages/extensions"));
 const AdminSecrets = lazy(() => import("@/pages/admin-secrets"));
 const AdminUsers = lazy(() => import("@/pages/admin-users"));
 const AdminBilling = lazy(() => import("@/pages/admin-billing"));
@@ -91,6 +92,7 @@ function Router() {
         <Route path="/settings" component={Settings} />
         <Route path="/onboarding" component={Onboarding} />
         <Route path="/analytics" component={Analytics} />
+        <Route path="/extensions" component={Extensions} />
         <Route path="/admin/security">
           {() => <AdminGuard><SecurityStatus /></AdminGuard>}
         </Route>

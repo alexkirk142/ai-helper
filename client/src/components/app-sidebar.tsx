@@ -10,6 +10,7 @@ import {
   BarChart3,
   Building2,
   XCircle,
+  Puzzle,
 } from "lucide-react";
 import { BrandLogoIcon, BRAND_NAME, BRAND_TAGLINE } from "@/components/brand-logo";
 import { useAuth } from "@/hooks/use-auth";
@@ -52,6 +53,11 @@ const managementItems = [
     title: "Аналитика",
     url: "/analytics",
     icon: BarChart3,
+  },
+  {
+    title: "Расширения",
+    url: "/extensions",
+    icon: Puzzle,
   },
   {
     title: "Настройки",

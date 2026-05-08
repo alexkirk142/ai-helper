@@ -96,11 +96,75 @@ router.post("/api/billing/cancel", requireAuth, requireAdmin, async (req: Reques
 
     const { cancelSubscription } = await import("../services/cryptobot-billing");
     await cancelSubscription(user.tenantId);
-    
+
     res.json({ success: true, message: "Subscription will be canceled at period end" });
   } catch (error: any) {
     console.error("Error canceling subscription:", error);
     res.status(500).json({ error: error.message || "Failed to cancel subscription" });
+  }
+});
+
+// ─── AI Agent subscription routes ───────────────────────────────────────────
+
+router.get("/api/billing/ai/me", requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!req.userId || req.userId === "system") {
+      return res.status(403).json({ error: "User authentication required" });
+    }
+    const user = await getUserForBilling(req.userId);
+    if (!user?.tenantId) {
+      return res.status(403).json({ error: "User not associated with a tenant" });
+    }
+
+    const { getAiBillingStatus } = await import("../services/cryptobot-billing");
+    const billingStatus = await getAiBillingStatus(user.tenantId);
+    res.json(billingStatus);
+  } catch (error: any) {
+    console.error("Error fetching AI billing status:", error);
+    res.status(500).json({ error: "Failed to fetch AI billing status" });
+  }
+});
+
+router.post("/api/billing/ai/checkout", requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!req.userId || req.userId === "system") {
+      return res.status(403).json({ error: "User authentication required" });
+    }
+    const user = await getUserForBilling(req.userId);
+    if (!user?.tenantId) {
+      return res.status(403).json({ error: "User not associated with a tenant" });
+    }
+
+    const { createAiInvoice } = await import("../services/cryptobot-billing");
+
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const successUrl = `${baseUrl}/extensions?billing=success`;
+
+    const result = await createAiInvoice(user.tenantId, successUrl);
+    res.json({ url: result.payUrl, invoiceId: result.invoiceId });
+  } catch (error: any) {
+    console.error("Error creating AI invoice:", error);
+    res.status(500).json({ error: error.message || "Failed to create AI payment invoice" });
+  }
+});
+
+router.post("/api/billing/ai/cancel", requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!req.userId || req.userId === "system") {
+      return res.status(403).json({ error: "User authentication required" });
+    }
+    const user = await getUserForBilling(req.userId);
+    if (!user?.tenantId) {
+      return res.status(403).json({ error: "User not associated with a tenant" });
+    }
+
+    const { cancelAiSubscription } = await import("../services/cryptobot-billing");
+    await cancelAiSubscription(user.tenantId);
+
+    res.json({ success: true, message: "AI subscription will be canceled at period end" });
+  } catch (error: any) {
+    console.error("Error canceling AI subscription:", error);
+    res.status(500).json({ error: error.message || "Failed to cancel AI subscription" });
   }
 });
 

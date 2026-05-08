@@ -48,7 +48,41 @@ export function useCancelSubscription() {
 }
 
 export function isSubscriptionRequired(error: any): boolean {
-  return error?.code === "SUBSCRIPTION_REQUIRED" || 
+  return error?.code === "SUBSCRIPTION_REQUIRED" ||
          error?.error === "SUBSCRIPTION_REQUIRED" ||
          (error?.message && error.message.includes("SUBSCRIPTION_REQUIRED"));
+}
+
+// ─── AI Agent subscription hooks ────────────────────────────────────────────
+
+export function useAiBillingStatus() {
+  return useQuery<BillingStatus>({
+    queryKey: ["/api/billing/ai/me"],
+    staleTime: 30000,
+    refetchInterval: 60000,
+  });
+}
+
+export function useCreateAiCheckout() {
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/billing/ai/checkout");
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/ai/me"] });
+    },
+  });
+}
+
+export function useCancelAiSubscription() {
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/billing/ai/cancel");
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/ai/me"] });
+    },
+  });
 }

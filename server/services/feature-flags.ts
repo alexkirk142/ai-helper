@@ -7,7 +7,7 @@ import { randomUUID } from "crypto";
 const DEFAULT_FLAGS: Record<FeatureFlagName, { description: string; enabled: boolean }> = {
   AI_SUGGESTIONS_ENABLED: {
     description: "Enable AI-powered response suggestions",
-    enabled: true,
+    enabled: false,
   },
   DECISION_ENGINE_ENABLED: {
     description: "Enable advanced decision engine for auto-responses",

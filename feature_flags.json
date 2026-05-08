@@ -1,6 +1,6 @@
 {
   "global:AI_SUGGESTIONS_ENABLED": {
-    "enabled": true
+    "enabled": false
   },
   "global:DECISION_ENGINE_ENABLED": {
     "enabled": false

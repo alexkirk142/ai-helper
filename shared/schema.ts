@@ -1088,10 +1088,15 @@ export const SUBSCRIPTION_STATUSES = [
 
 export type SubscriptionStatus = typeof SUBSCRIPTION_STATUSES[number];
 
-// Plans table (single $50/month plan for now)
+// Plan feature types — distinguishes what a plan grants access to
+export const PLAN_FEATURE_TYPES = ["channels", "ai_agent"] as const;
+export type PlanFeatureType = typeof PLAN_FEATURE_TYPES[number];
+
+// Plans table
 export const plans = pgTable("plans", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
+  planType: varchar("plan_type").default("channels").notNull().$type<PlanFeatureType>(),
   stripePriceId: text("stripe_price_id"), // Optional - for Stripe
   stripeProductId: text("stripe_product_id"), // Optional - for Stripe
   amount: integer("amount").notNull(), // in cents (or smallest unit)
@@ -1103,10 +1108,11 @@ export const plans = pgTable("plans", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
-// Subscriptions table (one per tenant)
+// Subscriptions table — one row per (tenantId, feature) pair
 export const subscriptions = pgTable("subscriptions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  tenantId: varchar("tenant_id").notNull().references(() => tenants.id).unique(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  feature: varchar("feature").default("channels").notNull().$type<PlanFeatureType>(),
   planId: varchar("plan_id").references(() => plans.id),
   stripeCustomerId: text("stripe_customer_id"), // Optional - for Stripe
   stripeSubscriptionId: text("stripe_subscription_id").unique(), // Optional - for Stripe
@@ -1123,7 +1129,9 @@ export const subscriptions = pgTable("subscriptions", {
   hadTrial: boolean("had_trial").default(false), // Whether tenant ever had a trial (prevents multiple trials)
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+}, (table) => [
+  uniqueIndex("subscriptions_tenant_feature_unique").on(table.tenantId, table.feature),
+]);
 
 // Subscription grants (manual comping by platform admins)
 export const subscriptionGrants = pgTable("subscription_grants", {

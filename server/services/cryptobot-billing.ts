@@ -1,10 +1,10 @@
 import { CryptoPay, Assets } from "@foile/crypto-pay-api";
 import { db } from "../db";
 import { plans, subscriptions, tenants, subscriptionGrants } from "@shared/schema";
-import type { Plan, Subscription, SubscriptionStatus, BillingStatus } from "@shared/schema";
+import type { Plan, Subscription, SubscriptionStatus, BillingStatus, PlanFeatureType } from "@shared/schema";
 import { eq, and, isNull, desc, sql } from "drizzle-orm";
 import crypto from "crypto";
-import { SUBSCRIPTION_PRICE_USDT, TRIAL_PERIOD_HOURS } from "../config/business-constants";
+import { SUBSCRIPTION_PRICE_USDT, AI_SUBSCRIPTION_PRICE_USDT, TRIAL_PERIOD_HOURS } from "../config/business-constants";
 
 const CRYPTO_PAY_TOKEN = process.env.CRYPTO_PAY_API_TOKEN;
 const IS_TESTNET = process.env.CRYPTO_PAY_TESTNET === "true";
@@ -22,9 +22,20 @@ const cryptoPay = CRYPTO_PAY_TOKEN
 
 const PLAN_CONFIG = {
   name: "AI Sales Operator Pro",
+  planType: "channels" as PlanFeatureType,
   amount: SUBSCRIPTION_PRICE_USDT * 100, // USD cents
   currency: "usd",
   cryptoAmount: String(SUBSCRIPTION_PRICE_USDT),
+  cryptoAsset: "USDT",
+  interval: "month" as const,
+};
+
+const AI_PLAN_CONFIG = {
+  name: "AI Agent",
+  planType: "ai_agent" as PlanFeatureType,
+  amount: AI_SUBSCRIPTION_PRICE_USDT * 100,
+  currency: "usd",
+  cryptoAmount: String(AI_SUBSCRIPTION_PRICE_USDT),
   cryptoAsset: "USDT",
   interval: "month" as const,
 };
@@ -37,14 +48,19 @@ export function getCryptoPay(): CryptoPay {
 }
 
 export async function ensurePlanExists(): Promise<Plan> {
-  const [existingPlan] = await db.select().from(plans).where(eq(plans.isActive, true)).limit(1);
-  
+  const [existingPlan] = await db
+    .select()
+    .from(plans)
+    .where(and(eq(plans.isActive, true), eq(plans.planType, "channels")))
+    .limit(1);
+
   if (existingPlan) {
     return existingPlan;
   }
 
   const [plan] = await db.insert(plans).values({
     name: PLAN_CONFIG.name,
+    planType: PLAN_CONFIG.planType,
     amount: PLAN_CONFIG.amount,
     currency: PLAN_CONFIG.currency,
     cryptoAmount: PLAN_CONFIG.cryptoAmount,
@@ -53,7 +69,33 @@ export async function ensurePlanExists(): Promise<Plan> {
     isActive: true,
   }).returning();
 
-  console.log(`[CryptoBilling] Created plan: ${plan.name}`);
+  console.log(`[CryptoBilling] Created channels plan: ${plan.name}`);
+  return plan;
+}
+
+export async function ensureAiPlanExists(): Promise<Plan> {
+  const [existingPlan] = await db
+    .select()
+    .from(plans)
+    .where(and(eq(plans.isActive, true), eq(plans.planType, "ai_agent")))
+    .limit(1);
+
+  if (existingPlan) {
+    return existingPlan;
+  }
+
+  const [plan] = await db.insert(plans).values({
+    name: AI_PLAN_CONFIG.name,
+    planType: AI_PLAN_CONFIG.planType,
+    amount: AI_PLAN_CONFIG.amount,
+    currency: AI_PLAN_CONFIG.currency,
+    cryptoAmount: AI_PLAN_CONFIG.cryptoAmount,
+    cryptoAsset: AI_PLAN_CONFIG.cryptoAsset,
+    interval: AI_PLAN_CONFIG.interval,
+    isActive: true,
+  }).returning();
+
+  console.log(`[CryptoBilling] Created AI Agent plan: ${plan.name}`);
   return plan;
 }
 
@@ -64,25 +106,29 @@ export async function createInvoice(
   const cryptoPayInstance = getCryptoPay();
   const plan = await ensurePlanExists();
 
-  const [existingSub] = await db.select().from(subscriptions).where(eq(subscriptions.tenantId, tenantId));
-  
+  const [existingSub] = await db
+    .select()
+    .from(subscriptions)
+    .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "channels")));
+
   if (existingSub?.status === "active") {
-    throw new Error("Tenant already has an active subscription");
+    throw new Error("Tenant already has an active channels subscription");
   }
 
   const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId));
-  
+
   const invoice = await cryptoPayInstance.createInvoice(
     Assets.USDT,
     plan.cryptoAmount || String(SUBSCRIPTION_PRICE_USDT),
     {
       description: `${plan.name} - месячная подписка`,
-      expires_in: 3600, // 1 hour
+      expires_in: 3600,
       paid_btn_name: "callback" as any,
       paid_btn_url: successUrl,
       payload: JSON.stringify({
         tenantId,
         planId: plan.id,
+        feature: "channels",
         tenantName: tenant?.name || "Unknown",
       }),
       allow_comments: false,
@@ -93,6 +139,7 @@ export async function createInvoice(
   if (!existingSub) {
     await db.insert(subscriptions).values({
       tenantId,
+      feature: "channels",
       planId: plan.id,
       cryptoInvoiceId: String(invoice.invoice_id),
       paymentProvider: "cryptobot",
@@ -107,15 +154,73 @@ export async function createInvoice(
         status: "incomplete",
         updatedAt: new Date(),
       })
-      .where(eq(subscriptions.tenantId, tenantId));
+      .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "channels")));
   }
 
-  console.log(`[CryptoBilling] Created invoice ${invoice.invoice_id} for tenant ${tenantId}`);
+  console.log(`[CryptoBilling] Created channels invoice ${invoice.invoice_id} for tenant ${tenantId}`);
+  return { payUrl: invoice.pay_url, invoiceId: invoice.invoice_id };
+}
 
-  return {
-    payUrl: invoice.pay_url,
-    invoiceId: invoice.invoice_id,
-  };
+export async function createAiInvoice(
+  tenantId: string,
+  successUrl: string
+): Promise<{ payUrl: string; invoiceId: number }> {
+  const cryptoPayInstance = getCryptoPay();
+  const plan = await ensureAiPlanExists();
+
+  const [existingSub] = await db
+    .select()
+    .from(subscriptions)
+    .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "ai_agent")));
+
+  if (existingSub?.status === "active") {
+    throw new Error("Tenant already has an active AI Agent subscription");
+  }
+
+  const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId));
+
+  const invoice = await cryptoPayInstance.createInvoice(
+    Assets.USDT,
+    plan.cryptoAmount || String(AI_SUBSCRIPTION_PRICE_USDT),
+    {
+      description: `${plan.name} - месячная подписка`,
+      expires_in: 3600,
+      paid_btn_name: "callback" as any,
+      paid_btn_url: successUrl,
+      payload: JSON.stringify({
+        tenantId,
+        planId: plan.id,
+        feature: "ai_agent",
+        tenantName: tenant?.name || "Unknown",
+      }),
+      allow_comments: false,
+      allow_anonymous: false,
+    }
+  );
+
+  if (!existingSub) {
+    await db.insert(subscriptions).values({
+      tenantId,
+      feature: "ai_agent",
+      planId: plan.id,
+      cryptoInvoiceId: String(invoice.invoice_id),
+      paymentProvider: "cryptobot",
+      status: "incomplete",
+    });
+  } else {
+    await db
+      .update(subscriptions)
+      .set({
+        cryptoInvoiceId: String(invoice.invoice_id),
+        paymentProvider: "cryptobot",
+        status: "incomplete",
+        updatedAt: new Date(),
+      })
+      .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "ai_agent")));
+  }
+
+  console.log(`[CryptoBilling] Created AI Agent invoice ${invoice.invoice_id} for tenant ${tenantId}`);
+  return { payUrl: invoice.pay_url, invoiceId: invoice.invoice_id };
 }
 
 export async function checkInvoiceStatus(invoiceId: string): Promise<"active" | "paid" | "expired"> {
@@ -190,6 +295,8 @@ export async function handleWebhookEvent(payload: CryptoWebhookPayload): Promise
     return;
   }
 
+  const feature: PlanFeatureType = (metadata as any).feature === "ai_agent" ? "ai_agent" : "channels";
+
   const now = new Date();
   const periodEnd = new Date(now);
   periodEnd.setMonth(periodEnd.getMonth() + 1);
@@ -203,13 +310,24 @@ export async function handleWebhookEvent(payload: CryptoWebhookPayload): Promise
       cancelAtPeriodEnd: false,
       updatedAt: now,
     })
-    .where(eq(subscriptions.tenantId, tenantId));
+    .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, feature)));
 
-  console.log(`[CryptoBilling] Activated subscription for tenant ${tenantId} until ${periodEnd.toISOString()}`);
+  console.log(`[CryptoBilling] Activated ${feature} subscription for tenant ${tenantId} until ${periodEnd.toISOString()}`);
 }
 
 export async function getSubscriptionByTenant(tenantId: string): Promise<Subscription | null> {
-  const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.tenantId, tenantId));
+  const [sub] = await db
+    .select()
+    .from(subscriptions)
+    .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "channels")));
+  return sub || null;
+}
+
+export async function getAiSubscriptionByTenant(tenantId: string): Promise<Subscription | null> {
+  const [sub] = await db
+    .select()
+    .from(subscriptions)
+    .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "ai_agent")));
   return sub || null;
 }
 
@@ -320,22 +438,81 @@ export async function getBillingStatus(tenantId: string): Promise<BillingStatus>
   };
 }
 
+/** Billing status for the AI Agent subscription (feature = 'ai_agent'). No trial support. */
+export async function getAiBillingStatus(tenantId: string): Promise<BillingStatus> {
+  const subscription = await getAiSubscriptionByTenant(tenantId);
+
+  if (!subscription) {
+    return {
+      hasSubscription: false,
+      status: null,
+      plan: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      canAccess: false,
+      isTrial: false,
+      trialEndsAt: null,
+      trialDaysRemaining: null,
+      hadTrial: false,
+      hasActiveGrant: false,
+      grantEndsAt: null,
+    };
+  }
+
+  const plan = subscription.planId ? await getPlanById(subscription.planId) : null;
+  const now = new Date();
+
+  const accessibleStatuses: SubscriptionStatus[] = ["active", "past_due"];
+  let canAccess = accessibleStatuses.includes(subscription.status as SubscriptionStatus);
+
+  if (canAccess && subscription.currentPeriodEnd) {
+    canAccess = new Date(subscription.currentPeriodEnd) > now;
+  }
+
+  return {
+    hasSubscription: true,
+    status: subscription.status as SubscriptionStatus,
+    plan,
+    currentPeriodEnd: subscription.currentPeriodEnd,
+    cancelAtPeriodEnd: subscription.cancelAtPeriodEnd || false,
+    canAccess,
+    isTrial: false,
+    trialEndsAt: null,
+    trialDaysRemaining: null,
+    hadTrial: false,
+    hasActiveGrant: false,
+    grantEndsAt: null,
+  };
+}
+
 export async function cancelSubscription(tenantId: string): Promise<void> {
   const subscription = await getSubscriptionByTenant(tenantId);
-  
+
   if (!subscription) {
-    throw new Error("No subscription found");
+    throw new Error("No channels subscription found");
   }
 
   await db
     .update(subscriptions)
-    .set({
-      cancelAtPeriodEnd: true,
-      updatedAt: new Date(),
-    })
-    .where(eq(subscriptions.tenantId, tenantId));
-  
-  console.log(`[CryptoBilling] Subscription marked for cancellation: tenant ${tenantId}`);
+    .set({ cancelAtPeriodEnd: true, updatedAt: new Date() })
+    .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "channels")));
+
+  console.log(`[CryptoBilling] Channels subscription marked for cancellation: tenant ${tenantId}`);
+}
+
+export async function cancelAiSubscription(tenantId: string): Promise<void> {
+  const subscription = await getAiSubscriptionByTenant(tenantId);
+
+  if (!subscription) {
+    throw new Error("No AI Agent subscription found");
+  }
+
+  await db
+    .update(subscriptions)
+    .set({ cancelAtPeriodEnd: true, updatedAt: new Date() })
+    .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "ai_agent")));
+
+  console.log(`[CryptoBilling] AI Agent subscription marked for cancellation: tenant ${tenantId}`);
 }
 
 /**
@@ -384,11 +561,12 @@ export async function startTrial(tenantId: string): Promise<{ success: boolean; 
         hadTrial: true,
         updatedAt: now,
       })
-      .where(eq(subscriptions.tenantId, tenantId));
+      .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "channels")));
   } else {
     // Create new subscription with trial
     await db.insert(subscriptions).values({
       tenantId,
+      feature: "channels",
       status: "trialing",
       trialStartedAt: now,
       trialEndsAt: trialEndsAt,
@@ -441,18 +619,19 @@ export async function createExpiredSubscription(tenantId: string): Promise<void>
         hadTrial: true,
         updatedAt: new Date(),
       })
-      .where(eq(subscriptions.tenantId, tenantId));
+      .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "channels")));
   } else {
     // Create new expired subscription
     await db.insert(subscriptions).values({
       tenantId,
+      feature: "channels",
       status: "expired",
       hadTrial: true,
       paymentProvider: "cryptobot",
     });
   }
-  
-  console.log(`[CryptoBilling] Created expired subscription for tenant ${tenantId} (fraud prevention)`);
+
+  console.log(`[CryptoBilling] Created expired channels subscription for tenant ${tenantId} (fraud prevention)`);
 }
 
 export async function refreshExpiredSubscriptions(): Promise<void> {
