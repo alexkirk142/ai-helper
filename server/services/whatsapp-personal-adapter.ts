@@ -845,7 +845,7 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
         fs.mkdirSync(AUTH_DIR, { recursive: true });
       }
 
-      const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = await getBaileys();
+      const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, Browsers } = await getBaileys();
       const { state, saveCreds: rawSaveCreds } = await useMultiFileAuthState(sessionDir);
       const saveCreds = async () => {
         await rawSaveCreds();
@@ -867,12 +867,15 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
 
       const logger = pino({ level: "silent" });
 
+      // Pairing code requires a standard WhatsApp-recognized browser fingerprint.
+      // Custom strings are rejected by WA servers — must use Browsers helper.
       const socket = makeWASocket({
         version,
         logger,
         auth: state,
         printQRInTerminal: false,
-        browser: ["AI Sales Operator", "Chrome", "1.0.0"],
+        mobile: false,
+        browser: Browsers.ubuntu("Chrome"),
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: undefined,
         keepAliveIntervalMs: 30000,
