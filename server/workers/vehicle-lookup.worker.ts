@@ -525,8 +525,8 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
         conversationId,
         oem: null,
         searchFallback: {
-          make: vehicleContext.make,
-          model: vehicleContext.model,
+          make: vehicleContext.make ?? null,
+          model: vehicleContext.model ?? null,
           gearboxType,
           gearboxModel: gearbox.model ?? null,
         },
@@ -630,7 +630,7 @@ export function createVehicleLookupWorker(connectionConfig: IORedis): Worker<Veh
       await processVehicleLookup(job);
     },
     {
-      connection: connectionConfig,
+      connection: connectionConfig as any,
       concurrency: 1,
     }
   );

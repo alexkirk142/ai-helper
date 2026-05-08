@@ -1,10 +1,9 @@
 /**
  * Lightweight metrics facade.
  *
- * Default implementation is a no-op so the application ships with zero
- * external dependencies.  To wire a real backend, replace the bodies of
- * `incr` and `timing` — the call-sites throughout the codebase stay
- * unchanged.
+ * When `METRICS_ENABLED=true`, counter and timing events are logged to the
+ * console in a structured line format. Otherwise this module is effectively
+ * no-op — no external dependencies required.
  *
  * Example wiring (StatsD):
  *   import StatsD from "hot-shots";
@@ -23,9 +22,15 @@ export type MetricTags = Record<string, string | number | boolean | null | undef
  * @param name   Dot-namespaced metric name, e.g. "detector.candidates_total"
  * @param tags   Optional low-cardinality key/value dimensions
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function incr(name: string, tags?: MetricTags): void {
-  // no-op — wire real backend here
+  if (process.env.METRICS_ENABLED !== "true") return;
+  const tagStr = tags
+    ? " " + Object.entries(tags)
+        .filter(([, v]) => v != null)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(",")
+    : "";
+  console.log(`[METRIC] incr ${name}${tagStr}`);
 }
 
 /**
@@ -34,7 +39,13 @@ export function incr(name: string, tags?: MetricTags): void {
  * @param ms     Duration in milliseconds
  * @param tags   Optional low-cardinality key/value dimensions
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function timing(name: string, ms: number, tags?: MetricTags): void {
-  // no-op — wire real backend here
+  if (process.env.METRICS_ENABLED !== "true") return;
+  const tagStr = tags
+    ? " " + Object.entries(tags)
+        .filter(([, v]) => v != null)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(",")
+    : "";
+  console.log(`[METRIC] timing ${name} ${ms}ms${tagStr}`);
 }

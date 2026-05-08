@@ -24,7 +24,7 @@ export function getVehicleLookupQueue(): Queue<VehicleLookupJobData> | null {
 
   try {
     vehicleLookupQueue = new Queue<VehicleLookupJobData>(QUEUE_NAME, {
-      connection: config,
+      connection: config as any,
       defaultJobOptions: {
         attempts: 3,
         backoff: {

@@ -12,6 +12,7 @@ import { encryptSecret, isValidKeyName } from "../services/secret-store";
 import { clearSecretCache } from "../services/secret-resolver";
 import { updateService } from "../services/update-service";
 import { getAppUrl } from "../utils/app-url";
+import { SUBSCRIPTION_PRICE_USDT } from "../config/business-constants";
 
 const MAX_GRANT_DURATION_DAYS = 365;
 
@@ -151,7 +152,7 @@ router.get(
       tenantId: u.tenantId,
       tenantName: tenantNameMap[u.tenantId] || "Unknown",
       endsAt: u.endsAt?.toISOString() || "",
-      amount: 50, // 50 USDT per subscription
+      amount: SUBSCRIPTION_PRICE_USDT,
     })).sort((a, b) => new Date(a.endsAt).getTime() - new Date(b.endsAt).getTime());
 
     res.json({
@@ -161,10 +162,10 @@ router.get(
       expiredTrials,
       upcomingRenewals: {
         count: renewals.length,
-        totalAmount: renewals.length * 50,
+        totalAmount: renewals.length * SUBSCRIPTION_PRICE_USDT,
         renewals,
       },
-      totalRevenue: activeSubscriptions * 50,
+      totalRevenue: activeSubscriptions * SUBSCRIPTION_PRICE_USDT,
     });
   }
 );
@@ -909,56 +910,87 @@ router.post(
       return res.status(400).json({ error: "Invalid request", details: parsed.error.errors });
     }
 
-    const [secret] = await db.select().from(integrationSecrets).where(eq(integrationSecrets.id, id)).limit(1);
-    if (!secret) {
-      return res.status(404).json({ error: "Secret not found" });
-    }
-
-    if (secret.scope === "global") {
-      const user = (req as any).user;
-      if (!user?.isPlatformOwner) {
-        return res.status(403).json({ error: "Global secrets can only be managed by platform owner" });
-      }
-    }
-
-    if (secret.revokedAt) {
-      return res.status(400).json({ error: "Cannot rotate a revoked secret" });
-    }
-
     const adminId = (req as any).user?.id;
+    const user = (req as any).user;
     const { plaintextValue, reason } = parsed.data;
     const { ciphertext, meta, last4 } = encryptSecret(plaintextValue);
 
-    const previousState = {
-      last4: secret.last4,
-      rotatedAt: secret.rotatedAt,
-      updatedAt: secret.updatedAt,
-    };
+    try {
+      const { rotated, secret } = await db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select()
+          .from(integrationSecrets)
+          .where(eq(integrationSecrets.id, id))
+          .limit(1);
 
-    const [updated] = await db
-      .update(integrationSecrets)
-      .set({
-        encryptedValue: ciphertext,
-        encryptionMeta: meta,
-        last4,
-        rotatedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(integrationSecrets.id, id))
-      .returning();
+        if (!existing) {
+          const err = new Error("Secret not found") as Error & { status: number };
+          err.status = 404;
+          throw err;
+        }
 
-    await db.insert(adminActions).values({
-      actionType: "secret_rotate",
-      targetType: "secret",
-      targetId: id,
-      adminId,
-      reason,
-      previousState,
-      metadata: null,
-    });
+        if (existing.scope === "global" && !user?.isPlatformOwner) {
+          const err = new Error("Global secrets can only be managed by platform owner") as Error & { status: number };
+          err.status = 403;
+          throw err;
+        }
 
-    clearSecretCache({ scope: secret.scope as "global" | "tenant", tenantId: secret.tenantId || undefined, keyName: secret.keyName });
-    res.json(secretToMetadata(updated));
+        if (existing.revokedAt) {
+          const err = new Error("Cannot rotate a revoked secret") as Error & { status: number };
+          err.status = 400;
+          throw err;
+        }
+
+        const previousState = {
+          last4: existing.last4,
+          rotatedAt: existing.rotatedAt,
+          updatedAt: existing.updatedAt,
+        };
+
+        await tx.insert(adminActions).values({
+          actionType: "secret_rotate",
+          targetType: "secret",
+          targetId: id,
+          adminId,
+          reason,
+          previousState,
+          metadata: null,
+        });
+
+        const [updatedRow] = await tx
+          .update(integrationSecrets)
+          .set({
+            encryptedValue: ciphertext,
+            encryptionMeta: meta,
+            last4,
+            rotatedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(integrationSecrets.id, id))
+          .returning();
+
+        if (!updatedRow) {
+          const err = new Error("Secret update failed") as Error & { status: number };
+          err.status = 500;
+          throw err;
+        }
+
+        return { rotated: updatedRow, secret: existing };
+      });
+
+      clearSecretCache({
+        scope: secret.scope as "global" | "tenant",
+        tenantId: secret.tenantId || undefined,
+        keyName: secret.keyName,
+      });
+      res.json(secretToMetadata(rotated));
+    } catch (err: unknown) {
+      const e = err as Error & { status?: number };
+      if (typeof e.status === "number") {
+        return res.status(e.status).json({ error: e.message });
+      }
+      throw err;
+    }
   }
 );
 

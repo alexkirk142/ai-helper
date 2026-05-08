@@ -178,9 +178,10 @@ describe("Route Registry Integration - Real Routes", () => {
         "/api/telegram-personal/verify-2fa",
         "/api/telegram-personal/cancel-auth",
         "/api/telegram-personal/verify-session",
-        "/api/telegram-personal/start-qr-auth",
-        "/api/telegram-personal/check-qr-auth",
-        "/api/telegram-personal/verify-qr-2fa"
+        // Legacy QR routes removed (DEBT-01); canonical routes are under /accounts/
+        "/api/telegram-personal/accounts/start-qr",
+        "/api/telegram-personal/accounts/check-qr",
+        "/api/telegram-personal/accounts/verify-qr-2fa",
       ];
       
       for (const path of telegramPaths) {

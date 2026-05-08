@@ -2,8 +2,9 @@ import { Router } from "express";
 import { enqueueMarquizLead } from "../services/marquiz-lead-queue";
 import type { MarquizLeadJobData } from "../services/marquiz-lead-queue";
 import { processMarquizLeadDirect } from "../workers/marquiz-lead.worker";
+import { storage } from "../storage";
 
-const router = Router();
+const router = Router({ mergeParams: true });
 
 // Actual Marquiz webhook format (from https://help.marquiz.ru/article/518):
 // {
@@ -67,13 +68,28 @@ function findField(fields: Record<string, string>, ...prefixes: string[]): strin
   return "";
 }
 
-router.post("/", async (req, res) => {
-  // Acknowledge immediately so Marquiz doesn't retry
-  res.status(200).json({ ok: true });
+/** Resolve tenantId: from URL param first, then legacy env var */
+async function resolveTenantId(paramTenantId?: string): Promise<string | null> {
+  if (paramTenantId) {
+    const tenant = await storage.getTenant(paramTenantId).catch(() => null);
+    if (!tenant) {
+      console.warn(`[MarquizWebhook] Unknown tenantId in URL: ${paramTenantId}`);
+      return null;
+    }
+    return paramTenantId;
+  }
+  const envTenantId = process.env.MARQUIZ_TENANT_ID ?? "";
+  if (!envTenantId) {
+    console.error("[MarquizWebhook] No tenantId in URL and MARQUIZ_TENANT_ID not set");
+    return null;
+  }
+  return envTenantId;
+}
 
+async function handleWebhook(req: any, res: any, tenantId: string) {
   try {
     const body = req.body as MarquizPayload;
-    console.log("[MarquizWebhook] Incoming payload:", JSON.stringify(body));
+    console.log(`[MarquizWebhook] tenant=${tenantId} payload:`, JSON.stringify(body));
 
     // ── Phone ──────────────────────────────────────────────────────────────
     const rawPhone =
@@ -219,6 +235,7 @@ router.post("/", async (req, res) => {
     console.log(`[MarquizWebhook] preferredChannel="${preferredChannel ?? "auto"}" (extra.messenger="${messengerRaw}")`);
 
     const leadData: MarquizLeadJobData = {
+      tenantId,
       quizName,
       phone: rawPhone,
       maxPhone: maxPhoneRaw,
@@ -249,7 +266,7 @@ router.post("/", async (req, res) => {
     // Try BullMQ queue first; fall back to direct processing if Redis unavailable
     const queued = await enqueueMarquizLead(leadData);
     if (queued) {
-      console.log(`[MarquizWebhook] Lead enqueued, jobId=${queued.jobId}`);
+      console.log(`[MarquizWebhook] Lead enqueued, jobId=${queued.jobId}, tenant=${tenantId}`);
     } else {
       console.warn("[MarquizWebhook] Queue unavailable — processing lead directly");
       await processMarquizLeadDirect(leadData);
@@ -257,6 +274,22 @@ router.post("/", async (req, res) => {
   } catch (err: any) {
     console.error("[MarquizWebhook] Unhandled error:", err.message, err.stack);
   }
+}
+
+// ── Per-tenant route: POST /webhooks/marquiz/:tenantId ────────────────────────
+router.post("/:tenantId", async (req, res) => {
+  res.status(200).json({ ok: true });
+  const tenantId = await resolveTenantId(req.params.tenantId);
+  if (!tenantId) return;
+  await handleWebhook(req, res, tenantId);
+});
+
+// ── Legacy global route: POST /webhooks/marquiz (uses MARQUIZ_TENANT_ID env) ──
+router.post("/", async (req, res) => {
+  res.status(200).json({ ok: true });
+  const tenantId = await resolveTenantId();
+  if (!tenantId) return;
+  await handleWebhook(req, res, tenantId);
 });
 
 export default router;

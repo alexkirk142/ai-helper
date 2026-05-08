@@ -75,14 +75,14 @@ describe("Feature Flags Endpoints", () => {
     expect(flagNames).toContain("RAG_ENABLED");
   });
 
-  it("GET /api/admin/feature-flags without debug header returns 403 (defaults to operator)", async () => {
-    // Without X-Debug-Role header, should default to operator and get 403
+  it("GET /api/admin/feature-flags without debug header returns 403 (defaults to guest)", async () => {
+    // Without X-Debug-Role header, should default to guest and get 403
     const res = await request(app)
       .get("/api/admin/feature-flags");
     
     expect(res.status).toBe(403);
     expect(res.body).toHaveProperty("error", "Forbidden");
-    expect(res.body).toHaveProperty("currentRole", "operator");
+    expect(res.body).toHaveProperty("currentRole", "guest");
   });
 
   it("GET /api/admin/feature-flags as operator returns 403", async () => {
@@ -313,12 +313,12 @@ describe("Audit Events Endpoints", () => {
   });
 
   it("GET /api/admin/audit-events without debug header returns 403", async () => {
-    // Without X-Debug-Role, should default to operator and get 403
+    // Without X-Debug-Role, should default to guest and get 403
     const res = await request(app)
       .get("/api/admin/audit-events");
     
     expect(res.status).toBe(403);
-    expect(res.body).toHaveProperty("currentRole", "operator");
+    expect(res.body).toHaveProperty("currentRole", "guest");
   });
 });
 

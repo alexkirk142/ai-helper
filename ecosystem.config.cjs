@@ -28,6 +28,7 @@ module.exports = {
       autorestart: true,
       watch: false,
       max_memory_restart: '1G',
+      kill_timeout: 15000,
       env: {
         NODE_ENV: 'production',
         PORT: 5000,
@@ -50,6 +51,20 @@ module.exports = {
       env: { NODE_ENV: 'production', ...envVars },
       error_file: path.join(__dirname, '../logs/worker-price-lookup-error.log'),
       out_file: path.join(__dirname, '../logs/worker-price-lookup-out.log'),
+      time: true
+    },
+    {
+      name: 'worker-vehicle-lookup',
+      script: 'npm',
+      args: 'run worker:vehicle-lookup',
+      cwd: __dirname,
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '512M',
+      env: { NODE_ENV: 'production', ...envVars },
+      error_file: path.join(__dirname, '../logs/worker-vehicle-lookup-error.log'),
+      out_file: path.join(__dirname, '../logs/worker-vehicle-lookup-out.log'),
       time: true
     },
     {

@@ -4,6 +4,7 @@ import { plans, subscriptions, tenants, subscriptionGrants } from "@shared/schem
 import type { Plan, Subscription, SubscriptionStatus, BillingStatus } from "@shared/schema";
 import { eq, and, isNull, desc, sql } from "drizzle-orm";
 import crypto from "crypto";
+import { SUBSCRIPTION_PRICE_USDT, TRIAL_PERIOD_HOURS } from "../config/business-constants";
 
 const CRYPTO_PAY_TOKEN = process.env.CRYPTO_PAY_API_TOKEN;
 const IS_TESTNET = process.env.CRYPTO_PAY_TESTNET === "true";
@@ -21,9 +22,9 @@ const cryptoPay = CRYPTO_PAY_TOKEN
 
 const PLAN_CONFIG = {
   name: "AI Sales Operator Pro",
-  amount: 5000, // $50.00 in cents
+  amount: SUBSCRIPTION_PRICE_USDT * 100, // USD cents
   currency: "usd",
-  cryptoAmount: "50", // 50 USDT
+  cryptoAmount: String(SUBSCRIPTION_PRICE_USDT),
   cryptoAsset: "USDT",
   interval: "month" as const,
 };
@@ -73,7 +74,7 @@ export async function createInvoice(
   
   const invoice = await cryptoPayInstance.createInvoice(
     Assets.USDT,
-    plan.cryptoAmount || "50",
+    plan.cryptoAmount || String(SUBSCRIPTION_PRICE_USDT),
     {
       description: `${plan.name} - месячная подписка`,
       expires_in: 3600, // 1 hour
@@ -337,14 +338,11 @@ export async function cancelSubscription(tenantId: string): Promise<void> {
   console.log(`[CryptoBilling] Subscription marked for cancellation: tenant ${tenantId}`);
 }
 
-// Trial duration: 72 hours (3 days)
-const TRIAL_DURATION_HOURS = 72;
-
 /**
  * Start a free trial for a tenant.
  * Rules:
  * - Trial can only be started once per tenant (hadTrial flag prevents re-use)
- * - Trial lasts 72 hours
+ * - Trial lasts TRIAL_PERIOD_HOURS hours
  * - If tenant already had a paid subscription or expired trial, no new trial is allowed
  */
 export async function startTrial(tenantId: string): Promise<{ success: boolean; reason?: string }> {
@@ -373,7 +371,7 @@ export async function startTrial(tenantId: string): Promise<{ success: boolean; 
   }
   
   const now = new Date();
-  const trialEndsAt = new Date(now.getTime() + TRIAL_DURATION_HOURS * 60 * 60 * 1000);
+  const trialEndsAt = new Date(now.getTime() + TRIAL_PERIOD_HOURS * 60 * 60 * 1000);
   
   if (existingSub) {
     // Update existing subscription to trialing
@@ -399,7 +397,7 @@ export async function startTrial(tenantId: string): Promise<{ success: boolean; 
     });
   }
   
-  console.log(`[CryptoBilling] Started 72h trial for tenant ${tenantId}, expires at ${trialEndsAt.toISOString()}`);
+  console.log(`[CryptoBilling] Started ${TRIAL_PERIOD_HOURS}h trial for tenant ${tenantId}, expires at ${trialEndsAt.toISOString()}`);
   return { success: true };
 }
 

@@ -66,6 +66,7 @@ declare global {
     interface Request {
       userRole?: UserRole;
       userId?: string;
+      tenantId?: string;
     }
   }
 }
@@ -78,7 +79,7 @@ declare global {
  */
 export function extractUserRole(req: Request): UserRole {
   const config = getConfig();
-  
+
   // In development/staging/test, allow debug role header for testing.
   // SECURITY: Debug role is ONLY allowed in non-production AND must be explicitly provided.
   if (config.NODE_ENV !== "production") {
@@ -86,9 +87,8 @@ export function extractUserRole(req: Request): UserRole {
     if (debugRole && ["owner", "admin", "operator", "viewer", "guest"].includes(debugRole)) {
       return debugRole as UserRole;
     }
-    // In non-production without explicit debug header, default to operator (not admin!)
-    // This allows basic API access but blocks admin routes during development.
-    return "operator";
+    // In non-production without explicit debug header, default to guest (least privilege).
+    return "guest";
   }
   
   // In production, read role from the authenticated session.
@@ -105,7 +105,7 @@ export function extractUserRole(req: Request): UserRole {
 
 /**
  * Middleware to require authentication.
- * Checks email/password session, then falls back to debug headers in non-production.
+ * Checks email/password session, then falls back to debug headers when ENABLE_DEBUG_HEADERS=true (non-production).
  */
 async function _requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const config = getConfig();
@@ -122,26 +122,59 @@ async function _requireAuth(req: Request, res: Response, next: NextFunction): Pr
         (req as any).user = user;
       }
     } catch (err) {
-      console.error("[requireAuth] Error fetching user:", err);
+      console.error("[requireAuth] Error fetching user from DB:", err);
+      res.status(503).json({ error: "Service temporarily unavailable" });
+      return;
     }
     
     return next();
   }
   
-  // In non-production, allow debug headers for testing
-  if (config.NODE_ENV !== "production") {
+  // In non-production, allow debug headers for testing only when explicitly enabled
+  if (config.NODE_ENV !== "production" && process.env.ENABLE_DEBUG_HEADERS === "true") {
     req.userRole = extractUserRole(req);
     req.userId = req.headers["x-debug-user-id"] as string || "system";
     return next();
   }
   
-  // In production without valid session, return 401
+  // Without valid session and no permitted debug bypass, return 401
   res.status(401).json({ error: "Authentication required" });
 }
 
 export const requireAuth: MarkedHandler = Object.assign(_requireAuth, {
   [AUTH_MARKER]: true,
 });
+
+/**
+ * Middleware to require tenant association.
+ * Must be placed after requireAuth. Uses cached req.user when available
+ * to avoid a second DB call, falls back to storage.getUser otherwise.
+ * Sets req.tenantId and (req as any).user for downstream handlers.
+ */
+export async function requireTenant(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  try {
+    const user = (req as any).user ?? await storage.getUser(userId);
+    if (!user?.tenantId) {
+      res.status(403).json({ error: "User not associated with a tenant" });
+      return;
+    }
+    (req as any).user = user;
+    req.tenantId = user.tenantId;
+    next();
+  } catch (err) {
+    console.error("[requireTenant] DB error:", err);
+    res.status(503).json({ error: "Service unavailable" });
+  }
+}
 
 /**
  * Middleware to require specific roles.

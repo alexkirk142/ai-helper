@@ -120,7 +120,11 @@ export default function Dashboard() {
           <>
             <MetricsCard
               title="Среднее время ответа"
-              value={`${metrics?.avgResponseTime || 0}с`}
+              value={
+                metrics?.avgResponseTime == null
+                  ? "—"
+                  : `${metrics.avgResponseTime}с`
+              }
               icon={<TrendingUp className="h-4 w-4" />}
               trend="up"
               trendValue="-15%"

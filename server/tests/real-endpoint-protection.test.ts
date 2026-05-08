@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "fs";
+import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 
 const routesContent = readFileSync(join(__dirname, "../routes.ts"), "utf-8");
 
-function extractEndpoints(content: string): Array<{
+function extractEndpoints(content: string, prefix: "app" | "router" = "app"): Array<{
   method: string;
   path: string;
   hasAuth: boolean;
@@ -12,7 +12,7 @@ function extractEndpoints(content: string): Array<{
 }> {
   const endpoints: Array<{ method: string; path: string; hasAuth: boolean; permission: string | null }> = [];
   
-  const routeRegex = /app\.(get|post|patch|delete)\s*\(\s*["']([^"']+)["']\s*,([^)]+\))/gi;
+  const routeRegex = new RegExp(`${prefix}\\.(get|post|patch|delete)\\s*\\(\\s*["']([^"']+)["']\\s*,([^)]+\\))`, "gi");
   
   let match;
   while ((match = routeRegex.exec(content)) !== null) {
@@ -31,7 +31,20 @@ function extractEndpoints(content: string): Array<{
   return endpoints;
 }
 
-const allEndpoints = extractEndpoints(routesContent);
+const routesDir = join(__dirname, "../routes");
+const subRouteFiles = [
+  ...readdirSync(routesDir)
+    .filter(f => f.endsWith(".routes.ts"))
+    .map(f => readFileSync(join(routesDir, f), "utf-8")),
+  ...readdirSync(join(routesDir, "channels"))
+    .filter(f => f.endsWith(".routes.ts"))
+    .map(f => readFileSync(join(routesDir, "channels", f), "utf-8")),
+];
+
+const allEndpoints = [
+  ...extractEndpoints(routesContent, "app"),
+  ...subRouteFiles.flatMap(content => extractEndpoints(content, "router")),
+];
 
 const writeEndpoints = allEndpoints.filter(e => 
   e.method === "POST" || e.method === "PATCH" || e.method === "DELETE"
@@ -42,6 +55,7 @@ const excludedPaths = [
   "/api/webhook/whatsapp",
   "/webhooks/telegram",
   "/webhooks/whatsapp",
+  "/webhooks/cryptobot",
   "/api/login",
   "/api/logout", 
   "/api/callback"
@@ -196,8 +210,8 @@ describe("Real Routes.ts Endpoint Protection", () => {
       expect(route?.permission).toBe("MANAGE_CHANNELS");
     });
 
-    it("protects telegram-personal start-qr-auth endpoint", () => {
-      const route = allEndpoints.find(e => e.path === "/api/telegram-personal/start-qr-auth");
+    it("protects telegram-personal accounts/start-qr endpoint", () => {
+      const route = allEndpoints.find(e => e.path === "/api/telegram-personal/accounts/start-qr");
       expect(route?.hasAuth).toBe(true);
       expect(route?.permission).toBe("MANAGE_CHANNELS");
     });

@@ -53,7 +53,13 @@ class RealtimeService {
           if (message.type === "ping") {
             ws.send(JSON.stringify({ type: "pong" }));
           }
-        } catch {
+        } catch (err) {
+          console.error("[WebSocket] Message handler error:", err);
+          try {
+            ws.send(JSON.stringify({ type: "error", message: "Invalid message format" }));
+          } catch {
+            // ws может быть уже закрыт — игнорируем ошибку отправки
+          }
         }
       });
 
@@ -115,8 +121,8 @@ class RealtimeService {
           socket.destroy();
           return;
         }
-      } else if (process.env.NODE_ENV === "production") {
-        console.warn("[WebSocket] Rejected: unauthenticated connection in production");
+      } else {
+        console.warn("[WebSocket] Rejected: unauthenticated connection");
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();
         return;

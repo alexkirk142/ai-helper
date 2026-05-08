@@ -142,6 +142,8 @@ export const userInvites = pgTable("user_invites", {
   tokenHash: text("token_hash").notNull().unique(), // SHA-256 hash of token (never store plaintext)
   invitedBy: varchar("invited_by").references(() => users.id),
   expiresAt: timestamp("expires_at").notNull(),
+  emailStatus: text("email_status").default("pending").notNull(),
+  emailSentAt: timestamp("email_sent_at"),
   usedAt: timestamp("used_at"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
@@ -185,6 +187,7 @@ export const customers = pgTable("customers", {
   phone: text("phone"),
   email: text("email"),
   tags: jsonb("tags").default([]), // array of strings
+  isBlocked: boolean("is_blocked").default(false).notNull(),
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -227,6 +230,7 @@ export const conversations = pgTable("conversations", {
   lastMessageAt: timestamp("last_message_at").default(sql`CURRENT_TIMESTAMP`),
   unreadCount: integer("unread_count").default(0),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
   index("idx_conversations_tenant_id").on(table.tenantId),
   index("idx_conversations_customer_id").on(table.customerId),
@@ -628,7 +632,9 @@ export const auditEvents = pgTable("audit_events", {
 });
 
 // Insert schemas
-export const insertTenantSchema = createInsertSchema(tenants).omit({ id: true, createdAt: true });
+export const insertTenantSchema = createInsertSchema(tenants, {
+  status: z.enum(TENANT_STATUSES).optional(),
+}).omit({ id: true, createdAt: true });
 export const insertChannelSchema = createInsertSchema(channels).omit({ id: true, createdAt: true });
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, passwordUpdatedAt: true, lastLoginAt: true, failedLoginAttempts: true, lockedUntil: true });
 export const insertUserInviteSchema = createInsertSchema(userInvites).omit({ id: true, createdAt: true, usedAt: true });
@@ -641,8 +647,9 @@ export const updateCustomerSchema = z.object({
   phone: z.string().optional().nullable(),
   tags: z.array(z.string()).optional(),
   externalId: z.string().optional(),
+  isBlocked: z.boolean().optional(),
 });
-export const insertConversationSchema = createInsertSchema(conversations).omit({ id: true, createdAt: true });
+export const insertConversationSchema = createInsertSchema(conversations).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertMessageSchema = createInsertSchema(messages).omit({ id: true, createdAt: true });
 export const insertProductSchema = createInsertSchema(products).omit({ id: true, createdAt: true });
 export const insertKnowledgeDocSchema = createInsertSchema(knowledgeDocs).omit({ id: true, createdAt: true });
@@ -944,6 +951,8 @@ export type ConversationWithCustomer = Conversation & {
   customer: Customer;
   lastMessage?: Message;
   channel?: Channel;
+  /** Set only in search results — the specific message whose content matched the query */
+  matchedMessage?: Message;
 };
 
 export type ConversationDetail = Conversation & {
@@ -958,7 +967,7 @@ export type DashboardMetrics = {
   activeConversations: number;
   escalatedConversations: number;
   resolvedToday: number;
-  avgResponseTime: number;
+  avgResponseTime: number | null;
   aiAccuracy: number;
   pendingSuggestions: number;
   productsCount: number;

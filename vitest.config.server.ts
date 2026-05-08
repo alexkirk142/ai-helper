@@ -19,6 +19,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    env: {
+      ENABLE_DEBUG_HEADERS: "true",
+    },
     globals: true,
     include: ["server/**/*.{test,spec}.{ts,mts}"],
     exclude: ["**/node_modules/**", "**/.git/**"],

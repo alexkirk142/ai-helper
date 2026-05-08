@@ -183,10 +183,12 @@ async function getNextAccount(
 
 async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promise<void> {
   const data = job.data;
-  const tenantId = process.env.MARQUIZ_TENANT_ID ?? "";
+
+  // Prefer tenantId from job data (per-tenant webhook), fall back to legacy env var
+  const tenantId = data.tenantId || process.env.MARQUIZ_TENANT_ID || "";
 
   if (!tenantId) {
-    console.error("[MarquizWorker] MARQUIZ_TENANT_ID env var is not set — skipping lead");
+    console.error("[MarquizWorker] No tenantId in job data and MARQUIZ_TENANT_ID not set — skipping lead");
     return;
   }
 
@@ -483,6 +485,13 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
       if (r.success) return;
       console.warn(`[MarquizWorker] Telegram phone send failed (${r.error})`);
     }
+    // Telegram unavailable — fall back to MAX Personal so the lead is not lost.
+    if (hasPhone) {
+      console.warn(`[MarquizWorker] Telegram failed — falling back to MAX Personal`);
+      const r = await sendViaMAX();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] MAX Personal fallback also failed (${r.error})`);
+    }
     console.warn(`[MarquizWorker] Client chose Telegram but all methods failed — saving as failed lead`);
     await saveFailedLead(data, tenantId, phone, commonMeta, "telegram_failed", tenant);
     return;
@@ -685,7 +694,7 @@ export function startMarquizLeadWorker(): Worker<MarquizLeadJobData> | null {
       await processLead(job, rotationRedis);
     },
     {
-      connection: config,
+      connection: config as any,
       concurrency: 1,
     },
   );

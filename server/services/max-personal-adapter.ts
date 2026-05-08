@@ -6,7 +6,7 @@
  * Tenants cannot enter or modify credentials themselves.
  */
 
-import type { ChannelAdapter, ParsedIncomingMessage, ChannelSendResult } from "./channel-adapter";
+import type { ChannelAdapter, ParsedIncomingMessage, ChannelSendResult } from "./channel-adapter.types";
 import type { ChannelType } from "@shared/schema";
 import { maxGreenApiAdapter } from "./max-green-api-adapter";
 import { db } from "../db";

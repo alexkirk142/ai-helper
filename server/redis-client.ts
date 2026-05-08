@@ -44,7 +44,10 @@ export function getRateLimiterRedis(): Redis | null {
 
   client.on("error", (err: Error) => {
     if (available || !warnedUnavailable) {
-      console.warn("[Redis] Rate-limiter error — falling back to in-memory:", err.message);
+      console.warn(
+        "[Redis] RATE LIMITING DEGRADED — falling back to per-process in-memory store",
+      );
+      console.warn("[Redis] Rate-limiter error:", err.message);
       warnedUnavailable = true;
     }
     available = false;

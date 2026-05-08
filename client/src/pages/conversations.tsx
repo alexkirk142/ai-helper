@@ -1,8 +1,8 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { ConversationList } from "@/components/conversation-list";
 import { ChatInterface } from "@/components/chat-interface";
-import { CustomerCard } from "@/components/customer-card";
+import { CustomerCard, CRM_PRESET_TAGS, getTagColor } from "@/components/customer-card";
 import { ChannelTabs } from "@/components/channel-tabs";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -10,10 +10,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { User, ArrowLeft, Send, X, Paperclip } from "lucide-react";
+import { User, ArrowLeft, Send, X, Paperclip, Tag } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { ConversationWithCustomer, ConversationDetail } from "@shared/schema";
 import type { ChannelFilter } from "@/components/channel-tabs";
 
@@ -34,6 +36,7 @@ export default function Conversations() {
   const [testImagePreviewUrl, setTestImagePreviewUrl] = useState<string | null>(null);
   const testImageInputRef = useRef<HTMLInputElement>(null);
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>("all");
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [replyAsCustomerText, setReplyAsCustomerText] = useState("");
   const [showReplyAsCustomer, setShowReplyAsCustomer] = useState(false);
   const [replyAsCustomerFile, setReplyAsCustomerFile] = useState<File | null>(null);
@@ -68,9 +71,50 @@ export default function Conversations() {
     setMobileShowChat(false);
   };
 
-  const { data: conversations, isLoading: conversationsLoading } = useQuery<ConversationWithCustomer[]>({
-    queryKey: ["/api/conversations"],
+  const CONV_LIMIT = 100;
+  const [convOffset, setConvOffset] = useState(0);
+  const [allConversations, setAllConversations] = useState<ConversationWithCustomer[]>([]);
+  // Persists across fetches so the sentinel doesn't unmount while the next page is loading
+  const [hasNextPage, setHasNextPage] = useState(false);
+
+  const { data: convPage, isLoading: conversationsLoading, isFetching: convFetching } = useQuery<ConversationWithCustomer[]>({
+    queryKey: ["/api/conversations", convOffset],
+    queryFn: async () => {
+      const res = await fetch(`/api/conversations?limit=${CONV_LIMIT}&offset=${convOffset}`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    staleTime: 30_000,
   });
+
+  // Accumulate pages; reset when offset is 0 (full refresh)
+  useEffect(() => {
+    if (!convPage) return;
+    if (convOffset === 0) {
+      setAllConversations(convPage);
+    } else {
+      setAllConversations(prev => {
+        const ids = new Set(prev.map(c => c.id));
+        const fresh = convPage.filter(c => !ids.has(c.id));
+        return [...prev, ...fresh];
+      });
+    }
+    // Update only when data actually arrives, not when offset changes (avoids sentinel flicker)
+    setHasNextPage(convPage.length >= CONV_LIMIT);
+  }, [convPage, convOffset]);
+
+  // When React Query invalidates conversations (new message), reset to first page
+  useEffect(() => {
+    setConvOffset(0);
+  }, []); // only on mount
+
+  const conversations = allConversations;
+  const isFetchingNextPage = convFetching && convOffset > 0;
+  const fetchNextPage = () => {
+    if (hasNextPage && !convFetching) setConvOffset(o => o + CONV_LIMIT);
+  };
 
   const { data: channelCounts } = useQuery<{ all: number; telegram?: number; max?: number; whatsapp?: number }>({
     queryKey: ["/api/conversations/channel-counts"],
@@ -100,20 +144,42 @@ export default function Conversations() {
 
   const filteredConversations = useMemo(() => {
     if (!conversations) return [];
-    if (channelFilter === "all") return conversations;
+
+    let result = conversations;
+
+    // Channel filter
     if (channelFilter === "marquiz") {
-      return conversations.filter(
-        (c) => (c.customer?.metadata as any)?.source === "marquiz"
+      result = result.filter((c) => (c.customer?.metadata as any)?.source === "marquiz");
+    } else if (channelFilter !== "all") {
+      const types = CHANNEL_FAMILY_TYPES[channelFilter];
+      result = result.filter((c) => {
+        const channelType = c.channel?.type ?? c.customer?.channel ?? "";
+        return types.includes(channelType);
+      });
+    }
+
+    // Tag filter
+    if (tagFilter) {
+      result = result.filter((c) =>
+        Array.isArray(c.customer?.tags) && (c.customer.tags as string[]).includes(tagFilter)
       );
     }
-    const types = CHANNEL_FAMILY_TYPES[channelFilter];
-    return conversations.filter((c) => {
-      // Prefer channel.type from the channels table; fall back to customer.channel
-      // for conversations without a channelId (e.g. max_personal via start-conversation).
-      const channelType = c.channel?.type ?? c.customer?.channel ?? "";
-      return types.includes(channelType);
-    });
-  }, [conversations, channelFilter]);
+
+    return result;
+  }, [conversations, channelFilter, tagFilter]);
+
+  // Count conversations per preset tag (across ALL conversations, not just filtered by channel)
+  const tagCounts = useMemo(() => {
+    if (!conversations) return {} as Record<string, number>;
+    const counts: Record<string, number> = {};
+    for (const c of conversations) {
+      const tags = Array.isArray(c.customer?.tags) ? (c.customer.tags as string[]) : [];
+      for (const t of tags) {
+        counts[t] = (counts[t] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, [conversations]);
 
   const { data: conversationDetail, isLoading: detailLoading } = useQuery<ConversationDetail>({
     queryKey: ["/api/conversations", selectedId],
@@ -523,12 +589,68 @@ export default function Conversations() {
       <div className={`w-80 shrink-0 border-r flex flex-col overflow-hidden ${mobileShowChat ? 'hidden md:flex' : 'flex'}`}>
         <ChannelTabs
           activeFilter={channelFilter}
-          onFilterChange={setChannelFilter}
+          onFilterChange={(f) => { setChannelFilter(f); setTagFilter(null); setConvOffset(0); setAllConversations([]); }}
           counts={{
             ...(channelCounts ?? { all: 0 }),
             ...(marquizCount > 0 ? { marquiz: marquizCount } : {}),
           }}
         />
+
+        {/* Tag filter chips — only show tags that have at least 1 conversation */}
+        {Object.keys(tagCounts).length > 0 && (
+          <div className="border-b px-3 py-2">
+            <div className="flex items-center gap-1 mb-1.5">
+              <Tag className="h-3 w-3 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground font-medium">Теги</span>
+              {tagFilter && (
+                <button
+                  className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => setTagFilter(null)}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {CRM_PRESET_TAGS.filter(p => tagCounts[p.label] > 0).map(preset => (
+                <button
+                  key={preset.label}
+                  onClick={() => setTagFilter(tagFilter === preset.label ? null : preset.label)}
+                  className={cn(
+                    "text-xs rounded-full border px-2 py-0.5 transition-all",
+                    preset.color,
+                    tagFilter === preset.label
+                      ? "ring-2 ring-offset-1 ring-current opacity-100"
+                      : "opacity-70 hover:opacity-100",
+                  )}
+                >
+                  {preset.label}
+                  <span className="ml-1 opacity-60">({tagCounts[preset.label]})</span>
+                </button>
+              ))}
+              {/* Custom tags not in presets */}
+              {Object.entries(tagCounts)
+                .filter(([tag]) => !CRM_PRESET_TAGS.some(p => p.label === tag))
+                .map(([tag, count]) => (
+                  <button
+                    key={tag}
+                    onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
+                    className={cn(
+                      "text-xs rounded-full border px-2 py-0.5 transition-all bg-secondary text-secondary-foreground",
+                      tagFilter === tag
+                        ? "ring-2 ring-offset-1 ring-current opacity-100"
+                        : "opacity-70 hover:opacity-100",
+                    )}
+                  >
+                    {tag}
+                    <span className="ml-1 opacity-60">({count})</span>
+                  </button>
+                ))
+              }
+            </div>
+          </div>
+        )}
+
         <ConversationList
           conversations={filteredConversations}
           selectedId={selectedId || undefined}
@@ -537,6 +659,9 @@ export default function Conversations() {
           onNewDialog={handleNewDialogOpen}
           onCreateTestDialog={() => setTestDialogOpen(true)}
           isLoading={conversationsLoading}
+          hasMoreServer={hasNextPage && !tagFilter && channelFilter === "all"}
+          isFetchingMore={isFetchingNextPage}
+          onLoadMoreServer={fetchNextPage}
         />
       </div>
 

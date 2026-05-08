@@ -64,7 +64,8 @@ export function getMessageQueue(): Queue<DelayedMessageJobData> | null {
 
   try {
     messageQueue = new Queue<DelayedMessageJobData>(QUEUE_NAME, {
-      connection: config,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      connection: config as any,
       defaultJobOptions: {
         attempts: 3,
         backoff: {

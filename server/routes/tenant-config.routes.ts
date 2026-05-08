@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { storage } from "../storage";
-import { requireAuth, requirePermission } from "../middleware/rbac";
+import { requireAuth, requirePermission, requireTenant } from "../middleware/rbac";
 import { renderTemplate, TEMPLATE_SAMPLE_VALUES } from "../services/template-renderer";
 
 const router = Router();
@@ -31,13 +31,9 @@ const previewTemplateSchema = z.union([
 ]);
 
 // GET /api/templates — list all templates for current tenant
-router.get("/api/templates", requireAuth, requirePermission("VIEW_CONVERSATIONS"), async (req: Request, res: Response) => {
+router.get("/api/templates", requireAuth, requirePermission("VIEW_CONVERSATIONS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const templates = await storage.getMessageTemplatesByTenant(user.tenantId);
+    const templates = await storage.getMessageTemplatesByTenant(req.tenantId!);
     res.json(templates);
   } catch (error) {
     console.error("Error fetching templates:", error);
@@ -46,18 +42,14 @@ router.get("/api/templates", requireAuth, requirePermission("VIEW_CONVERSATIONS"
 });
 
 // POST /api/templates — create template
-router.post("/api/templates", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), async (req: Request, res: Response) => {
+router.post("/api/templates", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
     const parsed = createTemplateSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
     }
     const template = await storage.createMessageTemplate({
-      tenantId: user.tenantId,
+      tenantId: req.tenantId!,
       ...parsed.data,
     });
     res.status(201).json(template);
@@ -69,12 +61,9 @@ router.post("/api/templates", requireAuth, requirePermission("MANAGE_TENANT_SETT
 
 // POST /api/templates/preview — render template with sample data
 // Must be registered BEFORE /:id routes to avoid param capture
-router.post("/api/templates/preview", requireAuth, requirePermission("VIEW_CONVERSATIONS"), async (req: Request, res: Response) => {
+router.post("/api/templates/preview", requireAuth, requirePermission("VIEW_CONVERSATIONS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
+    const tenantId = req.tenantId!;
     const parsed = previewTemplateSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
@@ -83,7 +72,7 @@ router.post("/api/templates/preview", requireAuth, requirePermission("VIEW_CONVE
     let content: string;
     if ("templateId" in parsed.data) {
       const tpl = await storage.getMessageTemplate(parsed.data.templateId);
-      if (!tpl || tpl.tenantId !== user.tenantId) {
+      if (!tpl || tpl.tenantId !== tenantId) {
         return res.status(404).json({ error: "Template not found" });
       }
       content = tpl.content;
@@ -100,14 +89,11 @@ router.post("/api/templates/preview", requireAuth, requirePermission("VIEW_CONVE
 });
 
 // PATCH /api/templates/:id — update template
-router.patch("/api/templates/:id", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), async (req: Request, res: Response) => {
+router.patch("/api/templates/:id", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
+    const tenantId = req.tenantId!;
     const existing = await storage.getMessageTemplate(req.params.id);
-    if (!existing || existing.tenantId !== user.tenantId) {
+    if (!existing || existing.tenantId !== tenantId) {
       return res.status(404).json({ error: "Template not found" });
     }
     const parsed = updateTemplateSchema.safeParse(req.body);
@@ -123,14 +109,11 @@ router.patch("/api/templates/:id", requireAuth, requirePermission("MANAGE_TENANT
 });
 
 // DELETE /api/templates/:id — delete template
-router.delete("/api/templates/:id", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), async (req: Request, res: Response) => {
+router.delete("/api/templates/:id", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
+    const tenantId = req.tenantId!;
     const existing = await storage.getMessageTemplate(req.params.id);
-    if (!existing || existing.tenantId !== user.tenantId) {
+    if (!existing || existing.tenantId !== tenantId) {
       return res.status(404).json({ error: "Template not found" });
     }
     const deleted = await storage.deleteMessageTemplate(req.params.id);
@@ -167,13 +150,9 @@ const reorderPaymentMethodsSchema = z.array(
 ).min(1);
 
 // GET /api/payment-methods — list all for tenant
-router.get("/api/payment-methods", requireAuth, requirePermission("VIEW_CONVERSATIONS"), async (req: Request, res: Response) => {
+router.get("/api/payment-methods", requireAuth, requirePermission("VIEW_CONVERSATIONS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const methods = await storage.getPaymentMethodsByTenant(user.tenantId);
+    const methods = await storage.getPaymentMethodsByTenant(req.tenantId!);
     res.json(methods);
   } catch (error) {
     console.error("Error fetching payment methods:", error);
@@ -182,18 +161,14 @@ router.get("/api/payment-methods", requireAuth, requirePermission("VIEW_CONVERSA
 });
 
 // POST /api/payment-methods — create
-router.post("/api/payment-methods", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), async (req: Request, res: Response) => {
+router.post("/api/payment-methods", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
     const parsed = createPaymentMethodSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
     }
     const method = await storage.createPaymentMethod({
-      tenantId: user.tenantId,
+      tenantId: req.tenantId!,
       ...parsed.data,
     });
     res.status(201).json(method);
@@ -204,17 +179,13 @@ router.post("/api/payment-methods", requireAuth, requirePermission("MANAGE_TENAN
 });
 
 // PATCH /api/payment-methods/reorder — bulk reorder (must be before /:id)
-router.patch("/api/payment-methods/reorder", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), async (req: Request, res: Response) => {
+router.patch("/api/payment-methods/reorder", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
     const parsed = reorderPaymentMethodsSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
     }
-    await storage.reorderPaymentMethods(user.tenantId, parsed.data);
+    await storage.reorderPaymentMethods(req.tenantId!, parsed.data);
     res.json({ success: true });
   } catch (error) {
     console.error("Error reordering payment methods:", error);
@@ -223,14 +194,11 @@ router.patch("/api/payment-methods/reorder", requireAuth, requirePermission("MAN
 });
 
 // PATCH /api/payment-methods/:id — update
-router.patch("/api/payment-methods/:id", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), async (req: Request, res: Response) => {
+router.patch("/api/payment-methods/:id", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
+    const tenantId = req.tenantId!;
     const existing = await storage.getPaymentMethod(req.params.id);
-    if (!existing || existing.tenantId !== user.tenantId) {
+    if (!existing || existing.tenantId !== tenantId) {
       return res.status(404).json({ error: "Payment method not found" });
     }
     const parsed = updatePaymentMethodSchema.safeParse(req.body);
@@ -246,14 +214,11 @@ router.patch("/api/payment-methods/:id", requireAuth, requirePermission("MANAGE_
 });
 
 // DELETE /api/payment-methods/:id — delete
-router.delete("/api/payment-methods/:id", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), async (req: Request, res: Response) => {
+router.delete("/api/payment-methods/:id", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
+    const tenantId = req.tenantId!;
     const existing = await storage.getPaymentMethod(req.params.id);
-    if (!existing || existing.tenantId !== user.tenantId) {
+    if (!existing || existing.tenantId !== tenantId) {
       return res.status(404).json({ error: "Payment method not found" });
     }
     const deleted = await storage.deletePaymentMethod(req.params.id);
@@ -261,62 +226,6 @@ router.delete("/api/payment-methods/:id", requireAuth, requirePermission("MANAGE
   } catch (error) {
     console.error("Error deleting payment method:", error);
     res.status(500).json({ error: "Failed to delete payment method" });
-  }
-});
-
-// ============================================================
-// AGENT SETTINGS
-// ============================================================
-
-const updateAgentSettingsSchema = z.object({
-  companyName: z.string().max(500).optional().nullable(),
-  specialization: z.string().max(1000).optional().nullable(),
-  warehouseCity: z.string().max(255).optional().nullable(),
-  warrantyMonths: z.number().int().nonnegative().optional().nullable(),
-  warrantyKm: z.number().int().nonnegative().optional().nullable(),
-  installDays: z.number().int().nonnegative().optional().nullable(),
-  qrDiscountPercent: z.number().int().min(0).max(100).optional().nullable(),
-  systemPrompt: z.string().max(10000).optional().nullable(),
-  objectionPayment: z.string().max(2000).optional().nullable(),
-  objectionOnline: z.string().max(2000).optional().nullable(),
-  closingScript: z.string().max(2000).optional().nullable(),
-  customFacts: z.record(z.unknown()).optional().nullable(),
-  mileageLow: z.number().int().nonnegative().optional().nullable(),
-  mileageMid: z.number().int().nonnegative().optional().nullable(),
-  mileageHigh: z.number().int().nonnegative().optional().nullable(),
-});
-
-// GET /api/agent-settings — get current tenant's agent settings
-router.get("/api/agent-settings", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), async (req: Request, res: Response) => {
-  try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const settings = await storage.getTenantAgentSettings(user.tenantId);
-    res.json(settings ?? {});
-  } catch (error) {
-    console.error("Error fetching agent settings:", error);
-    res.status(500).json({ error: "Failed to fetch agent settings" });
-  }
-});
-
-// PUT /api/agent-settings — upsert agent settings for current tenant
-router.put("/api/agent-settings", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), async (req: Request, res: Response) => {
-  try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const parsed = updateAgentSettingsSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
-    }
-    const settings = await storage.upsertTenantAgentSettings(user.tenantId, parsed.data);
-    res.json(settings);
-  } catch (error) {
-    console.error("Error updating agent settings:", error);
-    res.status(500).json({ error: "Failed to update agent settings" });
   }
 });
 

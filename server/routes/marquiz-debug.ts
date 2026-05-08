@@ -18,7 +18,8 @@ router.get("/", async (req: Request, res: Response) => {
     return res.status(403).json({ error: "Forbidden" });
   }
 
-  const tenantId = process.env.MARQUIZ_TENANT_ID ?? "";
+  // Support ?tenantId= for per-tenant debug; fall back to global env var
+  const tenantId = (req.query.tenantId as string | undefined) || process.env.MARQUIZ_TENANT_ID || "";
   const redisUrl = process.env.REDIS_URL ?? "";
 
   // Check queue
@@ -79,7 +80,9 @@ router.get("/", async (req: Request, res: Response) => {
     failedJobs,
     recentJobs,
     maxAccounts: accounts,
-    webhookUrl: "https://ai-helper-production-c56f.up.railway.app/webhooks/marquiz",
+    webhookUrl: tenantId
+      ? `${process.env.APP_URL ?? "https://aimessagehelper.online"}/webhooks/marquiz/${tenantId}`
+      : `${process.env.APP_URL ?? "https://aimessagehelper.online"}/webhooks/marquiz`,
     hint: completedJobs === 0 && failedJobs === 0
       ? "No jobs processed yet — send a test quiz submission to trigger the webhook"
       : undefined,

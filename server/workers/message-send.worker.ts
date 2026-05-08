@@ -58,7 +58,7 @@ async function markMessageAsSent(
       deliveryStatus: "sent",
       deliveredAt: new Date().toISOString(),
       externalMessageId: externalId || null,
-    } as unknown,
+    } as any,
   });
 }
 
@@ -75,7 +75,7 @@ async function markMessageAsFailed(
       deliveryStatus: "failed",
       failedAt: new Date().toISOString(),
       lastError: error,
-    } as unknown,
+    } as any,
   });
 }
 
@@ -144,9 +144,9 @@ async function processDelayedMessage(job: Job<DelayedMessageJobData>): Promise<v
   const adapter = getChannelAdapter(channel);
 
   if (typingEnabled) {
-    await adapter.sendTypingStart(conversationId);
+    await adapter.sendTypingStart?.(conversationId);
     await new Promise((resolve) => setTimeout(resolve, 500));
-    await adapter.sendTypingStop(conversationId);
+    await adapter.sendTypingStop?.(conversationId);
   }
 
   const result = await adapter.sendMessage(conversationId, text);
@@ -183,7 +183,7 @@ export function createMessageSendWorker(connectionConfig: IORedis): Worker<Delay
       await processDelayedMessage(job);
     },
     {
-      connection: connectionConfig,
+      connection: connectionConfig as any,
       concurrency: 5,
       limiter: {
         max: 100,

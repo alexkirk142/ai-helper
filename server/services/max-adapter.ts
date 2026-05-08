@@ -4,9 +4,10 @@ import type {
   ChannelSendResult,
   ParsedIncomingMessage,
   WebhookVerifyResult,
-} from "./channel-adapter";
+} from "./channel-adapter.types";
 import { featureFlagService } from "./feature-flags";
 import { auditLog } from "./audit-log";
+import { DedupCache } from "./utils/dedup-cache";
 
 const MAX_API_BASE_URL = "https://platform-api.max.ru";
 const MAX_RATE_LIMIT_RPS = 30;
@@ -82,8 +83,7 @@ export class MaxAdapter implements ChannelAdapter {
   readonly name: ChannelType = "max";
   private token: string;
   private baseUrl: string;
-  private processedMessageIds: Set<string> = new Set();
-  private maxProcessedIds = 10000;
+  private processedMessageIds = new DedupCache(10_000);
 
   constructor(token?: string) {
     this.token = token || process.env.MAX_TOKEN || "";
@@ -336,13 +336,6 @@ export class MaxAdapter implements ChannelAdapter {
     }
 
     this.processedMessageIds.add(messageId);
-    if (this.processedMessageIds.size > this.maxProcessedIds) {
-      const iterator = this.processedMessageIds.values();
-      const firstValue = iterator.next().value;
-      if (firstValue) {
-        this.processedMessageIds.delete(firstValue);
-      }
-    }
 
     const senderId = message.sender?.user_id || 0;
     const chatId = message.recipient?.chat_id || message.recipient?.user_id || senderId;

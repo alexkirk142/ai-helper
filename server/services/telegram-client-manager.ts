@@ -1,11 +1,13 @@
 import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { NewMessage, NewMessageEvent } from "telegram/events";
+import { CustomFile } from "telegram/client/uploads";
+// Native BigInt is used throughout — no big-integer library needed.
 import { storage } from "../storage";
 import { getSecret } from "./secret-resolver";
-import { processIncomingMessageFull } from "./inbound-message-handler";
+import { messageBus } from "./message-bus";
 import { featureFlagService } from "./feature-flags";
-import type { ParsedAttachment } from "./channel-adapter";
+import type { ParsedAttachment } from "./channel-adapter.types";
 
 interface ActiveConnection {
   tenantId: string;
@@ -30,6 +32,8 @@ class TelegramClientManager {
   private connections = new Map<string, ActiveConnection>();
   private reconnectTimers = new Map<string, NodeJS.Timeout>();
   private reconnectCounts = new Map<string, number>(); // persists across reconnect cycles
+  /** Tracks accounts currently inside connectAccount() to prevent duplicate concurrent attempts. */
+  private connectingAccounts: Set<string> = new Set();
   private healthCheckTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private isInitialized = false;
@@ -43,6 +47,20 @@ class TelegramClientManager {
   // access_hash to send to a user; gramjs caches it in memory but loses it
   // on server restart if the entity was not in the preloaded dialogs.
   private accessHashCache = new Map<string, bigint>();
+
+  // tenantId → Set of own Telegram userIds (numerical string, e.g. "7084898254").
+  // Used to suppress inter-account bridge messages (resolver→sender contact cards)
+  // from appearing in the conversation list.
+  private ownTelegramUserIds = new Map<string, Set<string>>();
+
+  private registerOwnUserId(tenantId: string, telegramUserId: string | bigint | null | undefined): void {
+    if (!telegramUserId) return;
+    const id = telegramUserId.toString();
+    if (!this.ownTelegramUserIds.has(tenantId)) {
+      this.ownTelegramUserIds.set(tenantId, new Set());
+    }
+    this.ownTelegramUserIds.get(tenantId)!.add(id);
+  }
 
   private async getCredentials(): Promise<{ apiId: number; apiHash: string } | null> {
     const [dbApiId, dbApiHash] = await Promise.all([
@@ -92,35 +110,47 @@ class TelegramClientManager {
       const accounts = await storage.getReconnectableTelegramAccounts();
       console.log(`[TelegramClientManager] Found ${accounts.length} Telegram accounts to reconnect`);
 
-      for (const account of accounts) {
-        if (!account.sessionString) {
-          console.log(`[TelegramClientManager] Account ${account.id}: no session, skipping`);
-          continue;
-        }
+      // Connect all accounts in parallel so one hanging account doesn't block others.
+      await Promise.allSettled(
+        accounts.map(async (account) => {
+          if (!account.sessionString) {
+            console.log(`[TelegramClientManager] Account ${account.id}: no session, skipping`);
+            return;
+          }
 
-        // Reset non-fatal statuses so the account is considered active and can be reconnected.
-        if (account.status !== "active") {
-          console.log(`[TelegramClientManager] Account ${account.id} has status="${account.status}" — resetting to "active" for reconnect`);
-          await storage.updateTelegramAccount(account.id, { status: "active", lastError: null as any }).catch(() => {});
-        }
+          // Register account's own Telegram userId upfront (from DB) for inter-account filter.
+          if (account.userId) {
+            this.registerOwnUserId(account.tenantId, account.userId);
+          }
 
-        try {
-          const connected = await this.connectAccount(account.tenantId, account.id, account.channelId, account.sessionString);
-          console.log(`[TelegramClientManager] Account ${account.id} connect result: ${connected}`);
-        } catch (error: any) {
-          console.error(`[TelegramClientManager] Failed to connect account ${account.id}:`, error.message);
-        }
-      }
+          // Reset non-fatal statuses so the account is considered active and can be reconnected.
+          if (account.status !== "active") {
+            console.log(`[TelegramClientManager] Account ${account.id} has status="${account.status}" — resetting to "active" for reconnect`);
+            await storage.updateTelegramAccount(account.id, { status: "active", lastError: null as any }).catch(() => {});
+          }
+
+          try {
+            const connected = await this.connectAccount(account.tenantId, account.id, account.channelId, account.sessionString);
+            console.log(`[TelegramClientManager] Account ${account.id} connect result: ${connected}`);
+          } catch (error: any) {
+            console.error(`[TelegramClientManager] Failed to connect account ${account.id}:`, error.message);
+          }
+        })
+      );
 
       // Also load legacy channels that aren't yet migrated to telegramSessions
-      await this.initializeLegacyChannels();
-
-      this.isInitialized = true;
-      console.log(`[TelegramClientManager] Initialized with ${this.connections.size} active connections`);
-
-      this.startHealthCheck();
+      await this.initializeLegacyChannels().catch((err: any) => {
+        console.error("[TelegramClientManager] Legacy channels init error:", err.message);
+      });
     } catch (error: any) {
       console.error("[TelegramClientManager] Initialization error:", error.message);
+    } finally {
+      // Always mark as initialized and start the health check — even if some
+      // accounts failed to connect. The heartbeat's orphan-detection (Part 2)
+      // will pick up any accounts that aren't yet connected and retry them.
+      this.isInitialized = true;
+      console.log(`[TelegramClientManager] Initialized with ${this.connections.size} active connections`);
+      this.startHealthCheck();
     }
   }
 
@@ -209,7 +239,8 @@ class TelegramClientManager {
         const connectionKey = `${account.tenantId}:${account.id}`;
         const alreadyConnected = this.connections.has(connectionKey);
         const hasPendingTimer = this.reconnectTimers.has(connectionKey);
-        if (!alreadyConnected && !hasPendingTimer) {
+        const isConnecting = this.connectingAccounts.has(connectionKey);
+        if (!alreadyConnected && !hasPendingTimer && !isConnecting) {
           console.log(`[TelegramClientManager] Heartbeat detected orphaned account ${connectionKey} (status=${account.status}) — resetting and reconnecting`);
           // Reset status so scheduleReconnect gets a fresh attempts counter and
           // the UI shows the account is being reconnected (not stuck in "error").
@@ -255,129 +286,167 @@ class TelegramClientManager {
   async connectAccount(tenantId: string, accountId: string, channelId: string | null, sessionString: string, existingClient?: TelegramClient): Promise<boolean> {
     const connectionKey = `${tenantId}:${accountId}`;
 
-    const existing = this.connections.get(connectionKey);
-    if (existing?.connected && existing.handlersAttached) {
-      console.log(`[TelegramClientManager] Already connected: ${connectionKey}`);
-      return true;
-    }
-
-    if (existing) {
-      console.log(`[TelegramClientManager] Cleaning up stale connection: ${connectionKey}`);
-      try { await existing.client.disconnect(); } catch {}
-      this.connections.delete(connectionKey);
-    }
-
-    const existingTimer = this.reconnectTimers.get(connectionKey);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      this.reconnectTimers.delete(connectionKey);
-    }
-
-    const credentials = await this.getCredentials();
-    if (!credentials) {
-      console.error("[TelegramClientManager] No credentials available");
+    // Prevent duplicate concurrent connection attempts for the same account
+    if (this.connectingAccounts.has(connectionKey)) {
+      console.log(`[TelegramClientManager] Already connecting ${connectionKey}, skipping duplicate`);
       return false;
     }
+    this.connectingAccounts.add(connectionKey);
 
     try {
-      let client: TelegramClient;
-
-      if (existingClient) {
-        // Reuse the already-connected auth client — no disconnect/reconnect needed.
-        // This avoids AUTH_KEY_DUPLICATED that would occur if we disconnected and
-        // immediately reconnected with the same session/auth key.
-        console.log(`[TelegramClientManager] Adopting existing auth client for ${connectionKey}`);
-        client = existingClient;
-      } else {
-        const { apiId, apiHash } = credentials;
-        const session = new StringSession(sessionString);
-        client = new TelegramClient(session, apiId, apiHash, {
-          connectionRetries: 0,
-          // autoReconnect: false — all reconnection is handled by our scheduleReconnect logic.
-          // gramJS's internal autoReconnect races with our reconnect on AUTH_KEY_DUPLICATED:
-          // gramJS queues its own retry before our catch block can stop it, causing two
-          // simultaneous connections with the same auth key → infinite AUTH_KEY_DUPLICATED loop.
-          autoReconnect: false,
-        });
-
-        console.log(`[TelegramClientManager] Connecting account ${connectionKey}...`);
-        await Promise.race([
-          client.connect(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("client.connect() timed out after 30s")), 30000)
-          ),
-        ]);
+      const existing = this.connections.get(connectionKey);
+      if (existing?.connected && existing.handlersAttached) {
+        console.log(`[TelegramClientManager] Already connected: ${connectionKey}`);
+        return true;
       }
 
-      const isAuthorized = await client.isUserAuthorized();
-      if (!isAuthorized) {
-        console.error(`[TelegramClientManager] Session invalid for ${connectionKey}`);
-        await storage.updateTelegramAccount(accountId, { status: "error", lastError: "Session invalid" });
+      if (existing) {
+        console.log(`[TelegramClientManager] Cleaning up stale connection: ${connectionKey}`);
+        try { await existing.client.disconnect(); } catch {}
+        this.connections.delete(connectionKey);
+      }
+
+      const existingTimer = this.reconnectTimers.get(connectionKey);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        this.reconnectTimers.delete(connectionKey);
+      }
+
+      const credentials = await this.getCredentials();
+      if (!credentials) {
+        console.error("[TelegramClientManager] No credentials available");
         return false;
       }
 
-      const me = await client.getMe();
-      console.log(`[TelegramClientManager] Account ${connectionKey}: ${(me as any)?.firstName || 'OK'}`);
-
-      const connection: ActiveConnection = {
-        tenantId,
-        accountId,
-        channelId,
-        client,
-        sessionString,
-        connected: true,
-        lastActivity: new Date(),
-        handlersAttached: false,
-        reconnectAttempts: 0,
-      };
-
-      this.connections.set(connectionKey, connection);
-      this.ensureHandlers(connection);
-
-      // Preload only 5 most recent dialogs on connect — old dialogs are loaded lazily on new message
+      let client: TelegramClient | undefined;
       try {
-        const dialogs = await client.getDialogs({ limit: 5 });
-        console.log(`[TelegramClientManager] Preloaded ${dialogs.length} recent dialogs for entity cache`);
-      } catch (dialogError: any) {
-        console.log(`[TelegramClientManager] Could not preload dialogs: ${dialogError.message}`);
-      }
+        if (existingClient) {
+          // Reuse the already-connected auth client — no disconnect/reconnect needed.
+          // This avoids AUTH_KEY_DUPLICATED that would occur if we disconnected and
+          // immediately reconnected with the same session/auth key.
+          console.log(`[TelegramClientManager] Adopting existing auth client for ${connectionKey}`);
+          client = existingClient;
+        } else {
+          const { apiId, apiHash } = credentials;
+          const session = new StringSession(sessionString);
+          client = new TelegramClient(session, apiId, apiHash, {
+            connectionRetries: 0,
+            // autoReconnect: false — all reconnection is handled by our scheduleReconnect logic.
+            // gramJS's internal autoReconnect races with our reconnect on AUTH_KEY_DUPLICATED:
+            // gramJS queues its own retry before our catch block can stop it, causing two
+            // simultaneous connections with the same auth key → infinite AUTH_KEY_DUPLICATED loop.
+            autoReconnect: false,
+          });
 
-      console.log(`[TelegramClientManager] Connected: ${connectionKey}, total: ${this.connections.size}`);
-      this.reconnectCounts.delete(connectionKey); // reset on success
-
-      // Persist the current session string — gramjs may have rotated the auth key during connect
-      // (e.g. after AUTH_KEY_DUPLICATED recovery). Without this, the next restart re-reads the
-      // stale key from DB and immediately hits AUTH_KEY_DUPLICATED or AUTH_KEY_INVALID again.
-      try {
-        const savedSession = client.session.save() as unknown as string;
-        if (savedSession && savedSession !== sessionString) {
-          console.log(`[TelegramClientManager] Auth key rotated for ${connectionKey} — persisting updated session to DB`);
-          await storage.updateTelegramAccount(accountId, { sessionString: savedSession });
-          connection.sessionString = savedSession;
+          console.log(`[TelegramClientManager] Connecting account ${connectionKey}...`);
+          // Promise.race alone is unreliable with gramjs — connect() can swallow errors internally
+          // and never resolve/reject. We use a timeout that actively calls disconnect() to interrupt
+          // any pending MTProto handshake.
+          let connectTimedOut = false;
+          const connectTimeoutHandle = setTimeout(async () => {
+            connectTimedOut = true;
+            console.warn(`[TelegramClientManager] client.connect() hanging >30s for ${connectionKey}, forcing disconnect...`);
+            try { await client!.disconnect(); } catch {}
+          }, 30000);
+          try {
+            await client.connect();
+          } finally {
+            clearTimeout(connectTimeoutHandle);
+          }
+          if (connectTimedOut) {
+            throw new Error("client.connect() timed out after 30s");
+          }
         }
-      } catch (saveErr: any) {
-        console.warn(`[TelegramClientManager] Could not persist updated session for ${connectionKey}: ${saveErr.message}`);
-      }
 
-      // Flush any messages that were queued while this channel was reconnecting
-      if (channelId) {
-        this.flushPendingMessages(tenantId, channelId).catch((err: any) =>
-          console.error(`[TelegramClientManager] flushPendingMessages error for ${connectionKey}: ${err.message}`)
-        );
-      }
+        // Allow up to 2 hours for isUserAuthorized — gramjs handles FLOOD_WAIT internally by
+        // pausing and retrying. Cutting the timeout too short interrupts gramjs mid-wait,
+        // causing an immediate retry which resets Telegram's FLOOD_WAIT countdown indefinitely.
+        // After many restarts, FLOOD_WAIT can grow to 30–90 minutes. We must let gramjs sit
+        // through the entire wait before declaring failure.
+        const isAuthorized = await Promise.race([
+          client.isUserAuthorized(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("isUserAuthorized timed out after 7200s")), 7200000)
+          ),
+        ]);
+        if (!isAuthorized) {
+          console.error(`[TelegramClientManager] Session invalid for ${connectionKey}`);
+          await storage.updateTelegramAccount(accountId, { status: "error", lastError: "Session invalid" });
+          return false;
+        }
 
-      return true;
-    } catch (error: any) {
-      console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
-      try { await client.disconnect(); } catch {}
-      const conn: ActiveConnection = {
-        tenantId, accountId, channelId,
-        client: null as any, sessionString,
-        connected: false, lastActivity: new Date(), handlersAttached: false,
-        reconnectAttempts: 0,
-      };
-      this.scheduleReconnect(`${tenantId}:${accountId}`, conn, error.message);
-      return false;
+        const me = await Promise.race([
+          client.getMe(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("getMe timed out after 60s")), 60000)
+          ),
+        ]);
+        console.log(`[TelegramClientManager] Account ${connectionKey}: ${(me as any)?.firstName || 'OK'}`);
+        // Register this account's Telegram userId so inter-account bridge messages can be filtered.
+        this.registerOwnUserId(tenantId, (me as any)?.id);
+
+        const connection: ActiveConnection = {
+          tenantId,
+          accountId,
+          channelId,
+          client,
+          sessionString,
+          connected: true,
+          lastActivity: new Date(),
+          handlersAttached: false,
+          reconnectAttempts: 0,
+        };
+
+        this.connections.set(connectionKey, connection);
+        this.ensureHandlers(connection);
+
+        // Preload only 5 most recent dialogs on connect — old dialogs are loaded lazily on new message
+        try {
+          const dialogs = await client.getDialogs({ limit: 5 });
+          console.log(`[TelegramClientManager] Preloaded ${dialogs.length} recent dialogs for entity cache`);
+        } catch (dialogError: any) {
+          console.log(`[TelegramClientManager] Could not preload dialogs: ${dialogError.message}`);
+        }
+
+        console.log(`[TelegramClientManager] Connected: ${connectionKey}, total: ${this.connections.size}`);
+        this.reconnectCounts.delete(connectionKey); // reset on success
+
+        // Persist the current session string — gramjs may have rotated the auth key during connect
+        // (e.g. after AUTH_KEY_DUPLICATED recovery). Without this, the next restart re-reads the
+        // stale key from DB and immediately hits AUTH_KEY_DUPLICATED or AUTH_KEY_INVALID again.
+        try {
+          const savedSession = client.session.save() as unknown as string;
+          if (savedSession && savedSession !== sessionString) {
+            console.log(`[TelegramClientManager] Auth key rotated for ${connectionKey} — persisting updated session to DB`);
+            await storage.updateTelegramAccount(accountId, { sessionString: savedSession });
+            connection.sessionString = savedSession;
+          }
+        } catch (saveErr: any) {
+          console.warn(`[TelegramClientManager] Could not persist updated session for ${connectionKey}: ${saveErr.message}`);
+        }
+
+        // Flush any messages that were queued while this channel was reconnecting
+        if (channelId) {
+          this.flushPendingMessages(tenantId, channelId).catch((err: any) =>
+            console.error(`[TelegramClientManager] flushPendingMessages error for ${connectionKey}: ${err.message}`)
+          );
+        }
+
+        return true;
+      } catch (error: any) {
+        console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
+        try { await client?.disconnect(); } catch {}
+        const conn: ActiveConnection = {
+          tenantId, accountId, channelId,
+          client: null as any, sessionString,
+          connected: false, lastActivity: new Date(), handlersAttached: false,
+          reconnectAttempts: 0,
+        };
+        this.scheduleReconnect(`${tenantId}:${accountId}`, conn, error.message);
+        return false;
+      }
+    } finally {
+      this.connectingAccounts.delete(connectionKey);
     }
   }
 
@@ -410,10 +479,11 @@ class TelegramClientManager {
       return false;
     }
 
+    let client: TelegramClient | undefined;
     try {
       const { apiId, apiHash } = credentials;
       const session = new StringSession(sessionString);
-      const client = new TelegramClient(session, apiId, apiHash, {
+      client = new TelegramClient(session, apiId, apiHash, {
         connectionRetries: 0,
         autoReconnect: false,
       });
@@ -466,7 +536,7 @@ class TelegramClientManager {
       return true;
     } catch (error: any) {
       console.error(`[TelegramClientManager] Connection error for ${connectionKey}:`, error.message);
-      try { await client.disconnect(); } catch {}
+      try { await client?.disconnect(); } catch {}
       const conn: ActiveConnection = {
         tenantId, accountId: legacyAccountId, channelId,
         client: null as any, sessionString,
@@ -521,6 +591,15 @@ class TelegramClientManager {
       const senderId = message.senderId?.toString() || "";
       const chatId = message.chatId?.toString() || "";
       const text = message.text || message.message || "";
+
+      // Drop messages that come FROM one of our own Telegram accounts (inter-account bridge
+      // messages: resolver→sender contact cards, read receipts, etc.). These must not create
+      // customer conversations or pollute the conversation list.
+      const ownIds = this.ownTelegramUserIds.get(tenantId);
+      if (senderId && ownIds?.has(senderId)) {
+        console.log(`[TelegramClientManager] Dropping inter-account message from own account userId=${senderId} (${connectionKey})`);
+        return;
+      }
 
       const hasMedia =
         !!message.media && !(message.media instanceof Api.MessageMediaEmpty);
@@ -587,7 +666,7 @@ class TelegramClientManager {
       const existingCustomer = await storage.getCustomerByExternalId(tenantId, "telegram_personal", chatId);
       const isNewChat = !existingCustomer;
 
-      await processIncomingMessageFull(tenantId, {
+      messageBus.emitIncomingMessage(tenantId, channelId, {
         channel: "telegram_personal",
         externalConversationId: chatId,
         externalUserId: senderId,
@@ -964,9 +1043,17 @@ class TelegramClientManager {
     channelId: string,
     externalConversationId: string,
     text: string,
-    options?: { replyToMessageId?: string }
+    options?: { replyToMessageId?: string; preferAccountId?: string }
   ): Promise<{ success: boolean; externalMessageId?: string; error?: string }> {
-    const connection = this.findConnection(tenantId, channelId);
+    // Prefer a specific account (e.g. the sender that initiated the conversation)
+    // over a generic findConnection scan that may return the resolver account.
+    let connection: ActiveConnection | null = null;
+    if (options?.preferAccountId) {
+      const acctConn = this.connections.get(`${tenantId}:${options.preferAccountId}`);
+      if (acctConn?.connected) connection = acctConn;
+    }
+    if (!connection) connection = this.findConnection(tenantId, channelId);
+
     if (!connection?.connected) {
       // If there is a reconnect in progress, queue the message for delivery on restore.
       // Check whether any connection key for this channel has a pending timer.
@@ -996,15 +1083,15 @@ class TelegramClientManager {
           //    gramjs entity cache, then retry getEntity.
           console.log(`[TelegramClientManager] No access_hash cached for ${externalConversationId}, loading dialogs...`);
           try {
-            await connection.client.getDialogs({ limit: 100 });
+            await connection.client.getDialogs({ limit: 500 });
             entity = await connection.client.getEntity(peerId);
             console.log(`[TelegramClientManager] Resolved entity after dialog refresh: ${externalConversationId}`);
           } catch {
-            // 3. Last resort — raw BigInt.  Will still fail if the user has never
-            //    messaged this account, but surfacing the real error is more useful
-            //    than silently swallowing it.
-            console.log(`[TelegramClientManager] Could not resolve entity even after dialog refresh, trying raw peer: ${entityError.message}`);
-            entity = peerId;
+            // 3. Last resort — InputPeerUser with accessHash=0 (min peer).
+            //    Telegram accepts this when the server has record of prior communication
+            //    with this user (works for accounts the bot has previously messaged).
+            console.log(`[TelegramClientManager] Could not resolve entity after 500 dialogs, using min peer: ${entityError.message}`);
+            entity = new Api.InputPeerUser({ userId: peerId, accessHash: BigInt(0) });
           }
         }
       }
@@ -1040,13 +1127,20 @@ class TelegramClientManager {
     mimeType: string,
     fileName: string,
     caption: string,
+    preferAccountId?: string,
   ): Promise<{
     success: boolean;
     externalMessageId?: string;
     accountId?: string;
     error?: string;
   }> {
-    const connection = this.findConnection(tenantId, channelId);
+    let connection: ActiveConnection | null = null;
+    if (preferAccountId) {
+      const acctConn = this.connections.get(`${tenantId}:${preferAccountId}`);
+      if (acctConn?.connected) connection = acctConn;
+    }
+    if (!connection) connection = this.findConnection(tenantId, channelId);
+
     if (!connection?.connected) {
       return { success: false, error: "Not connected" };
     }
@@ -1062,18 +1156,16 @@ class TelegramClientManager {
           entity = new Api.InputPeerUser({ userId: peerId, accessHash: cachedHash });
         } else {
           try {
-            await connection.client.getDialogs({ limit: 100 });
+            await connection.client.getDialogs({ limit: 500 });
             entity = await connection.client.getEntity(peerId);
           } catch {
-            entity = peerId;
+            entity = new Api.InputPeerUser({ userId: peerId, accessHash: BigInt(0) });
           }
         }
       }
 
       const forceDocument = !mimeType.startsWith("image/") && !mimeType.startsWith("video/");
 
-      // gramjs CustomFile: (name, size, path, buffer)
-      const { CustomFile } = await import("telegram/client/uploads");
       const file = new CustomFile(fileName, buffer.length, "", buffer);
 
       const result = await connection.client.sendFile(entity, {
@@ -1647,8 +1739,8 @@ class TelegramClientManager {
     // ── Step 2a: If single-account mode — resolver sends directly ─────────────
     if (senderConn.accountId === resolverConn.accountId) {
       try {
-        const peer = new Api.InputPeerUser({ userId: BigInt(userId), accessHash });
-        const result = await resolverConn.client.sendMessage(peer, { message: text });
+      const peer = new Api.InputPeerUser({ userId: BigInt(userId), accessHash });
+      const result = await resolverConn.client.sendMessage(peer, { message: text });
         resolverConn.lastActivity = new Date();
         console.log(`[TelegramClientManager] importContactAndSend (single): sent to ${userId}, msgId=${result.id}`);
         return { success: true, userId, firstName, username, accountId: resolverConn.accountId, channelId: resolverConn.channelId, externalMessageId: result.id.toString() } as any;
@@ -1679,7 +1771,7 @@ class TelegramClientManager {
       const senderImport = await resolverConn.client.invoke(
         new Api.contacts.ImportContacts({
           contacts: [new Api.InputPhoneContact({
-            clientId: BigInt(Date.now() + 1),
+                clientId: BigInt(Date.now() + 1),
             phone: senderDbAcc.phoneNumber,
             firstName: "Sender",
             lastName: "",
@@ -1706,7 +1798,7 @@ class TelegramClientManager {
             vcard: "",
           }),
           message: "",
-          randomId: BigInt(Date.now() + 2),
+              randomId: BigInt(Date.now() + 2),
         }),
       );
 
@@ -1722,7 +1814,32 @@ class TelegramClientManager {
         senderAccessHash = (cachedEntity as any).accessHash as bigint;
         console.log(`[TelegramClientManager] Bridge: sender got own accessHash for userId=${userId}`);
       } else {
-        console.warn(`[TelegramClientManager] Bridge: sender entity cache miss after 4s`);
+        console.warn(`[TelegramClientManager] Bridge: sender entity cache miss after 4s — trying direct importContacts fallback`);
+        // Fallback: Telegram may not include the User object in the contact-card update
+        // (common with fresh accounts that haven't interacted with the lead before).
+        // Ask the sender to import the lead's phone directly — this always returns the
+        // sender-scoped accessHash needed to send messages.
+        try {
+          const fallbackResult = await senderConn.client.invoke(
+            new Api.contacts.ImportContacts({
+              contacts: [new Api.InputPhoneContact({
+                clientId: BigInt(Date.now() + 3),
+                phone: cleanPhone,
+                firstName: firstName || "Lead",
+                lastName: cleanPhone.slice(-4),
+              })],
+            }),
+          );
+          const fallbackUser = fallbackResult.users?.[0] as Api.User | undefined;
+          if (fallbackUser?.accessHash) {
+            senderAccessHash = fallbackUser.accessHash;
+            console.log(`[TelegramClientManager] Bridge: sender importContacts fallback success for userId=${fallbackUser.id}`);
+          } else {
+            console.warn(`[TelegramClientManager] Bridge: sender importContacts fallback returned no user`);
+          }
+        } catch (fallbackErr: any) {
+          console.warn(`[TelegramClientManager] Bridge: sender importContacts fallback failed: ${fallbackErr.message}`);
+        }
       }
     } catch (bridgeErr: any) {
       console.warn(`[TelegramClientManager] Bridge failed: ${bridgeErr.message}`);
@@ -1774,6 +1891,19 @@ class TelegramClientManager {
 
     for (const [key, connection] of Array.from(this.connections.entries())) {
       try {
+        // Persist any in-memory session rotation before disconnecting so the
+        // next restart reads a fresh key and avoids AUTH_KEY_INVALID.
+        if (!connection.accountId.startsWith("legacy_") && connection.client) {
+          try {
+            const savedSession = connection.client.session.save() as unknown as string;
+            if (savedSession && savedSession !== connection.sessionString) {
+              await storage.updateTelegramAccount(connection.accountId, { sessionString: savedSession });
+              console.log(`[TelegramClientManager] Persisted rotated session for ${key} before shutdown`);
+            }
+          } catch (saveErr: any) {
+            console.warn(`[TelegramClientManager] Could not persist session for ${key} during shutdown: ${saveErr.message}`);
+          }
+        }
         await connection.client.disconnect();
         console.log(`[TelegramClientManager] Disconnected: ${key}`);
       } catch {}

@@ -1,17 +1,13 @@
 import { Router, type Request, type Response } from "express";
 import { storage } from "../storage";
 import { insertProductSchema } from "@shared/schema";
-import { requireAuth, requirePermission } from "../middleware/rbac";
+import { requireAuth, requirePermission, requireTenant } from "../middleware/rbac";
 
 const router = Router();
 
-router.get("/api/products", requireAuth, requirePermission("MANAGE_PRODUCTS"), async (req: Request, res: Response) => {
+router.get("/api/products", requireAuth, requirePermission("MANAGE_PRODUCTS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const productsUser = await storage.getUser(req.userId!);
-    if (!productsUser?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const products = await storage.getProductsByTenant(productsUser.tenantId);
+    const products = await storage.getProductsByTenant(req.tenantId!);
     res.json(products);
   } catch (error) {
     console.error("Error fetching products:", error);
@@ -19,20 +15,15 @@ router.get("/api/products", requireAuth, requirePermission("MANAGE_PRODUCTS"), a
   }
 });
 
-router.post("/api/products", requireAuth, requirePermission("MANAGE_PRODUCTS"), async (req: Request, res: Response) => {
+router.post("/api/products", requireAuth, requirePermission("MANAGE_PRODUCTS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const createProductUser = await storage.getUser(req.userId!);
-    if (!createProductUser?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    
     const productData = insertProductSchema.omit({ tenantId: true }).safeParse(req.body);
     if (!productData.success) {
       return res.status(400).json({ error: "Invalid product data", details: productData.error.issues });
     }
     
     const product = await storage.createProduct({
-      tenantId: createProductUser.tenantId,
+      tenantId: req.tenantId!,
       ...productData.data,
     });
     res.status(201).json(product);
@@ -42,14 +33,11 @@ router.post("/api/products", requireAuth, requirePermission("MANAGE_PRODUCTS"), 
   }
 });
 
-router.patch("/api/products/:id", requireAuth, requirePermission("MANAGE_PRODUCTS"), async (req: Request, res: Response) => {
+router.patch("/api/products/:id", requireAuth, requirePermission("MANAGE_PRODUCTS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const productUpdateUser = req.userId ? await storage.getUser(req.userId) : undefined;
-    if (!productUpdateUser?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
+    const tenantId = req.tenantId!;
     const existingProduct = await storage.getProduct(req.params.id);
-    if (!existingProduct || existingProduct.tenantId !== productUpdateUser.tenantId) {
+    if (!existingProduct || existingProduct.tenantId !== tenantId) {
       return res.status(404).json({ error: "Product not found" });
     }
     const product = await storage.updateProduct(req.params.id, req.body);
@@ -63,14 +51,11 @@ router.patch("/api/products/:id", requireAuth, requirePermission("MANAGE_PRODUCT
   }
 });
 
-router.delete("/api/products/:id", requireAuth, requirePermission("MANAGE_PRODUCTS"), async (req: Request, res: Response) => {
+router.delete("/api/products/:id", requireAuth, requirePermission("MANAGE_PRODUCTS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const productDeleteUser = req.userId ? await storage.getUser(req.userId) : undefined;
-    if (!productDeleteUser?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
+    const tenantId = req.tenantId!;
     const product = await storage.getProduct(req.params.id);
-    if (!product || product.tenantId !== productDeleteUser.tenantId) {
+    if (!product || product.tenantId !== tenantId) {
       return res.status(404).json({ error: "Product not found" });
     }
     
@@ -88,19 +73,15 @@ router.delete("/api/products/:id", requireAuth, requirePermission("MANAGE_PRODUC
   }
 });
 
-router.post("/api/products/import", requireAuth, requirePermission("MANAGE_PRODUCTS"), async (req: Request, res: Response) => {
+router.post("/api/products/import", requireAuth, requirePermission("MANAGE_PRODUCTS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const importProductsUser = await storage.getUser(req.userId!);
-    if (!importProductsUser?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    
+    const tenantId = req.tenantId!;
     const products = req.body.products || [];
     let count = 0;
     
     for (const p of products) {
       await storage.createProduct({
-        tenantId: importProductsUser.tenantId,
+        tenantId: tenantId,
         name: p.name,
         sku: p.sku,
         description: p.description,

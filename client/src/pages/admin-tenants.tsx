@@ -5,8 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Building2, Search } from "lucide-react";
+import { Loader2, Building2, Search, Copy, Check } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 
@@ -64,6 +65,42 @@ interface TemplateSettings {
   templateGearboxEnabled: boolean;
   templateEngineEnabled: boolean;
   templateTiresEnabled: boolean;
+}
+
+const APP_URL = "https://aimessagehelper.online";
+
+function CopyWebhookUrl({ tenantId }: { tenantId: string }) {
+  const [copied, setCopied] = useState(false);
+  const webhookUrl = `${APP_URL}/webhooks/marquiz/${tenantId}`;
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(webhookUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div className="flex items-center gap-2 pt-2 border-t border-border/40">
+      <span className="text-xs text-muted-foreground shrink-0">Marquiz webhook:</span>
+      <code className="text-xs bg-muted px-2 py-0.5 rounded font-mono truncate max-w-xs flex-1 select-all">
+        {webhookUrl}
+      </code>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-6 w-6 shrink-0"
+        onClick={handleCopy}
+        title="Скопировать URL"
+      >
+        {copied ? (
+          <Check className="h-3 w-3 text-green-500" />
+        ) : (
+          <Copy className="h-3 w-3" />
+        )}
+      </Button>
+    </div>
+  );
 }
 
 function TenantRow({ tenant }: { tenant: TenantSearchResult }) {
@@ -178,6 +215,9 @@ function TenantRow({ tenant }: { tenant: TenantSearchResult }) {
           </div>
         )}
       </div>
+
+      {/* Per-tenant Marquiz webhook URL */}
+      <CopyWebhookUrl tenantId={tenant.id} />
     </div>
   );
 }

@@ -44,7 +44,7 @@ export function getPriceLookupQueue(): Queue<PriceLookupJobData> | null {
 
   try {
     priceLookupQueue = new Queue<PriceLookupJobData>(QUEUE_NAME, {
-      connection: config,
+      connection: config as any,
       defaultJobOptions: {
         attempts: 3,
         backoff: {

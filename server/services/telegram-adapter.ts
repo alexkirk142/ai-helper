@@ -5,9 +5,10 @@ import type {
   ParsedAttachment,
   ParsedIncomingMessage,
   WebhookVerifyResult,
-} from "./channel-adapter";
+} from "./channel-adapter.types";
 import { featureFlagService } from "./feature-flags";
 import { auditLog } from "./audit-log";
+import { DedupCache } from "./utils/dedup-cache";
 
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const TELEGRAM_RATE_LIMIT_RPS = 30;
@@ -557,13 +558,6 @@ export class TelegramAdapter implements ChannelAdapter {
     }
 
     this.processedMessageIds.add(idempotencyKey);
-    if (this.processedMessageIds.size > this.maxProcessedIds) {
-      const iterator = this.processedMessageIds.values();
-      const firstValue = iterator.next().value;
-      if (firstValue) {
-        this.processedMessageIds.delete(firstValue);
-      }
-    }
 
     const attachments: ParsedAttachment[] = [];
 

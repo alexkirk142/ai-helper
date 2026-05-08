@@ -1,11 +1,13 @@
 import type { Express, Request, Response } from "express";
 import { storage } from "../storage";
+import { isRateLimiterRedisAvailable } from "../redis-client";
 
 interface HealthStatus {
   status: "healthy" | "degraded" | "unhealthy";
   timestamp: string;
   version: string;
   uptime: number;
+  redisAvailable: boolean;
   checks: {
     name: string;
     status: "pass" | "fail";
@@ -86,6 +88,7 @@ export function registerHealthRoutes(app: Express): void {
       timestamp: new Date().toISOString(),
       version: process.env.npm_package_version || "1.0.0",
       uptime: Math.round((Date.now() - startTime) / 1000),
+      redisAvailable: isRateLimiterRedisAvailable(),
       checks,
     };
 

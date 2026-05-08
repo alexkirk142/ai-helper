@@ -15,6 +15,7 @@ console.error = (...args: unknown[]) => {
 };
 
 import express from "express";
+import cors from "cors";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -27,6 +28,7 @@ import { WhatsAppPersonalAdapter } from "./services/whatsapp-personal-adapter";
 import { realtimeService } from "./services/websocket-server";
 import { storage } from "./storage";
 import { telegramClientManager } from "./services/telegram-client-manager";
+import { setupInboundMessageHandler } from "./services/inbound-message-handler";
 import { errorHandler } from "./middleware/error-handler";
 import { pool } from "./db";
 import { closeQueue } from "./services/message-queue";
@@ -97,6 +99,18 @@ const app = express();
 // Trust proxy for rate limiting behind reverse proxy
 app.set('trust proxy', 1);
 const httpServer = createServer(app);
+
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+  : undefined;
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  }),
+);
 
 declare module "http" {
   interface IncomingMessage {
@@ -268,6 +282,10 @@ app.use((req, res, next) => {
       marquizLeadWorker = startMarquizLeadWorker();
       noReplyCheckWorker = startNoReplyCheckWorker();
       log("BullMQ workers started", "startup");
+
+      // Wire messageBus → processIncomingMessageFull before any channel connects
+      setupInboundMessageHandler();
+      log("Inbound message handler subscribed to message bus", "startup");
 
       // Auto-restore Telegram Personal sessions in background — must not block worker startup
       telegramClientManager.initialize()

@@ -1,4 +1,4 @@
-import { eq, desc, asc, and, or, ilike, inArray, sql, gte, gt, isNull, ne } from "drizzle-orm";
+import { eq, desc, asc, and, or, ilike, inArray, sql, gte, gt, isNull, ne, count } from "drizzle-orm";
 import { db } from "./db";
 import {
   tenants, channels, users, userInvites, emailTokens, customers, customerNotes, customerMemory, conversations, messages,
@@ -57,14 +57,27 @@ import {
   type TenantAgentSettings, type InsertTenantAgentSettings,
   type TransmissionIdentityCache, type InsertTransmissionIdentityCache,
 } from "@shared/schema";
-import type { IStorage } from "./storage";
+import type { IStorage } from "./storage.types";
 import { encryptSessionString, decryptSessionString } from "./services/telegram-session-crypto";
 
 export class DatabaseStorage implements IStorage {
   private defaultTenantId: string | null = null;
+  private tenantCache = new Map<string, { data: Tenant; expiresAt: number }>();
+  private readonly TENANT_CACHE_TTL_MS = 60_000;
+  private decisionSettingsCache = new Map<string, { data: DecisionSettings; expiresAt: number }>();
+  private readonly DECISION_SETTINGS_CACHE_TTL_MS = 60_000;
+  private humanDelaySettingsCache = new Map<string, { data: HumanDelaySettings; expiresAt: number }>();
+  private readonly HUMAN_DELAY_SETTINGS_CACHE_TTL_MS = 60_000;
 
   async getTenant(id: string): Promise<Tenant | undefined> {
+    const cached = this.tenantCache.get(id);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, id));
+    if (tenant) {
+      this.tenantCache.set(id, { data: tenant, expiresAt: Date.now() + this.TENANT_CACHE_TTL_MS });
+    }
     return tenant;
   }
 
@@ -95,6 +108,7 @@ export class DatabaseStorage implements IStorage {
 
   async updateTenant(id: string, data: Partial<InsertTenant>): Promise<Tenant | undefined> {
     const [tenant] = await db.update(tenants).set(data).where(eq(tenants.id, id)).returning();
+    this.tenantCache.delete(id);
     return tenant;
   }
 
@@ -159,6 +173,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   // User Invites
+  async getUserInvite(id: string): Promise<UserInvite | undefined> {
+    const [invite] = await db.select().from(userInvites).where(eq(userInvites.id, id));
+    return invite;
+  }
+
   async getUserInviteByTokenHash(tokenHash: string): Promise<UserInvite | undefined> {
     const [invite] = await db.select().from(userInvites).where(eq(userInvites.tokenHash, tokenHash));
     return invite;
@@ -177,6 +196,18 @@ export class DatabaseStorage implements IStorage {
   async createUserInvite(data: InsertUserInvite): Promise<UserInvite> {
     const [invite] = await db.insert(userInvites).values(data).returning();
     return invite;
+  }
+
+  async updateUserInviteEmailStatus(inviteId: string, status: string, sentAt?: Date): Promise<void> {
+    await db.update(userInvites)
+      .set({ emailStatus: status, emailSentAt: sentAt || null })
+      .where(eq(userInvites.id, inviteId));
+  }
+
+  async updateUserInviteToken(inviteId: string, tokenHash: string, expiresAt: Date): Promise<void> {
+    await db.update(userInvites)
+      .set({ tokenHash, expiresAt })
+      .where(eq(userInvites.id, inviteId));
   }
 
   async markUserInviteUsed(inviteId: string): Promise<void> {
@@ -421,14 +452,20 @@ export class DatabaseStorage implements IStorage {
     return { ...conv, customer, messages: msgs, currentSuggestion: suggestion };
   }
 
-  async getConversationsByTenant(tenantId: string): Promise<ConversationWithCustomer[]> {
+  async getConversationsByTenant(tenantId: string, options?: { limit?: number; offset?: number }): Promise<ConversationWithCustomer[]> {
     const rows = await db
       .select({ conv: conversations, customer: customers, channel: channels })
       .from(conversations)
       .innerJoin(customers, eq(conversations.customerId, customers.id))
       .leftJoin(channels, eq(conversations.channelId, channels.id))
-      .where(and(eq(conversations.tenantId, tenantId), ne(conversations.status, "failed_delivery")))
-      .orderBy(desc(conversations.lastMessageAt));
+      .where(and(
+        eq(conversations.tenantId, tenantId),
+        ne(conversations.status, "failed_delivery"),
+        ne(customers.isBlocked, true),
+      ))
+      .orderBy(desc(conversations.lastMessageAt))
+      .limit(options?.limit ?? 200)
+      .offset(options?.offset ?? 0);
 
     if (rows.length === 0) return [];
 
@@ -451,6 +488,84 @@ export class DatabaseStorage implements IStorage {
       ...conv,
       customer,
       lastMessage: lastMsgMap.get(conv.id),
+      channel: channel ?? undefined,
+    }));
+  }
+
+  async searchConversations(tenantId: string, query: string): Promise<ConversationWithCustomer[]> {
+    if (!query || query.trim().length < 2) return [];
+    const pattern = `%${query.trim()}%`;
+
+    // Find conversation IDs matching customer name / phone
+    const byCustomer = await db
+      .select({ convId: conversations.id })
+      .from(conversations)
+      .innerJoin(customers, eq(conversations.customerId, customers.id))
+      .where(and(
+        eq(conversations.tenantId, tenantId),
+        ne(conversations.status, "failed_delivery"),
+        ne(customers.isBlocked, true),
+        or(ilike(customers.name, pattern), ilike(customers.phone, pattern)),
+      ));
+
+    // Find conversation IDs matching any message content
+    const byMessage = await db
+      .select({ convId: messages.conversationId })
+      .from(messages)
+      .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+      .innerJoin(customers, eq(conversations.customerId, customers.id))
+      .where(and(
+        eq(conversations.tenantId, tenantId),
+        ne(conversations.status, "failed_delivery"),
+        ne(customers.isBlocked, true),
+        ilike(messages.content, pattern),
+      ));
+
+    const convIdSet = new Set([
+      ...byCustomer.map(r => r.convId),
+      ...byMessage.map(r => r.convId),
+    ]);
+    if (convIdSet.size === 0) return [];
+
+    const convIdList = [...convIdSet];
+
+    // Load full conversation data
+    const rows = await db
+      .select({ conv: conversations, customer: customers, channel: channels })
+      .from(conversations)
+      .innerJoin(customers, eq(conversations.customerId, customers.id))
+      .leftJoin(channels, eq(conversations.channelId, channels.id))
+      .where(inArray(conversations.id, convIdList))
+      .orderBy(desc(conversations.lastMessageAt))
+      .limit(50);
+
+    if (rows.length === 0) return [];
+
+    // Load all messages for matched conversations
+    const allMessages = await db
+      .select()
+      .from(messages)
+      .where(inArray(messages.conversationId, convIdList))
+      .orderBy(desc(messages.createdAt));
+
+    const lastMsgMap = new Map<string, Message>();
+    const matchedMsgMap = new Map<string, Message>();
+    const queryLower = query.trim().toLowerCase();
+
+    for (const msg of allMessages) {
+      if (!lastMsgMap.has(msg.conversationId)) {
+        lastMsgMap.set(msg.conversationId, msg);
+      }
+      if (!matchedMsgMap.has(msg.conversationId) && msg.content.toLowerCase().includes(queryLower)) {
+        matchedMsgMap.set(msg.conversationId, msg);
+      }
+    }
+
+    return rows.map(({ conv, customer, channel }) => ({
+      ...conv,
+      customer,
+      lastMessage: lastMsgMap.get(conv.id),
+      matchedMessage: matchedMsgMap.get(conv.id),
       channel: channel ?? undefined,
     }));
   }
@@ -496,7 +611,8 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(channels, eq(conversations.channelId, channels.id))
       .where(and(
         eq(conversations.tenantId, tenantId),
-        eq(conversations.status, "active")
+        eq(conversations.status, "active"),
+        ne(customers.isBlocked, true),
       ))
       .orderBy(desc(conversations.lastMessageAt));
 
@@ -576,21 +692,23 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createConversation(data: InsertConversation & { lastMessageAt?: Date; createdAt?: Date }, _tenantId: string): Promise<Conversation> {
+    const created = data.createdAt || new Date();
     const [conv] = await db.insert(conversations).values({
       ...data,
       lastMessageAt: data.lastMessageAt || new Date(),
-      createdAt: data.createdAt || new Date(),
+      createdAt: created,
+      updatedAt: created,
     }).returning();
     return conv;
   }
 
   async updateConversation(id: string, tenantId: string, data: Partial<InsertConversation>): Promise<Conversation | undefined> {
-    const [conv] = await db.update(conversations).set(data).where(and(eq(conversations.id, id), eq(conversations.tenantId, tenantId))).returning();
+    const [conv] = await db.update(conversations).set({ ...data, updatedAt: new Date() }).where(and(eq(conversations.id, id), eq(conversations.tenantId, tenantId))).returning();
     return conv;
   }
 
   async deleteConversation(id: string, tenantId: string): Promise<boolean> {
-    await db.transaction(async (tx) => {
+    return db.transaction(async (tx) => {
       // Get ai_suggestion IDs first to delete human_actions
       const suggestions = await tx.select({ id: aiSuggestions.id })
         .from(aiSuggestions)
@@ -609,9 +727,9 @@ export class DatabaseStorage implements IStorage {
       await tx.delete(escalationEvents).where(eq(escalationEvents.conversationId, id));
       await tx.delete(aiSuggestions).where(eq(aiSuggestions.conversationId, id));
       await tx.delete(messages).where(eq(messages.conversationId, id));
-      await tx.delete(conversations).where(and(eq(conversations.id, id), eq(conversations.tenantId, tenantId)));
+      const result = await tx.delete(conversations).where(and(eq(conversations.id, id), eq(conversations.tenantId, tenantId)));
+      return (result.rowCount ?? 0) > 0;
     });
-    return true;
   }
 
   async getMessage(id: string, tenantId: string): Promise<Message | undefined> {
@@ -729,7 +847,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteProduct(id: string): Promise<boolean> {
     const result = await db.delete(products).where(eq(products.id, id));
-    return true;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async searchProducts(tenantId: string, query: string): Promise<Product[]> {
@@ -766,8 +884,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteKnowledgeDoc(id: string): Promise<boolean> {
-    await db.delete(knowledgeDocs).where(eq(knowledgeDocs.id, id));
-    return true;
+    const result = await db.delete(knowledgeDocs).where(eq(knowledgeDocs.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   async searchKnowledgeDocs(tenantId: string, query: string): Promise<KnowledgeDoc[]> {
@@ -1032,7 +1150,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getDashboardMetrics(tenantId: string): Promise<DashboardMetrics> {
-    const [convCounts, pendingResult, productsResult, docsResult] = await Promise.all([
+    const [convCounts, pendingResult, productsResult, docsResult, resolvedTodayResult] = await Promise.all([
       db
         .select({
           total: sql<number>`count(*)::int`,
@@ -1060,15 +1178,25 @@ export class DatabaseStorage implements IStorage {
         .select({ count: sql<number>`count(*)::int` })
         .from(knowledgeDocs)
         .where(eq(knowledgeDocs.tenantId, tenantId)),
+
+      db
+        .select({ count: count() })
+        .from(conversations)
+        .where(and(
+          eq(conversations.tenantId, tenantId),
+          eq(conversations.status, "resolved"),
+          gte(conversations.updatedAt, sql`CURRENT_DATE`),
+        )),
     ]);
 
     const conv = convCounts[0];
+    const resolvedToday = Number(resolvedTodayResult[0]?.count ?? 0);
     return {
       totalConversations: conv?.total ?? 0,
       activeConversations: conv?.active ?? 0,
       escalatedConversations: conv?.escalated ?? 0,
-      resolvedToday: 0,
-      avgResponseTime: 12,
+      resolvedToday,
+      avgResponseTime: null,
       aiAccuracy: 0,
       pendingSuggestions: pendingResult[0]?.count ?? 0,
       productsCount: productsResult[0]?.count ?? 0,
@@ -1077,7 +1205,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getDecisionSettings(tenantId: string): Promise<DecisionSettings | undefined> {
+    const cached = this.decisionSettingsCache.get(tenantId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
     const [settings] = await db.select().from(decisionSettings).where(eq(decisionSettings.tenantId, tenantId));
+    if (settings) {
+      this.decisionSettingsCache.set(tenantId, {
+        data: settings,
+        expiresAt: Date.now() + this.DECISION_SETTINGS_CACHE_TTL_MS,
+      });
+    }
     return settings;
   }
 
@@ -1089,25 +1227,38 @@ export class DatabaseStorage implements IStorage {
         set: { ...data, updatedAt: new Date() },
       })
       .returning();
+    this.decisionSettingsCache.delete(data.tenantId);
     return result;
   }
 
   async getHumanDelaySettings(tenantId: string): Promise<HumanDelaySettings | undefined> {
+    const cached = this.humanDelaySettingsCache.get(tenantId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
     const [settings] = await db.select().from(humanDelaySettings).where(eq(humanDelaySettings.tenantId, tenantId));
-    if (settings) return settings;
-    
-    return {
-      tenantId,
-      enabled: false,
-      delayProfiles: DEFAULT_DELAY_PROFILES,
-      nightMode: "DELAY",
-      nightDelayMultiplier: 3.0,
-      nightAutoReplyText: "Спасибо за сообщение! Мы ответим в рабочее время.",
-      minDelayMs: 3000,
-      maxDelayMs: 120000,
-      typingIndicatorEnabled: true,
-      updatedAt: new Date(),
-    };
+    let result: HumanDelaySettings;
+    if (settings) {
+      result = settings;
+    } else {
+      result = {
+        tenantId,
+        enabled: false,
+        delayProfiles: DEFAULT_DELAY_PROFILES,
+        nightMode: "DELAY",
+        nightDelayMultiplier: 3.0,
+        nightAutoReplyText: "Спасибо за сообщение! Мы ответим в рабочее время.",
+        minDelayMs: 3000,
+        maxDelayMs: 120000,
+        typingIndicatorEnabled: true,
+        updatedAt: new Date(),
+      };
+    }
+    this.humanDelaySettingsCache.set(tenantId, {
+      data: result,
+      expiresAt: Date.now() + this.HUMAN_DELAY_SETTINGS_CACHE_TTL_MS,
+    });
+    return result;
   }
 
   async upsertHumanDelaySettings(data: InsertHumanDelaySettings): Promise<HumanDelaySettings> {
@@ -1118,6 +1269,7 @@ export class DatabaseStorage implements IStorage {
         set: { ...data, updatedAt: new Date() },
       })
       .returning();
+    this.humanDelaySettingsCache.delete(data.tenantId);
     return result;
   }
 

@@ -148,6 +148,20 @@
       "when": 1740600120000,
       "tag": "0019_ai_suggestions_escalation",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1777957935628,
+      "tag": "0021_superb_toad_men",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1746700000000,
+      "tag": "0024_customer_is_blocked",
+      "breakpoints": true
     }
   ]
 }

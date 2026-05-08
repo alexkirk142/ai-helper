@@ -102,11 +102,11 @@ export async function createCheckoutSession(
   }
 
   const session = await stripeInstance.checkout.sessions.create({
-    customer: customerId,
+    customer: customerId || undefined,
     mode: "subscription",
     line_items: [
       {
-        price: plan.stripePriceId,
+        price: plan.stripePriceId ?? undefined,
         quantity: 1,
       },
     ],

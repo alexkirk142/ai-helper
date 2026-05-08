@@ -29,7 +29,7 @@ export function getNoReplyCheckQueue(): Queue<NoReplyCheckJobData> | null {
 
   try {
     noReplyCheckQueue = new Queue<NoReplyCheckJobData>(QUEUE_NAME, {
-      connection: config,
+      connection: config as any,
       defaultJobOptions: {
         attempts: 2,
         backoff: { type: "fixed", delay: 5000 },

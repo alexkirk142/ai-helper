@@ -32,7 +32,7 @@ export class LostDealsService {
       const minutesSinceEscalation = timeSinceEscalation / (1000 * 60);
       
       if (minutesSinceEscalation > ESCALATION_TIMEOUT_MINUTES) {
-        const messages = await this.storage.getMessagesByConversation(conversationId);
+        const messages = await this.storage.getMessagesByConversation(conversationId, conversation.tenantId);
         const operatorReplied = messages.some(m => 
           (m.role === "assistant" || m.role === "owner") && 
           new Date(m.createdAt) > new Date(suggestion.createdAt)

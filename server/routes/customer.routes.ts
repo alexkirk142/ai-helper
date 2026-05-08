@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { storage } from "../storage";
 import { updateCustomerSchema, insertCustomerNoteSchema } from "@shared/schema";
-import { requireAuth, requireOperator, requireAdmin, requirePermission } from "../middleware/rbac";
+import { requireAuth, requireOperator, requireAdmin, requirePermission, requireTenant } from "../middleware/rbac";
 import { auditLog } from "../services/audit-log";
 import { sanitizeString } from "../utils/sanitizer";
 
@@ -11,18 +11,15 @@ const router = Router();
 const MAX_NOTE_LENGTH = 2048;
 
 // GET /api/customers - List customers with optional search
-router.get("/api/customers", requireAuth, requirePermission("VIEW_CUSTOMERS"), async (req: Request, res: Response) => {
+router.get("/api/customers", requireAuth, requirePermission("VIEW_CUSTOMERS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const customersUser = await storage.getUser(req.userId!);
-    if (!customersUser?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
+    const tenantId = req.tenantId!;
     const search = req.query.search as string | undefined;
     let customers;
     if (search && search.trim().length > 0) {
-      customers = await storage.searchCustomers(customersUser.tenantId, search.trim());
+      customers = await storage.searchCustomers(tenantId, search.trim());
     } else {
-      customers = await storage.getCustomersByTenant(customersUser.tenantId);
+      customers = await storage.getCustomersByTenant(tenantId);
     }
     res.json(customers);
   } catch (error) {
@@ -32,14 +29,11 @@ router.get("/api/customers", requireAuth, requirePermission("VIEW_CUSTOMERS"), a
 });
 
 // GET /api/customers/:id - Get single customer
-router.get("/api/customers/:id", requireAuth, requirePermission("VIEW_CUSTOMERS"), async (req: Request, res: Response) => {
+router.get("/api/customers/:id", requireAuth, requirePermission("VIEW_CUSTOMERS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = req.userId ? await storage.getUser(req.userId) : undefined;
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const customer = await storage.getCustomer(req.params.id, user.tenantId);
-    if (!customer || customer.tenantId !== user.tenantId) {
+    const tenantId = req.tenantId!;
+    const customer = await storage.getCustomer(req.params.id, tenantId);
+    if (!customer || customer.tenantId !== tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
     res.json(customer);
@@ -50,14 +44,11 @@ router.get("/api/customers/:id", requireAuth, requirePermission("VIEW_CUSTOMERS"
 });
 
 // PATCH /api/customers/:id - Update customer (displayName, tags)
-router.patch("/api/customers/:id", requireAuth, requireOperator, async (req: Request, res: Response) => {
+router.patch("/api/customers/:id", requireAuth, requireOperator, requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = req.userId ? await storage.getUser(req.userId) : undefined;
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const customer = await storage.getCustomer(req.params.id, user.tenantId);
-    if (!customer || customer.tenantId !== user.tenantId) {
+    const tenantId = req.tenantId!;
+    const customer = await storage.getCustomer(req.params.id, tenantId);
+    if (!customer || customer.tenantId !== tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
     
@@ -66,7 +57,7 @@ router.patch("/api/customers/:id", requireAuth, requireOperator, async (req: Req
       return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
     }
     
-    const updated = await storage.updateCustomer(req.params.id, user.tenantId, parsed.data);
+    const updated = await storage.updateCustomer(req.params.id, tenantId, parsed.data);
     res.json(updated);
   } catch (error) {
     console.error("Error updating customer:", error);
@@ -75,14 +66,11 @@ router.patch("/api/customers/:id", requireAuth, requireOperator, async (req: Req
 });
 
 // GET /api/customers/:id/notes - Get customer notes
-router.get("/api/customers/:id/notes", requireAuth, requirePermission("VIEW_CUSTOMERS"), async (req: Request, res: Response) => {
+router.get("/api/customers/:id/notes", requireAuth, requirePermission("VIEW_CUSTOMERS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = req.userId ? await storage.getUser(req.userId) : undefined;
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const customer = await storage.getCustomer(req.params.id, user.tenantId);
-    if (!customer || customer.tenantId !== user.tenantId) {
+    const tenantId = req.tenantId!;
+    const customer = await storage.getCustomer(req.params.id, tenantId);
+    if (!customer || customer.tenantId !== tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
     const notes = await storage.getCustomerNotes(req.params.id);
@@ -94,14 +82,12 @@ router.get("/api/customers/:id/notes", requireAuth, requirePermission("VIEW_CUST
 });
 
 // POST /api/customers/:id/notes - Create customer note
-router.post("/api/customers/:id/notes", requireAuth, requireOperator, async (req: Request, res: Response) => {
+router.post("/api/customers/:id/notes", requireAuth, requireOperator, requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = req.userId ? await storage.getUser(req.userId) : undefined;
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const customer = await storage.getCustomer(req.params.id, user.tenantId);
-    if (!customer || customer.tenantId !== user.tenantId) {
+    const user = (req as any).user;
+    const tenantId = req.tenantId!;
+    const customer = await storage.getCustomer(req.params.id, tenantId);
+    if (!customer || customer.tenantId !== tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
 
@@ -116,10 +102,6 @@ router.post("/api/customers/:id/notes", requireAuth, requireOperator, async (req
     const parsed = noteInputSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
-    }
-
-    if (!req.userId || req.userId === "system") {
-      return res.status(403).json({ error: "User authentication required to create notes" });
     }
 
     const sanitizedNoteText = sanitizeString(parsed.data.noteText);
@@ -149,19 +131,17 @@ router.post("/api/customers/:id/notes", requireAuth, requireOperator, async (req
 });
 
 // DELETE /api/customers/:id/notes/:noteId - Delete customer note
-router.delete("/api/customers/:id/notes/:noteId", requireAuth, requireOperator, async (req: Request, res: Response) => {
+router.delete("/api/customers/:id/notes/:noteId", requireAuth, requireOperator, requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = req.userId ? await storage.getUser(req.userId) : undefined;
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const customer = await storage.getCustomer(req.params.id, user.tenantId);
-    if (!customer || customer.tenantId !== user.tenantId) {
+    const user = (req as any).user;
+    const tenantId = req.tenantId!;
+    const customer = await storage.getCustomer(req.params.id, tenantId);
+    if (!customer || customer.tenantId !== tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
     
     const note = await storage.getCustomerNote(req.params.noteId);
-    if (!note || note.tenantId !== user.tenantId) {
+    if (!note || note.tenantId !== tenantId) {
       return res.status(404).json({ error: "Note not found" });
     }
     
@@ -234,14 +214,11 @@ router.delete("/api/customers/:id/data", requireAuth, requirePermission("DELETE_
 });
 
 // GET /api/customers/:id/memory - Get customer memory (preferences + frequent topics)
-router.get("/api/customers/:id/memory", requireAuth, requirePermission("VIEW_CUSTOMERS"), async (req: Request, res: Response) => {
+router.get("/api/customers/:id/memory", requireAuth, requirePermission("VIEW_CUSTOMERS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = req.userId ? await storage.getUser(req.userId) : undefined;
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const customer = await storage.getCustomer(req.params.id, user.tenantId);
-    if (!customer || customer.tenantId !== user.tenantId) {
+    const tenantId = req.tenantId!;
+    const customer = await storage.getCustomer(req.params.id, tenantId);
+    if (!customer || customer.tenantId !== tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
     
@@ -264,14 +241,11 @@ router.get("/api/customers/:id/memory", requireAuth, requirePermission("VIEW_CUS
 });
 
 // PATCH /api/customers/:id/memory - Update customer preferences
-router.patch("/api/customers/:id/memory", requireAuth, requireOperator, async (req: Request, res: Response) => {
+router.patch("/api/customers/:id/memory", requireAuth, requireOperator, requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = req.userId ? await storage.getUser(req.userId) : undefined;
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const customer = await storage.getCustomer(req.params.id, user.tenantId);
-    if (!customer || customer.tenantId !== user.tenantId) {
+    const tenantId = req.tenantId!;
+    const customer = await storage.getCustomer(req.params.id, tenantId);
+    if (!customer || customer.tenantId !== tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
     
@@ -313,14 +287,11 @@ router.patch("/api/customers/:id/memory", requireAuth, requireOperator, async (r
 });
 
 // POST /api/customers/:id/memory/rebuild-summary - Rebuild customer summary via LLM
-router.post("/api/customers/:id/memory/rebuild-summary", requireAuth, requireAdmin, async (req: Request, res: Response) => {
+router.post("/api/customers/:id/memory/rebuild-summary", requireAuth, requireAdmin, requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = req.userId ? await storage.getUser(req.userId) : undefined;
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const customer = await storage.getCustomer(req.params.id, user.tenantId);
-    if (!customer || customer.tenantId !== user.tenantId) {
+    const tenantId = req.tenantId!;
+    const customer = await storage.getCustomer(req.params.id, tenantId);
+    if (!customer || customer.tenantId !== tenantId) {
       return res.status(404).json({ error: "Customer not found" });
     }
     

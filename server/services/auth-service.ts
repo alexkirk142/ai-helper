@@ -7,6 +7,8 @@ import { UserRole } from "../middleware/rbac";
 import { emailProvider, emailTemplates } from "./email-provider";
 import { startTrial } from "./cryptobot-billing";
 import { fraudDetectionService } from "./fraud-detection-service";
+import { db } from "../db";
+import { sql } from "drizzle-orm";
 
 const SALT_ROUNDS = 12;
 const EMAIL_VERIFICATION_EXPIRY_HOURS = 24;
@@ -550,7 +552,7 @@ export class AuthService {
    * - Token validated via hash lookup
    * - Single-use token
    * - Password strength validated
-   * - All existing sessions should be invalidated (TODO: implement session store)
+   * - All existing sessions are invalidated on success
    */
   async resetPassword(token: string, newPassword: string): Promise<{ success: boolean; error?: string; errorCode?: string }> {
     // Validate password strength
@@ -584,6 +586,18 @@ export class AuthService {
     // Hash new password and update
     const passwordHash = await this.hashPassword(newPassword);
     await storage.updateUserPassword(emailToken.userId, passwordHash);
+
+    // Invalidate all existing sessions for this user after password reset.
+    // Prevents stolen session cookies from remaining valid after a password change.
+    try {
+      await db.execute(
+        sql`DELETE FROM sessions WHERE sess->>'userId' = ${emailToken.userId}`
+      );
+      console.info(`[Auth] Invalidated sessions for user ${emailToken.userId} after password reset`);
+    } catch (sessionErr) {
+      // Non-fatal: log but don't fail the password reset
+      console.error("[Auth] Failed to invalidate sessions after password reset:", sessionErr);
+    }
 
     await auditLog.log(
       "password_reset_completed" as any,

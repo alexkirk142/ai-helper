@@ -127,7 +127,10 @@ ai-sales/
 │   │   ├── admin.ts                 # /api/admin/* — tenants, users, secrets, proxies, billing
 │   │   ├── phase0.ts                # Feature flags CRUD + audit log
 │   │   ├── health.ts                # /health, /ready, /metrics
-│   │   ├── conversation.routes.ts   # /api/conversations/* CRUD + status changes
+│   │   ├── conversation.routes.ts   # /api/conversations/* core CRUD + mode/status
+│   │   ├── message.routes.ts        # /api/conversations/:id/messages + read marker
+│   │   ├── suggestion.routes.ts     # /api/conversations/:id/generate-suggestion + /api/suggestions/*
+│   │   ├── escalation.routes.ts     # /api/escalations/* + /api/conversations/:id/csat
 │   │   ├── customer.routes.ts       # /api/customers/* CRUD + notes + memory
 │   │   ├── product.routes.ts        # /api/products/* CRUD
 │   │   ├── knowledge-base.routes.ts # /api/knowledge-docs/*
@@ -405,7 +408,7 @@ Sub-routers are mounted via `app.use(...)`.
 - `POST /api/auth/accept-invite`
 - `GET  /api/auth/user` — current session user
 
-### Conversations (`server/routes/conversation.routes.ts`)
+### Conversations (`server/routes/conversation.routes.ts` + `message.routes.ts` + `suggestion.routes.ts` + `escalation.routes.ts`)
 - `GET  /api/conversations`
 - `POST /api/conversations`
 - `GET  /api/conversations/:id`

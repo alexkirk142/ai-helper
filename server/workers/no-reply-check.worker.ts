@@ -84,7 +84,7 @@ export function startNoReplyCheckWorker(): Worker<NoReplyCheckJobData> | null {
       await processNoReplyCheck(job);
     },
     {
-      connection: config,
+      connection: config as any,
       concurrency: 5,
     },
   );

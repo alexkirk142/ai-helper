@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -13,7 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Search, MessageCircle, Trash2, MessageSquarePlus } from "lucide-react";
+import { Search, MessageCircle, Trash2, MessageSquarePlus, Loader2 } from "lucide-react";
 import { SiTelegram, SiWhatsapp } from "react-icons/si";
 import { cn } from "@/lib/utils";
 import type { ConversationWithCustomer } from "@shared/schema";
@@ -54,6 +55,9 @@ interface ConversationListProps {
   onCreateTestDialog?: () => void;
   onNewDialog?: () => void;
   isLoading?: boolean;
+  hasMoreServer?: boolean;
+  isFetchingMore?: boolean;
+  onLoadMoreServer?: () => void;
 }
 
 const statusColors: Record<string, string> = {
@@ -72,6 +76,31 @@ const modeLabels: Record<string, string> = {
 // Render PAGE_SIZE items initially, load more as user scrolls
 const PAGE_SIZE = 60;
 
+// Highlight matching text inside a string
+function Highlight({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-yellow-200 dark:bg-yellow-800 text-inherit rounded-sm px-0.5">
+        {text.slice(idx, idx + query.length)}
+      </mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
+
+// Extract a short snippet around the matched word
+function getSnippet(content: string, query: string, radius = 40): string {
+  const idx = content.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return content.slice(0, 80);
+  const start = Math.max(0, idx - radius);
+  const end = Math.min(content.length, idx + query.length + radius);
+  return (start > 0 ? "…" : "") + content.slice(start, end) + (end < content.length ? "…" : "");
+}
+
 export function ConversationList({
   conversations,
   selectedId,
@@ -80,10 +109,36 @@ export function ConversationList({
   onCreateTestDialog,
   onNewDialog,
   isLoading,
+  hasMoreServer,
+  isFetchingMore,
+  onLoadMoreServer,
 }: ConversationListProps) {
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  // Debounce: fire server search 400ms after user stops typing
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 400);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const isServerSearch = debouncedQuery.length >= 2;
+
+  // Server-side full-text search
+  const { data: searchResults, isFetching: searchLoading } = useQuery<ConversationWithCustomer[]>({
+    queryKey: ["/api/conversations/search", debouncedQuery],
+    queryFn: async () => {
+      const res = await fetch(`/api/conversations/search?q=${encodeURIComponent(debouncedQuery)}`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Search failed");
+      return res.json();
+    },
+    enabled: isServerSearch,
+    staleTime: 30_000,
+  });
 
   const handleDeleteConfirm = () => {
     if (deleteTargetId && onDelete) {
@@ -92,46 +147,66 @@ export function ConversationList({
     setDeleteTargetId(null);
   };
 
-  // Client-side search filter
-  const filtered = searchQuery.trim()
-    ? conversations.filter((c) => {
-        const q = searchQuery.toLowerCase();
-        return (
-          c.customer?.name?.toLowerCase().includes(q) ||
-          c.customer?.phone?.toLowerCase().includes(q) ||
-          c.lastMessage?.content?.toLowerCase().includes(q)
-        );
-      })
-    : conversations;
+  // When server search is active — use results; otherwise client-side filter
+  const filtered = isServerSearch
+    ? (searchResults ?? [])
+    : searchQuery.trim()
+      ? conversations.filter((c) => {
+          const q = searchQuery.toLowerCase();
+          return (
+            c.customer?.name?.toLowerCase().includes(q) ||
+            c.customer?.phone?.toLowerCase().includes(q) ||
+            c.lastMessage?.content?.toLowerCase().includes(q)
+          );
+        })
+      : conversations;
 
-  // Reset visible count when filter/search changes so we always start fresh
+  // Reset visible count only when the filter changes or the list SHRINKS
+  // (filter applied / channel switch). Do NOT reset when more server data arrives
+  // (list grows) — that would jump back to the top.
   const prevFilterKey = useRef("");
-  const filterKey = searchQuery + "|" + conversations.length;
-  if (filterKey !== prevFilterKey.current) {
+  const prevLength = useRef(0);
+  const filterKey = debouncedQuery;
+  const listShrunk = conversations.length < prevLength.current;
+  if (filterKey !== prevFilterKey.current || listShrunk) {
     prevFilterKey.current = filterKey;
-    if (visibleCount !== PAGE_SIZE) setVisibleCount(PAGE_SIZE);
+    setVisibleCount(PAGE_SIZE);
   }
+  prevLength.current = conversations.length;
 
   const visibleItems = filtered.slice(0, visibleCount);
   const hasMore = visibleCount < filtered.length;
 
-  // IntersectionObserver sentinel — load next page when visible
+  // Keep a reference to the active observer so we can disconnect before creating a new one.
+  // React 18 does not invoke the return value of ref callbacks as cleanup.
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
+  // IntersectionObserver sentinel — load next local page, or fetch next server page
   const sentinelRef = useCallback(
     (node: HTMLDivElement | null) => {
-      if (!node || !hasMore) return;
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+      if (!node || (!hasMore && !hasMoreServer)) return;
       const observer = new IntersectionObserver(
         (entries) => {
-          if (entries[0].isIntersecting) {
+          if (!entries[0].isIntersecting) return;
+          if (hasMore) {
             setVisibleCount((c) => Math.min(c + PAGE_SIZE, filtered.length));
+          } else if (hasMoreServer && onLoadMoreServer && !isFetchingMore) {
+            onLoadMoreServer();
           }
         },
         { threshold: 0.1 },
       );
       observer.observe(node);
-      return () => observer.disconnect();
+      observerRef.current = observer;
     },
-    [hasMore, filtered.length],
+    [hasMore, filtered.length, hasMoreServer, isFetchingMore, onLoadMoreServer],
   );
+
+  const showLoading = isLoading || (isServerSearch && searchLoading && !searchResults);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -139,13 +214,21 @@ export function ConversationList({
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Поиск разговоров..."
-            className="pl-9"
+            placeholder="Поиск по имени, номеру, сообщениям..."
+            className="pl-9 pr-8"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             data-testid="input-search-conversations"
           />
+          {searchLoading && isServerSearch && (
+            <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+          )}
         </div>
+        {isServerSearch && !searchLoading && searchResults && (
+          <p className="text-xs text-muted-foreground px-1">
+            Найдено: {searchResults.length} {searchResults.length === 1 ? "диалог" : "диалогов"} · по всем сообщениям
+          </p>
+        )}
         {onNewDialog && (
           <Button
             variant="default"
@@ -172,7 +255,7 @@ export function ConversationList({
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
-        {isLoading ? (
+        {showLoading ? (
           <div className="space-y-2 p-3">
             {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="animate-pulse">
@@ -203,6 +286,15 @@ export function ConversationList({
               const isMarquizLead =
                 (conversation.customer?.metadata as any)?.source === "marquiz";
 
+              // In search mode: prefer matched message snippet over last message
+              const displayQuery = isServerSearch ? debouncedQuery : searchQuery.trim();
+              const matchedMsg = conversation.matchedMessage;
+              const showMatchedSnippet = isServerSearch && matchedMsg &&
+                matchedMsg.id !== conversation.lastMessage?.id;
+              const snippetText = showMatchedSnippet
+                ? getSnippet(matchedMsg!.content, displayQuery)
+                : conversation.lastMessage?.content;
+
               return (
                 <div
                   key={conversation.id}
@@ -230,7 +322,14 @@ export function ConversationList({
                   <div className="flex-1 min-w-0 overflow-hidden">
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-sm font-medium">
-                        {conversation.customer?.name || "Неизвестный клиент"}
+                        {displayQuery ? (
+                          <Highlight
+                            text={conversation.customer?.name || "Неизвестный клиент"}
+                            query={displayQuery}
+                          />
+                        ) : (
+                          conversation.customer?.name || "Неизвестный клиент"
+                        )}
                       </span>
                       <span className="shrink-0 text-xs text-muted-foreground">
                         {conversation.lastMessageAt &&
@@ -242,8 +341,22 @@ export function ConversationList({
                     </div>
 
                     <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {conversation.lastMessage?.content || "Нет сообщений"}
+                      {snippetText ? (
+                        displayQuery ? (
+                          <Highlight text={snippetText} query={displayQuery} />
+                        ) : (
+                          snippetText
+                        )
+                      ) : (
+                        "Нет сообщений"
+                      )}
                     </div>
+
+                    {showMatchedSnippet && (
+                      <div className="mt-0.5 text-xs text-muted-foreground/60 truncate">
+                        в старом сообщении
+                      </div>
+                    )}
 
                     <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
                       {conversation.channel?.type && (
@@ -283,12 +396,20 @@ export function ConversationList({
               );
             })}
 
-            {/* Sentinel — triggers loading the next page when scrolled into view */}
-            {hasMore && (
-              <div ref={sentinelRef} className="h-8 flex items-center justify-center">
-                <span className="text-xs text-muted-foreground">
-                  Показано {visibleCount} из {filtered.length}
-                </span>
+            {/* Sentinel — auto-loads next local chunk or next server page */}
+            {(hasMore || hasMoreServer) && (
+              <div ref={sentinelRef} className="h-10 flex items-center justify-center gap-2">
+                {isFetchingMore ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">Загрузка...</span>
+                  </>
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    Показано {visibleCount} из {filtered.length}
+                    {hasMoreServer ? "+" : ""}
+                  </span>
+                )}
               </div>
             )}
           </div>

@@ -6,6 +6,7 @@ import rateLimit from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 import { getRateLimiterRedisInstance } from "../redis-client";
 import { storage } from "../storage";
+import { getEmailProvider } from "../services/email-provider";
 import { db } from "../db";
 import { adminActions, users } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -51,8 +52,8 @@ const inviteSchema = z.object({
 /**
  * Build a RedisStore for express-rate-limit if REDIS_URL is configured.
  * Returns undefined (memory store fallback) when Redis is not configured.
- * passOnStoreError: true means Redis errors allow the request through rather
- * than returning 500, so dev without Redis continues to work transparently.
+ * passOnStoreError: skip blocking on Redis errors in dev/staging; in production,
+ * Redis store errors cause the middleware to reject the request (safer).
  */
 function makeRedisStore(prefix: string): RedisStore | undefined {
   const redis = getRateLimiterRedisInstance();
@@ -70,7 +71,7 @@ const authRateLimiter = rateLimit({
   message: { error: "Too many attempts. Please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
-  passOnStoreError: true,
+  passOnStoreError: process.env.NODE_ENV !== "production",
   store: makeRedisStore("rl:auth:login:"),
 });
 
@@ -80,7 +81,7 @@ const signupRateLimiter = rateLimit({
   message: { error: "Too many signup attempts. Please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
-  passOnStoreError: true,
+  passOnStoreError: process.env.NODE_ENV !== "production",
   store: makeRedisStore("rl:auth:signup:"),
 });
 
@@ -204,44 +205,60 @@ router.post("/login", authRateLimiter, async (req: Request, res: Response) => {
       return res.status(status).json({ error: result.error, code: result.errorCode });
     }
 
-    // Set session cookie
-    if (result.user) {
-      (req.session as any).userId = result.user.id;
-      (req.session as any).tenantId = result.user.tenantId;
-      (req.session as any).role = result.user.role;
-      
-      // Explicitly save session to ensure cookie is set
-      await new Promise<void>((resolve, reject) => {
-        req.session.save((err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-
-      // Audit log for successful login
-      await db.insert(adminActions).values({
-        actionType: "user_login",
-        targetType: "user",
-        targetId: result.user.id,
-        adminId: result.user.id,
-        reason: "User login",
-        previousState: null,
-        metadata: {
-          ip: req.ip || req.socket.remoteAddress,
-          userAgent: req.get("User-Agent")?.slice(0, 200),
-        },
-      });
+    const user = result.user;
+    if (!user) {
+      return res.status(500).json({ error: "Internal server error" });
     }
 
-    return res.status(200).json({
-      success: true,
-      user: {
-        id: result.user!.id,
-        email: result.user!.email,
-        username: result.user!.username,
-        role: result.user!.role,
-        tenantId: result.user!.tenantId,
-      },
+    // SECURITY: regenerate session ID to prevent session fixation
+    req.session.regenerate((regenErr) => {
+      if (regenErr) {
+        console.error("[Auth] Session regeneration failed:", regenErr);
+        return res.status(500).json({ error: "Session error" });
+      }
+
+      const sess = req.session as any;
+      sess.userId = user.id;
+      sess.tenantId = user.tenantId;
+      sess.role = user.role;
+
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          console.error("[Auth] Session save failed:", saveErr);
+          return res.status(500).json({ error: "Session error" });
+        }
+
+        void (async () => {
+          try {
+            await db.insert(adminActions).values({
+              actionType: "user_login",
+              targetType: "user",
+              targetId: user.id,
+              adminId: user.id,
+              reason: "User login",
+              previousState: null,
+              metadata: {
+                ip: req.ip || req.socket.remoteAddress,
+                userAgent: req.get("User-Agent")?.slice(0, 200),
+              },
+            });
+
+            return res.status(200).json({
+              success: true,
+              user: {
+                id: user.id,
+                email: user.email,
+                username: user.username,
+                role: user.role,
+                tenantId: user.tenantId,
+              },
+            });
+          } catch (innerErr) {
+            console.error("[Auth] Login error:", innerErr);
+            return res.status(500).json({ error: "Internal server error" });
+          }
+        })();
+      });
     });
   } catch (error) {
     console.error("[Auth] Login error:", error);
@@ -362,18 +379,102 @@ router.post("/invite", requireAuth, requirePermission("MANAGE_USERS"), async (re
       return res.status(400).json({ error: result.error });
     }
 
-    // Return invite link (token is in the link)
-    // SECURITY: plaintextToken is shown ONCE - only hash is stored in DB
-    // In production, this should send email with invite link
+    // Attempt to send email
     const inviteLink = `/signup?invite=${result.plaintextToken}`;
+    
+    // Get full URL for email
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const fullInviteLink = `${baseUrl}${inviteLink}`;
+    
+    const emailProvider = getEmailProvider();
+    try {
+      const emailResult = await emailProvider.send({
+        to: parseResult.data.email,
+        subject: "You have been invited to join the team",
+        text: `You have been invited to join our team. Click the link to join: ${fullInviteLink}`
+      });
 
-    return res.status(201).json({
-      success: true,
-      inviteLink,
-      expiresAt: result.invite!.expiresAt,
-    });
+      if (emailResult.success) {
+        await storage.updateUserInviteEmailStatus(result.invite!.id, "sent", new Date());
+        return res.status(201).json({
+          success: true,
+          inviteLink,
+          expiresAt: result.invite!.expiresAt,
+        });
+      } else {
+        throw new Error(emailResult.error || "Unknown email provider error");
+      }
+    } catch (emailError) {
+      console.error("[Auth] Invite email failed:", emailError);
+      await storage.updateUserInviteEmailStatus(result.invite!.id, "failed");
+      return res.status(207).json({
+        success: true,
+        warning: "Invite created but email delivery failed. Resend manually.",
+        inviteLink,
+        expiresAt: result.invite!.expiresAt,
+      });
+    }
   } catch (error) {
     console.error("[Auth] Invite error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /auth/invite/:id/resend
+ * 
+ * Resend invite email.
+ * Requires MANAGE_USERS permission.
+ */
+router.post("/invite/:id/resend", requireAuth, requirePermission("MANAGE_USERS"), async (req: Request, res: Response) => {
+  try {
+    const session = req.session as any;
+    if (!session?.tenantId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    const invite = await storage.getUserInvite(req.params.id);
+    if (!invite || invite.tenantId !== session.tenantId) {
+      return res.status(404).json({ error: "Invite not found" });
+    }
+
+    if (invite.emailStatus !== "pending" && invite.emailStatus !== "failed") {
+      return res.status(400).json({ error: "Cannot resend invite with this status" });
+    }
+
+    // Generate new token since we don't store plaintext tokens
+    const plaintextToken = authService.generateInviteToken();
+    const tokenHash = authService.hashInviteToken(plaintextToken);
+    const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000); // 72 hours expiry
+
+    await storage.updateUserInviteToken(invite.id, tokenHash, expiresAt);
+
+    // Attempt to send email
+    const inviteLink = `/signup?invite=${plaintextToken}`;
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const fullInviteLink = `${baseUrl}${inviteLink}`;
+    
+    const emailProvider = getEmailProvider();
+    const emailResult = await emailProvider.send({
+      to: invite.email,
+      subject: "You have been invited to join the team",
+      text: `You have been invited to join our team. Click the link to join: ${fullInviteLink}`
+    });
+
+    if (emailResult.success) {
+      await storage.updateUserInviteEmailStatus(invite.id, "sent", new Date());
+      return res.status(200).json({
+        success: true,
+        message: "Invite email resent successfully",
+        inviteLink,
+        expiresAt
+      });
+    } else {
+      await storage.updateUserInviteEmailStatus(invite.id, "failed");
+      return res.status(500).json({ error: "Failed to resend invite email" });
+    }
+  } catch (error) {
+    console.error("[Auth] Resend invite error:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 });

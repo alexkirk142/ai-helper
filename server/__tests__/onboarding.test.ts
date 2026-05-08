@@ -1,31 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect } from "vitest";
+import {
+  calculateNextStep,
+  calculateStatus,
+  deduplicateSteps,
+  isValidRole,
+} from "../services/onboarding-service";
+import { ONBOARDING_STEPS, type OnboardingStatus, type OnboardingStep } from "@shared/schema";
 
 describe("Onboarding Logic", () => {
-  const ONBOARDING_STEPS = ["BUSINESS", "CHANNELS", "PRODUCTS", "POLICIES", "KB", "REVIEW", "DONE"] as const;
-  type OnboardingStep = typeof ONBOARDING_STEPS[number];
-  type OnboardingStatus = "NOT_STARTED" | "IN_PROGRESS" | "DONE";
-
-  function calculateNextStep(currentStep: OnboardingStep): OnboardingStep {
-    const currentIndex = ONBOARDING_STEPS.indexOf(currentStep);
-    return currentIndex < ONBOARDING_STEPS.length - 1 
-      ? ONBOARDING_STEPS[currentIndex + 1] 
-      : "DONE";
-  }
-
-  function calculateStatus(nextStep: OnboardingStep): OnboardingStatus {
-    return nextStep === "DONE" ? "DONE" : "IN_PROGRESS";
-  }
-
-  function deduplicateSteps(existingSteps: OnboardingStep[], newStep: OnboardingStep): OnboardingStep[] {
-    const stepsSet = new Set(existingSteps);
-    stepsSet.add(newStep);
-    return Array.from(stepsSet) as OnboardingStep[];
-  }
-
-  function isValidRole(role: string): boolean {
-    return ["operator", "admin", "owner"].includes(role);
-  }
-
   describe("Step Navigation", () => {
     it("should calculate next step correctly", () => {
       expect(calculateNextStep("BUSINESS")).toBe("CHANNELS");

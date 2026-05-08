@@ -7,10 +7,10 @@ async function getBaileys() {
   }
   return _baileys;
 }
-import type { ChannelAdapter, ParsedIncomingMessage, ChannelSendResult } from "./channel-adapter";
+import type { ChannelAdapter, ParsedIncomingMessage, ChannelSendResult } from "./channel-adapter.types";
 import type { ChannelType } from "@shared/schema";
 import { featureFlagService } from "./feature-flags";
-import { processIncomingMessageFull } from "./inbound-message-handler";
+import { messageBus } from "./message-bus";
 import { sanitizeForLog } from "../utils/sanitizer";
 import * as fs from "fs";
 import * as path from "path";
@@ -398,8 +398,8 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
           
           if (parsed) {
             try {
-              await processIncomingMessageFull(tenantId, parsed);
-              console.log(`[WhatsAppPersonal] Message processed for tenant ${tenantId}`);
+              messageBus.emitIncomingMessage(tenantId, null, parsed);
+              console.log(`[WhatsAppPersonal] Message emitted for tenant ${tenantId}`);
             } catch (error) {
               console.error("[WhatsAppPersonal] Message processing error:", error);
             }
@@ -452,8 +452,8 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
             const parsed = adapter.parseIncomingMessage(recentMsg);
             if (parsed) {
               try {
-                await processIncomingMessageFull(tenantId, parsed);
-                console.log(`[WhatsAppPersonal] History message processed from ${chat.jid}`);
+                messageBus.emitIncomingMessage(tenantId, null, parsed);
+                console.log(`[WhatsAppPersonal] History message emitted from ${chat.jid}`);
               } catch (error) {
                 console.error("[WhatsAppPersonal] History message processing error:", error);
               }
@@ -619,8 +619,8 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
           
           if (parsed) {
             try {
-              await processIncomingMessageFull(tenantId, parsed);
-              console.log(`[WhatsAppPersonal] Message processed for tenant ${tenantId}`);
+              messageBus.emitIncomingMessage(tenantId, null, parsed);
+              console.log(`[WhatsAppPersonal] Message emitted for tenant ${tenantId}`);
             } catch (error) {
               console.error("[WhatsAppPersonal] Message processing error:", error);
             }
@@ -673,8 +673,8 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
             const parsed = adapter.parseIncomingMessage(recentMsg);
             if (parsed) {
               try {
-                await processIncomingMessageFull(tenantId, parsed);
-                console.log(`[WhatsAppPersonal] History message processed from ${chat.jid}`);
+                messageBus.emitIncomingMessage(tenantId, null, parsed);
+                console.log(`[WhatsAppPersonal] History message emitted from ${chat.jid}`);
               } catch (error) {
                 console.error("[WhatsAppPersonal] History message processing error:", error);
               }

@@ -1,6 +1,6 @@
 import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions";
-import type { ChannelAdapter, ParsedIncomingMessage, ChannelSendResult } from "./channel-adapter";
+import type { ChannelAdapter, ParsedIncomingMessage, ChannelSendResult } from "./channel-adapter.types";
 import type { ChannelType } from "@shared/schema";
 import { featureFlagService } from "./feature-flags";
 import { getSecret } from "./secret-resolver";

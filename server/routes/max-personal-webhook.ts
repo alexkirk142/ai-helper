@@ -290,7 +290,7 @@ router.post("/:tenantId/:accountId", async (req, res) => {
           });
           if (byInternalId) {
             console.log(`[MaxPersonalWebhook] Resolved MAX internal ID ${incomingLocalPart} → phone externalId: ${byInternalId.externalId}`);
-            normalizedChatId = byInternalId.externalId;
+            normalizedChatId = byInternalId.externalId ?? normalizedChatId;
           }
         }
       }

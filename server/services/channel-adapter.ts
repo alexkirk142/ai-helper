@@ -6,74 +6,21 @@ import { TelegramAdapter } from "./telegram-adapter";
 import { whatsappAdapter } from "./whatsapp-adapter";
 import { WhatsAppPersonalAdapter } from "./whatsapp-personal-adapter";
 import { maxPersonalAdapter } from "./max-personal-adapter";
+import type {
+  ChannelAdapter,
+  ChannelSendResult,
+  ParsedAttachment,
+  ParsedIncomingMessage,
+  WebhookVerifyResult,
+} from "./channel-adapter.types";
 
-// ============ Channel Adapter Interface ============
-
-export interface ChannelSendResult {
-  success: boolean;
-  externalMessageId?: string;
-  error?: string;
-  timestamp?: Date;
-}
-
-export interface ParsedAttachment {
-  type: "image" | "voice" | "audio" | "video" | "video_note" | "document" | "sticker" | "poll";
-  url?: string;
-  fileId?: string;
-  mimeType?: string;
-  fileName?: string;
-  fileSize?: number;
-  duration?: number;
-  width?: number;
-  height?: number;
-  thumbnail?: string;
-  pollQuestion?: string;
-  pollOptions?: string[];
-}
-
-export interface ParsedIncomingMessage {
-  externalMessageId: string;
-  externalConversationId: string;
-  externalUserId: string;
-  text: string;
-  timestamp: Date;
-  channel: ChannelType;
-  metadata?: Record<string, unknown>;
-  attachments?: ParsedAttachment[];
-  forwardedFrom?: {
-    name?: string;
-    username?: string;
-    date?: number;
-  };
-}
-
-export interface WebhookVerifyResult {
-  valid: boolean;
-  challenge?: string;
-  error?: string;
-}
-
-export interface ChannelAdapter {
-  readonly name: ChannelType;
-
-  sendMessage(
-    externalConversationId: string,
-    text: string,
-    options?: { replyToMessageId?: string }
-  ): Promise<ChannelSendResult>;
-
-  parseIncomingMessage(rawPayload: unknown): ParsedIncomingMessage | null;
-
-  sendTypingStart?(externalConversationId: string): Promise<void>;
-
-  sendTypingStop?(externalConversationId: string): Promise<void>;
-
-  verifyWebhook?(
-    headers: Record<string, string>,
-    body: unknown,
-    secret?: string
-  ): WebhookVerifyResult;
-}
+export type {
+  ChannelAdapter,
+  ChannelSendResult,
+  ParsedAttachment,
+  ParsedIncomingMessage,
+  WebhookVerifyResult,
+} from "./channel-adapter.types";
 
 // ============ Channel Registry ============
 

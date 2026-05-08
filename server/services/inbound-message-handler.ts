@@ -1,5 +1,7 @@
 import { storage } from "../storage";
-import type { ParsedIncomingMessage } from "./channel-adapter";
+import bigInt from "big-integer";
+import type { ParsedIncomingMessage } from "./channel-adapter.types";
+import { messageBus } from "./message-bus";
 import { getMergedGearboxTemplates, fillGearboxTemplate } from "./gearbox-templates";
 import { realtimeService } from "./websocket-server";
 import { featureFlagService } from "./feature-flags";
@@ -95,11 +97,10 @@ export function detectVehicleIdFromText(text: string): VehicleIdDetection | null
     };
   }
 
-  return {
-    idType: best.type === "VIN" ? "VIN" : "FRAME",
-    rawValue: best.raw,
-    normalizedValue: best.value,
-  };
+  if (best.type === "VIN") {
+    return { idType: "VIN", rawValue: best.raw, normalizedValue: best.value };
+  }
+  return { idType: "FRAME", rawValue: best.raw, normalizedValue: best.value };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -464,7 +465,7 @@ export async function processIncomingMessageFull(
                 console.warn(`[InboundHandler] No TG client for accountId=${accountId}, skipping image download`);
                 return att;
               }
-              const messages = await client.getMessages(BigInt(chatId), { ids: [parseInt(msgId, 10)] });
+              const messages = await client.getMessages(bigInt(chatId), { ids: [parseInt(msgId, 10)] });
               const msg = messages?.[0];
               if (!msg) return att;
               const buffer = await client.downloadMedia(msg, {}) as Buffer | undefined;
@@ -850,4 +851,17 @@ export async function processIncomingMessageFull(
   } catch (error) {
     console.error(`[InboundHandler] Error processing message:`, error);
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Event Bus subscription — wires messageBus → processIncomingMessageFull
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function setupInboundMessageHandler(): void {
+  messageBus.onIncomingMessage(({ tenantId, message }) => {
+    processIncomingMessageFull(tenantId, message).catch((err) => {
+      console.error("[InboundHandler] Error processing incoming message via bus:", err);
+    });
+  });
+  console.log("[InboundHandler] Subscribed to messageBus incoming_message events");
 }

@@ -1,0 +1,36 @@
+---
+description: Always use SocratiCode MCP for codebase analysis instead of Grep/SemanticSearch
+alwaysApply: true
+---
+
+# SocratiCode MCP — Primary Analysis Tool
+
+Always prefer SocratiCode MCP tools over Grep, Glob, or SemanticSearch for code analysis.
+
+## Tool Usage Map
+
+| Task | SocratiCode Tool |
+|------|-----------------|
+| Find code by meaning/concept | `codebase_search` — semantic search across indexed codebase |
+| Understand a function/class | `codebase_symbol` — definition + callers + callees in one call |
+| Trace what code calls | `codebase_flow` — execution flow from an entry point |
+| Impact of a change | `codebase_impact` — blast radius before refactoring/deleting |
+| Search DB schema, API specs | `codebase_context_search` — context artifacts |
+| Circular dependencies | `codebase_graph_circular` |
+| Dependency graph stats | `codebase_graph_stats` |
+
+## Required: Check Index Before Searching
+
+Always call `codebase_status` first to confirm the index is ready.
+If not indexed, call `codebase_index` with `projectPath: "c:\\Users\\Administrator\\Desktop\\ai-helper"`.
+
+## projectPath
+
+Always use: `c:\Users\Administrator\Desktop\ai-helper`
+
+## Fallback Only
+
+Use Grep/Read/Glob ONLY when:
+- SocratiCode quota is exceeded (OpenAI error)
+- Looking for an exact literal string (not semantic)
+- Reading a specific known file line range

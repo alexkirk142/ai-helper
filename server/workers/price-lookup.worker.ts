@@ -1295,7 +1295,7 @@ export function createPriceLookupWorker(connectionConfig: IORedis): Worker<Price
       await processPriceLookup(job);
     },
     {
-      connection: connectionConfig,
+      connection: connectionConfig as any,
       concurrency: 1,
     }
   );

@@ -1,17 +1,13 @@
 import { Router, type Request, type Response } from "express";
 import { storage } from "../storage";
-import { requireAuth, requirePermission } from "../middleware/rbac";
+import { requireAuth, requirePermission, requireTenant } from "../middleware/rbac";
 import { validateBody, patchTenantSchema } from "../middleware/validation";
 import { auditLog } from "../services/audit-log";
 import { onboardingRateLimiter } from "../middleware/rate-limiter";
+import { ONBOARDING_STEPS, ONBOARDING_STATUS, type OnboardingStep, type OnboardingStatus } from "@shared/schema";
+import { calculateNextStep, calculateStatus, deduplicateSteps, isValidRole } from "../services/onboarding-service";
 
 const router = Router();
-
-const ONBOARDING_STEPS = ["BUSINESS", "CHANNELS", "PRODUCTS", "POLICIES", "KB", "REVIEW", "DONE"] as const;
-type OnboardingStep = typeof ONBOARDING_STEPS[number];
-
-const ONBOARDING_STATUSES = ["NOT_STARTED", "IN_PROGRESS", "DONE"] as const;
-type OnboardingStatus = typeof ONBOARDING_STATUSES[number];
 
 async function getUserByIdOrOidcId(userId: string) {
   let user = await storage.getUserByOidcId(userId);
@@ -23,13 +19,9 @@ async function getUserByIdOrOidcId(userId: string) {
 
 // ============ TENANT ROUTES ============
 
-router.get("/api/tenant", requireAuth, requirePermission("VIEW_CONVERSATIONS"), async (req: Request, res: Response) => {
+router.get("/api/tenant", requireAuth, requirePermission("VIEW_CONVERSATIONS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const tenant = await storage.getTenant(user.tenantId);
+    const tenant = await storage.getTenant(req.tenantId!);
     if (!tenant) {
       return res.status(404).json({ error: "Tenant not found" });
     }
@@ -40,13 +32,9 @@ router.get("/api/tenant", requireAuth, requirePermission("VIEW_CONVERSATIONS"), 
   }
 });
 
-router.patch("/api/tenant", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), validateBody(patchTenantSchema), async (req: Request, res: Response) => {
+router.patch("/api/tenant", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), requireTenant, validateBody(patchTenantSchema), async (req: Request, res: Response) => {
   try {
-    const user = await storage.getUser(req.userId!);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    const updated = await storage.updateTenant(user.tenantId, req.body);
+    const updated = await storage.updateTenant(req.tenantId!, req.body);
     res.json(updated);
   } catch (error) {
     console.error("Error updating tenant:", error);
@@ -54,14 +42,11 @@ router.patch("/api/tenant", requireAuth, requirePermission("MANAGE_TENANT_SETTIN
   }
 });
 
-router.post("/api/onboarding/setup", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), async (req: Request, res: Response) => {
+router.post("/api/onboarding/setup", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), requireTenant, async (req: Request, res: Response) => {
   try {
     const data = req.body;
-    const onboardingUser = await storage.getUser(req.userId!);
-    if (!onboardingUser?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    let tenant = await storage.getTenant(onboardingUser.tenantId);
+    const tenantId = req.tenantId!;
+    let tenant = await storage.getTenant(tenantId);
     if (!tenant) {
       return res.status(404).json({ error: "Tenant not found" });
     }
@@ -82,7 +67,7 @@ router.post("/api/onboarding/setup", requireAuth, requirePermission("MANAGE_TENA
 
     if (data.deliveryOptions) {
       await storage.createKnowledgeDoc({
-        tenantId: tenant!.id,
+        tenantId: tenantId,
         title: "Delivery Options",
         content: data.deliveryOptions,
         category: "shipping",
@@ -90,7 +75,7 @@ router.post("/api/onboarding/setup", requireAuth, requirePermission("MANAGE_TENA
     }
     if (data.returnPolicy) {
       await storage.createKnowledgeDoc({
-        tenantId: tenant!.id,
+        tenantId: tenantId,
         title: "Return Policy",
         content: data.returnPolicy,
         category: "returns",
@@ -106,25 +91,20 @@ router.post("/api/onboarding/setup", requireAuth, requirePermission("MANAGE_TENA
 
 // ============ ONBOARDING STATE ROUTES ============
 
-router.get("/api/onboarding/state", requireAuth, requirePermission("VIEW_CONVERSATIONS"), async (req: Request, res: Response) => {
+router.get("/api/onboarding/state", requireAuth, requirePermission("VIEW_CONVERSATIONS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    if (!req.userId || req.userId === "system") {
-      return res.status(403).json({ error: "User authentication required" });
-    }
-    const user = await getUserByIdOrOidcId(req.userId);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    
-    if (!user.role || !["operator", "admin", "owner"].includes(user.role)) {
+    const user = (req as any).user;
+    const tenantId = req.tenantId!;
+
+    if (!user.role || !isValidRole(user.role)) {
       return res.status(403).json({ error: "Insufficient permissions" });
     }
 
-    let state = await storage.getOnboardingState(user.tenantId);
+    let state = await storage.getOnboardingState(tenantId);
     
     if (!state) {
       state = {
-        tenantId: user.tenantId,
+        tenantId: tenantId,
         status: "NOT_STARTED",
         currentStep: "BUSINESS",
         completedSteps: [],
@@ -144,23 +124,18 @@ router.get("/api/onboarding/state", requireAuth, requirePermission("VIEW_CONVERS
   }
 });
 
-router.put("/api/onboarding/state", requireAuth, async (req: Request, res: Response) => {
+router.put("/api/onboarding/state", requireAuth, requireTenant, async (req: Request, res: Response) => {
   try {
-    if (!req.userId || req.userId === "system") {
-      return res.status(403).json({ error: "User authentication required" });
-    }
-    const user = await getUserByIdOrOidcId(req.userId);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    
-    if (!user.role || !["operator", "admin", "owner"].includes(user.role)) {
+    const user = (req as any).user;
+    const tenantId = req.tenantId!;
+
+    if (!user.role || !isValidRole(user.role)) {
       return res.status(403).json({ error: "Insufficient permissions" });
     }
 
     const { status, currentStep, completedSteps, answers } = req.body;
     
-    if (status && !ONBOARDING_STATUSES.includes(status)) {
+    if (status && !ONBOARDING_STATUS.includes(status as OnboardingStatus)) {
       return res.status(400).json({ error: `Invalid status: ${status}` });
     }
     
@@ -180,19 +155,19 @@ router.put("/api/onboarding/state", requireAuth, async (req: Request, res: Respo
     }
 
     const state = await storage.upsertOnboardingState({
-      tenantId: user.tenantId,
+      tenantId: tenantId,
       status,
       currentStep,
       completedSteps,
       answers,
     });
 
-    auditLog.setContext({ tenantId: user.tenantId });
+    auditLog.setContext({ tenantId: tenantId });
     await auditLog.log(
       "settings_updated" as any,
       "tenant",
-      user.tenantId,
-      req.userId,
+      tenantId,
+      req.userId!,
       "user",
       { action: "onboarding_state_updated", status, currentStep, completedStepsCount: completedSteps?.length ?? 0 }
     );
@@ -204,17 +179,12 @@ router.put("/api/onboarding/state", requireAuth, async (req: Request, res: Respo
   }
 });
 
-router.post("/api/onboarding/complete-step", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), async (req: Request, res: Response) => {
+router.post("/api/onboarding/complete-step", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    if (!req.userId || req.userId === "system") {
-      return res.status(403).json({ error: "User authentication required" });
-    }
-    const user = await getUserByIdOrOidcId(req.userId);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    
-    if (!user.role || !["operator", "admin", "owner"].includes(user.role)) {
+    const user = (req as any).user;
+    const tenantId = req.tenantId!;
+
+    if (!user.role || !isValidRole(user.role)) {
       return res.status(403).json({ error: "Insufficient permissions" });
     }
 
@@ -224,10 +194,10 @@ router.post("/api/onboarding/complete-step", requireAuth, requirePermission("MAN
       return res.status(400).json({ error: `Invalid step: ${step}` });
     }
 
-    let currentState = await storage.getOnboardingState(user.tenantId);
+    let currentState = await storage.getOnboardingState(tenantId);
     if (!currentState) {
       currentState = {
-        tenantId: user.tenantId,
+        tenantId: tenantId,
         status: "NOT_STARTED",
         currentStep: "BUSINESS",
         completedSteps: [],
@@ -236,36 +206,33 @@ router.post("/api/onboarding/complete-step", requireAuth, requirePermission("MAN
       };
     }
 
-    const stepsSet = new Set(currentState.completedSteps ?? []);
-    stepsSet.add(step);
-    const completedSteps = Array.from(stepsSet);
-    
+    const completedSteps = deduplicateSteps(
+      (currentState.completedSteps ?? []) as OnboardingStep[],
+      step as OnboardingStep
+    );
+
     const answers = {
       ...(currentState.answers ?? {}),
       [step]: stepAnswers,
     };
-    
-    const currentIndex = ONBOARDING_STEPS.indexOf(step as OnboardingStep);
-    const nextStep = currentIndex < ONBOARDING_STEPS.length - 1 
-      ? ONBOARDING_STEPS[currentIndex + 1] 
-      : "DONE";
-    
-    const status: OnboardingStatus = nextStep === "DONE" ? "DONE" : "IN_PROGRESS";
+
+    const nextStep = calculateNextStep(step as OnboardingStep);
+    const status: OnboardingStatus = calculateStatus(nextStep);
 
     const state = await storage.upsertOnboardingState({
-      tenantId: user.tenantId,
+      tenantId: tenantId,
       status,
       currentStep: nextStep,
       completedSteps,
       answers,
     });
 
-    auditLog.setContext({ tenantId: user.tenantId });
+    auditLog.setContext({ tenantId: tenantId });
     await auditLog.log(
       "settings_updated" as any,
       "tenant",
-      user.tenantId,
-      req.userId,
+      tenantId,
+      req.userId!,
       "user",
       { action: "onboarding_step_completed", completedStep: step, nextStep, status }
     );
@@ -281,17 +248,12 @@ router.post("/api/onboarding/complete-step", requireAuth, requirePermission("MAN
   }
 });
 
-router.post("/api/onboarding/generate-templates", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), onboardingRateLimiter, async (req: Request, res: Response) => {
+router.post("/api/onboarding/generate-templates", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), requireTenant, onboardingRateLimiter, async (req: Request, res: Response) => {
   try {
-    if (!req.userId || req.userId === "system") {
-      return res.status(403).json({ error: "User authentication required" });
-    }
-    const user = await getUserByIdOrOidcId(req.userId);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    
-    if (!user.role || !["operator", "admin", "owner"].includes(user.role)) {
+    const user = (req as any).user;
+    const tenantId = req.tenantId!;
+
+    if (!user.role || !isValidRole(user.role)) {
       return res.status(403).json({ error: "Insufficient permissions" });
     }
 
@@ -319,12 +281,12 @@ router.post("/api/onboarding/generate-templates", requireAuth, requirePermission
 
     const drafts = await generateTemplates(input, options);
 
-    auditLog.setContext({ tenantId: user.tenantId });
+    auditLog.setContext({ tenantId: tenantId });
     await auditLog.log(
       "settings_updated" as any,
       "tenant",
-      user.tenantId,
-      req.userId,
+      tenantId,
+      req.userId!,
       "user",
       { action: "templates_generated", count: drafts.length, types: drafts.map(d => d.docType) }
     );
@@ -336,17 +298,12 @@ router.post("/api/onboarding/generate-templates", requireAuth, requirePermission
   }
 });
 
-router.post("/api/onboarding/apply-templates", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), async (req: Request, res: Response) => {
+router.post("/api/onboarding/apply-templates", requireAuth, requirePermission("MANAGE_TENANT_SETTINGS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    if (!req.userId || req.userId === "system") {
-      return res.status(403).json({ error: "User authentication required" });
-    }
-    const user = await getUserByIdOrOidcId(req.userId);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    
-    if (!user.role || !["operator", "admin", "owner"].includes(user.role)) {
+    const user = (req as any).user;
+    const tenantId = req.tenantId!;
+
+    if (!user.role || !isValidRole(user.role)) {
       return res.status(403).json({ error: "Insufficient permissions" });
     }
 
@@ -364,7 +321,7 @@ router.post("/api/onboarding/apply-templates", requireAuth, requirePermission("M
 
     for (const draft of drafts) {
       const knowledgeDoc = await storage.createKnowledgeDoc({
-        tenantId: user.tenantId,
+        tenantId: tenantId,
         title: draft.title,
         content: draft.content,
         docType: draft.docType,
@@ -394,12 +351,12 @@ router.post("/api/onboarding/apply-templates", requireAuth, requirePermission("M
       }
     }
 
-    auditLog.setContext({ tenantId: user.tenantId });
+    auditLog.setContext({ tenantId: tenantId });
     await auditLog.log(
       "settings_updated" as any,
       "tenant",
-      user.tenantId,
-      req.userId,
+      tenantId,
+      req.userId!,
       "user",
       { action: "templates_applied", count: createdDocs.length, docIds: createdDocs.map(d => d.id) }
     );
@@ -416,17 +373,12 @@ router.post("/api/onboarding/apply-templates", requireAuth, requirePermission("M
   }
 });
 
-router.get("/api/onboarding/readiness", requireAuth, requirePermission("VIEW_CONVERSATIONS"), async (req: Request, res: Response) => {
+router.get("/api/onboarding/readiness", requireAuth, requirePermission("VIEW_CONVERSATIONS"), requireTenant, async (req: Request, res: Response) => {
   try {
-    if (!req.userId || req.userId === "system") {
-      return res.status(403).json({ error: "User authentication required" });
-    }
-    const user = await getUserByIdOrOidcId(req.userId);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    
-    if (!user.role || !["operator", "admin", "owner"].includes(user.role)) {
+    const user = (req as any).user;
+    const tenantId = req.tenantId!;
+
+    if (!user.role || !isValidRole(user.role)) {
       return res.status(403).json({ error: "Insufficient permissions" });
     }
 
@@ -434,24 +386,24 @@ router.get("/api/onboarding/readiness", requireAuth, requirePermission("VIEW_CON
     const { isFeatureEnabled } = await import("../services/feature-flags");
 
     const result = await calculateReadinessScore(
-      user.tenantId,
+      tenantId,
       storage,
       (flag: string) => isFeatureEnabled(flag)
     );
 
     await storage.createReadinessReport({
-      tenantId: user.tenantId,
+      tenantId: tenantId,
       score: result.score,
       checks: result.checks,
       recommendations: result.recommendations,
     });
 
-    auditLog.setContext({ tenantId: user.tenantId });
+    auditLog.setContext({ tenantId: tenantId });
     await auditLog.log(
       "settings_updated" as any,
       "tenant",
-      user.tenantId,
-      req.userId,
+      tenantId,
+      req.userId!,
       "user",
       { action: "readiness_calculated", score: result.score, threshold: READINESS_THRESHOLD }
     );
@@ -469,17 +421,12 @@ router.get("/api/onboarding/readiness", requireAuth, requirePermission("VIEW_CON
   }
 });
 
-router.get("/api/onboarding/run-smoke-test/stream", requireAuth, requirePermission("VIEW_CONVERSATIONS"), onboardingRateLimiter, async (req: Request, res: Response) => {
+router.get("/api/onboarding/run-smoke-test/stream", requireAuth, requirePermission("VIEW_CONVERSATIONS"), requireTenant, onboardingRateLimiter, async (req: Request, res: Response) => {
   try {
-    if (!req.userId || req.userId === "system") {
-      return res.status(403).json({ error: "User authentication required" });
-    }
-    const user = await getUserByIdOrOidcId(req.userId);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    
-    if (!user.role || !["operator", "admin", "owner"].includes(user.role)) {
+    const user = (req as any).user;
+    const tenantId = req.tenantId!;
+
+    if (!user.role || !isValidRole(user.role)) {
       return res.status(403).json({ error: "Insufficient permissions" });
     }
 
@@ -490,16 +437,16 @@ router.get("/api/onboarding/run-smoke-test/stream", requireAuth, requirePermissi
 
     const { runSmokeTest } = await import("../services/smoke-test-service");
     
-    const result = await runSmokeTest(user.tenantId, (progress) => {
+    const result = await runSmokeTest(tenantId, (progress) => {
       res.write(`data: ${JSON.stringify({ type: "progress", ...progress })}\n\n`);
     });
 
-    auditLog.setContext({ tenantId: user.tenantId });
+    auditLog.setContext({ tenantId: tenantId });
     await auditLog.log(
       "settings_updated" as any,
       "tenant",
-      user.tenantId,
-      req.userId,
+      tenantId,
+      req.userId!,
       "user",
       { 
         action: "smoke_test_run", 
@@ -526,29 +473,24 @@ router.get("/api/onboarding/run-smoke-test/stream", requireAuth, requirePermissi
   }
 });
 
-router.post("/api/onboarding/run-smoke-test", requireAuth, requirePermission("VIEW_CONVERSATIONS"), onboardingRateLimiter, async (req: Request, res: Response) => {
+router.post("/api/onboarding/run-smoke-test", requireAuth, requirePermission("VIEW_CONVERSATIONS"), requireTenant, onboardingRateLimiter, async (req: Request, res: Response) => {
   try {
-    if (!req.userId || req.userId === "system") {
-      return res.status(403).json({ error: "User authentication required" });
-    }
-    const user = await getUserByIdOrOidcId(req.userId);
-    if (!user?.tenantId) {
-      return res.status(403).json({ error: "User not associated with a tenant" });
-    }
-    
-    if (!user.role || !["operator", "admin", "owner"].includes(user.role)) {
+    const user = (req as any).user;
+    const tenantId = req.tenantId!;
+
+    if (!user.role || !isValidRole(user.role)) {
       return res.status(403).json({ error: "Insufficient permissions" });
     }
 
     const { runSmokeTest } = await import("../services/smoke-test-service");
-    const result = await runSmokeTest(user.tenantId);
+    const result = await runSmokeTest(tenantId);
 
-    auditLog.setContext({ tenantId: user.tenantId });
+    auditLog.setContext({ tenantId: tenantId });
     await auditLog.log(
       "settings_updated" as any,
       "tenant",
-      user.tenantId,
-      req.userId,
+      tenantId,
+      req.userId!,
       "user",
       { 
         action: "smoke_test_run", 

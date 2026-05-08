@@ -1,4 +1,7 @@
 import OpenAI from "openai";
+import { eq, and, desc, inArray } from "drizzle-orm";
+import { db } from "../db";
+import { conversations, messages } from "@shared/schema";
 import { storage } from "../storage";
 import { sanitizeString } from "../utils/sanitizer";
 import { auditLog } from "./audit-log";
@@ -23,20 +26,24 @@ async function getRecentCustomerMessages(
   customerId: string,
   limit: number = DEFAULT_MESSAGE_LIMIT
 ): Promise<Message[]> {
-  const conversations = await storage.getConversationsByTenant(tenantId);
-  const customerConversations = conversations.filter(c => c.customerId === customerId);
-  
-  const allMessages: Message[] = [];
-  for (const conv of customerConversations) {
-    const messages = await storage.getMessagesByConversation(conv.id);
-    allMessages.push(...messages);
-  }
-  
-  allMessages.sort((a, b) => 
-    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
-  
-  return allMessages.slice(0, limit);
+  const customerConvs = await db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(and(eq(conversations.tenantId, tenantId), eq(conversations.customerId, customerId)))
+    .orderBy(desc(conversations.lastMessageAt))
+    .limit(10);
+
+  if (customerConvs.length === 0) return [];
+
+  const convIds = customerConvs.map(c => c.id);
+  const allMessages = await db
+    .select()
+    .from(messages)
+    .where(inArray(messages.conversationId, convIds))
+    .orderBy(desc(messages.createdAt))
+    .limit(limit);
+
+  return allMessages;
 }
 
 function formatMessagesForSummary(messages: Message[]): string {

@@ -5,9 +5,10 @@ import type {
   ChannelSendResult,
   ParsedIncomingMessage,
   WebhookVerifyResult,
-} from "./channel-adapter";
+} from "./channel-adapter.types";
 import { featureFlagService } from "./feature-flags";
 import { auditLog } from "./audit-log";
+import { DedupCache } from "./utils/dedup-cache";
 
 const WHATSAPP_API_VERSION = "v18.0";
 const WHATSAPP_API_BASE = "https://graph.facebook.com";
@@ -117,8 +118,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private verifyToken: string;
   private appSecret: string;
   private baseUrl: string;
-  private processedMessageIds: Set<string> = new Set();
-  private maxProcessedIds = 10000;
+  private processedMessageIds = new DedupCache(10_000);
   private lastInboundTimestamps: Map<string, number> = new Map();
 
   constructor(config?: {
@@ -379,13 +379,6 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }
 
     this.processedMessageIds.add(message.id);
-    if (this.processedMessageIds.size > this.maxProcessedIds) {
-      const iterator = this.processedMessageIds.values();
-      const firstValue = iterator.next().value;
-      if (firstValue !== undefined) {
-        this.processedMessageIds.delete(firstValue);
-      }
-    }
 
     let textContent = "";
     if (message.type === "text" && message.text?.body) {

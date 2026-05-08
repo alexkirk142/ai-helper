@@ -73,6 +73,10 @@ import {
   GripVertical,
   ChevronUp,
   ChevronDown,
+  Inbox,
+  Copy,
+  Check,
+  ExternalLink,
 } from "lucide-react";
 import { useBillingStatus, isSubscriptionRequired } from "@/hooks/use-billing";
 import { useAutoPartsEnabled } from "@/hooks/useAutoPartsEnabled";
@@ -147,6 +151,8 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
     "discount", "complaint"
   ]);
 
+  const [isDirty, setIsDirty] = useState(false);
+
   useEffect(() => {
     if (settings) {
       setTAuto(settings.tAuto ?? 0.80);
@@ -154,6 +160,7 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
       setAutosendAllowed(settings.autosendAllowed ?? false);
       setIntentsAutosendAllowed((settings.intentsAutosendAllowed as string[]) ?? ["price", "availability", "shipping", "other"]);
       setIntentsForceHandoff((settings.intentsForceHandoff as string[]) ?? ["discount", "complaint"]);
+      setIsDirty(false);
     }
   }, [settings]);
 
@@ -163,7 +170,8 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/settings/decision"] });
-      toast({ title: "Настройки Decision Engine сохранены" });
+      toast({ title: "Настройки автоматических решений сохранены" });
+      setIsDirty(false);
     },
     onError: () => {
       toast({ title: "Не удалось сохранить настройки", variant: "destructive" });
@@ -186,6 +194,7 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
         ? prev.filter(i => i !== intent)
         : [...prev, intent]
     );
+    setIsDirty(true);
   };
 
   const toggleHandoffIntent = (intent: string) => {
@@ -194,13 +203,30 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
         ? prev.filter(i => i !== intent)
         : [...prev, intent]
     );
+    setIsDirty(true);
   };
+
+  function getIntentMode(intent: string): "auto" | "check" | "operator" {
+    if (intentsForceHandoff.includes(intent)) return "operator";
+    if (intentsAutosendAllowed.includes(intent)) return "auto";
+    return "check";
+  }
+
+  function setIntentMode(intent: string, mode: "auto" | "check" | "operator") {
+    setIntentsAutosendAllowed(prev =>
+      mode === "auto" ? [...prev.filter(i => i !== intent), intent] : prev.filter(i => i !== intent)
+    );
+    setIntentsForceHandoff(prev =>
+      mode === "operator" ? [...prev.filter(i => i !== intent), intent] : prev.filter(i => i !== intent)
+    );
+    setIsDirty(true);
+  }
 
   if (isLoading) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Decision Engine</CardTitle>
+          <CardTitle>Автоматические решения</CardTitle>
         </CardHeader>
         <CardContent>
           <Skeleton className="h-32 w-full" />
@@ -212,26 +238,31 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          Decision Engine
-          <Badge variant="outline" className="font-normal">Phase 1</Badge>
+        <CardTitle>
+          Автоматические решения
         </CardTitle>
         <CardDescription>
-          Настройка автоматического принятия решений AI
+          Настройте, как AI принимает решения по каждому типу запроса
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {isDirty && (
+          <div className="flex items-center gap-2 rounded-md bg-yellow-500/10 border border-yellow-500/20 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-400 mb-4">
+            <AlertCircle className="h-3 w-3 flex-shrink-0" />
+            Есть несохранённые изменения — не забудьте нажать «Сохранить»
+          </div>
+        )}
         <div className="space-y-4">
           <div>
             <div className="flex items-center justify-between mb-2">
-              <Label>Порог автоотправки (tAuto): {Math.round(tAuto * 100)}%</Label>
+              <Label>Уверенность для авто-отправки: {Math.round(tAuto * 100)}%</Label>
               <Badge variant="secondary" className="bg-green-500/10 text-green-600">
                 Auto-send
               </Badge>
             </div>
             <Slider
               value={[tAuto * 100]}
-              onValueChange={([value]) => setTAuto(value / 100)}
+              onValueChange={([value]) => { setTAuto(value / 100); setIsDirty(true); }}
               max={100}
               min={Math.round(tEscalate * 100) + 1}
               step={1}
@@ -244,14 +275,14 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <Label>Порог эскалации (tEscalate): {Math.round(tEscalate * 100)}%</Label>
+              <Label>Уверенность для передачи оператору: {Math.round(tEscalate * 100)}%</Label>
               <Badge variant="secondary" className="bg-red-500/10 text-red-600">
                 Escalate
               </Badge>
             </div>
             <Slider
               value={[tEscalate * 100]}
-              onValueChange={([value]) => setTEscalate(value / 100)}
+              onValueChange={([value]) => { setTEscalate(value / 100); setIsDirty(true); }}
               max={Math.round(tAuto * 100) - 1}
               min={0}
               step={1}
@@ -263,71 +294,100 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
           </div>
         </div>
 
-        <Separator />
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between rounded-md border p-4">
-            <div>
-              <Label>Разрешить автоотправку</Label>
-              <p className="text-xs text-muted-foreground mt-1">
-                AI может отправлять ответы без одобрения оператора
-              </p>
-            </div>
-            <Switch
-              checked={autosendAllowed}
-              onCheckedChange={setAutosendAllowed}
-              data-testid="switch-autosend-allowed"
-            />
+        <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
+          <p className="font-medium text-foreground text-sm">Как это работает:</p>
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="inline-flex items-center gap-1 rounded bg-red-500/10 text-red-600 px-2 py-0.5">
+              0% – {Math.round(tEscalate * 100)}%
+            </span>
+            <span>→ передать оператору</span>
+            <span className="mx-2 text-muted-foreground/40">│</span>
+            <span className="inline-flex items-center gap-1 rounded bg-yellow-500/10 text-yellow-600 px-2 py-0.5">
+              {Math.round(tEscalate * 100)}% – {Math.round(tAuto * 100)}%
+            </span>
+            <span>→ ждать проверки</span>
+            <span className="mx-2 text-muted-foreground/40">│</span>
+            <span className="inline-flex items-center gap-1 rounded bg-green-500/10 text-green-600 px-2 py-0.5">
+              {Math.round(tAuto * 100)}% – 100%
+            </span>
+            <span>→ отправить сразу</span>
           </div>
-
-          {autosendAllowed && (
-            <div className="space-y-2">
-              <Label>Интенты для автоотправки</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Выберите типы запросов, для которых разрешена автоотправка
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {INTENT_OPTIONS.filter(i => autoPartsEnabled || !AUTO_PARTS_INTENTS.has(i.value)).map((intent) => (
-                  <Badge
-                    key={intent.value}
-                    variant={intentsAutosendAllowed.includes(intent.value) ? "default" : "outline"}
-                    className={cn(
-                      "cursor-pointer",
-                      intentsAutosendAllowed.includes(intent.value) && "bg-green-500/20 text-green-700 dark:text-green-300"
-                    )}
-                    onClick={() => toggleAutosendIntent(intent.value)}
-                    data-testid={`badge-autosend-${intent.value}`}
-                  >
-                    {intent.label}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          )}
+          <p className="text-muted-foreground/70 mt-1">
+            Уверенность рассчитывается автоматически на основе релевантности базы знаний и истории ответов
+          </p>
         </div>
 
         <Separator />
 
         <div className="space-y-2">
-          <Label>Интенты → всегда эскалировать (ESCALATE)</Label>
-          <p className="text-xs text-muted-foreground mb-2">
-            Эти интенты всегда вызывают полную эскалацию оператору — независимо от уверенности AI
+          <Label>Поведение AI по типам запросов</Label>
+          <p className="text-xs text-muted-foreground mb-3">
+            Определите, что делать с каждым типом запроса от клиента
           </p>
-          <div className="flex flex-wrap gap-2">
-            {INTENT_OPTIONS.filter(i => autoPartsEnabled || !AUTO_PARTS_INTENTS.has(i.value)).map((intent) => (
-              <Badge
-                key={intent.value}
-                variant={intentsForceHandoff.includes(intent.value) ? "default" : "outline"}
-                className={cn(
-                  "cursor-pointer",
-                  intentsForceHandoff.includes(intent.value) && "bg-amber-500/20 text-amber-700 dark:text-amber-300"
-                )}
-                onClick={() => toggleHandoffIntent(intent.value)}
-                data-testid={`badge-handoff-${intent.value}`}
-              >
-                {intent.label}
-              </Badge>
-            ))}
+          <div className="rounded-md border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="text-left px-3 py-2 font-medium">Тип запроса</th>
+                  <th className="text-center px-3 py-2 font-medium text-green-600 w-28">
+                    <span className="flex items-center justify-center gap-1">
+                      <Zap className="h-3 w-3" /> Авто
+                    </span>
+                  </th>
+                  <th className="text-center px-3 py-2 font-medium text-yellow-600 w-28">
+                    Проверка
+                  </th>
+                  <th className="text-center px-3 py-2 font-medium text-red-600 w-28">
+                    Оператор
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {INTENT_OPTIONS
+                  .filter(i => autoPartsEnabled || !AUTO_PARTS_INTENTS.has(i.value))
+                  .map((intent) => {
+                    const mode = getIntentMode(intent.value);
+                    return (
+                      <tr key={intent.value} className="hover:bg-muted/30">
+                        <td className="px-3 py-2">{intent.label}</td>
+                        {(["auto", "check", "operator"] as const).map((m) => (
+                          <td key={m} className="text-center px-3 py-2">
+                            <button
+                              type="button"
+                              onClick={() => setIntentMode(intent.value, m)}
+                              className={cn(
+                                "h-5 w-5 rounded-full border-2 mx-auto block transition-colors",
+                                mode === m
+                                  ? m === "auto"
+                                    ? "bg-green-500 border-green-500"
+                                    : m === "check"
+                                    ? "bg-yellow-500 border-yellow-500"
+                                    : "bg-red-500 border-red-500"
+                                  : "bg-background border-muted-foreground/30 hover:border-muted-foreground"
+                              )}
+                              data-testid={`intent-mode-${intent.value}-${m}`}
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex gap-4 text-xs text-muted-foreground pt-1">
+            <span className="flex items-center gap-1">
+              <span className="h-2.5 w-2.5 rounded-full bg-green-500 inline-block" />
+              Авто — отправить без проверки
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2.5 w-2.5 rounded-full bg-yellow-500 inline-block" />
+              Проверка — оператор одобряет
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2.5 w-2.5 rounded-full bg-red-500 inline-block" />
+              Оператор — всегда передавать живому
+            </span>
           </div>
         </div>
 
@@ -338,7 +398,7 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
             data-testid="button-save-decision-settings"
           >
             <Save className="mr-2 h-4 w-4" />
-            Сохранить настройки Decision Engine
+            Сохранить настройки автоматических решений
           </Button>
         </div>
       </CardContent>
@@ -387,6 +447,7 @@ function HumanDelaySettings() {
       setMinDelayMs(settings.minDelayMs ?? 3000);
       setMaxDelayMs(settings.maxDelayMs ?? 120000);
       setTypingIndicatorEnabled(settings.typingIndicatorEnabled ?? true);
+      setIsDirty(false);
     }
   }, [settings]);
 
@@ -397,11 +458,14 @@ function HumanDelaySettings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/settings/human-delay"] });
       toast({ title: "Настройки задержки сохранены" });
+      setIsDirty(false);
     },
     onError: () => {
       toast({ title: "Не удалось сохранить настройки", variant: "destructive" });
     },
   });
+
+  const [isDirty, setIsDirty] = useState(false);
 
   const handleSave = () => {
     updateMutation.mutate({
@@ -419,7 +483,7 @@ function HumanDelaySettings() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Human-like Delay</CardTitle>
+          <CardTitle>Задержка перед ответом</CardTitle>
         </CardHeader>
         <CardContent>
           <Skeleton className="h-32 w-full" />
@@ -431,15 +495,20 @@ function HumanDelaySettings() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          Human-like Delay
-          <Badge variant="outline" className="font-normal">Phase 2</Badge>
+        <CardTitle>
+          Задержка перед ответом
         </CardTitle>
         <CardDescription>
-          Имитация человеческих задержек при отправке ответов
+          AI будет отвечать с небольшой задержкой, как живой оператор
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {isDirty && (
+          <div className="flex items-center gap-2 rounded-md bg-yellow-500/10 border border-yellow-500/20 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-400 mb-4">
+            <AlertCircle className="h-3 w-3 flex-shrink-0" />
+            Есть несохранённые изменения — не забудьте нажать «Сохранить»
+          </div>
+        )}
         <div className="flex items-center justify-between rounded-md border p-4">
           <div>
             <Label>Включить задержку ответов</Label>
@@ -449,7 +518,7 @@ function HumanDelaySettings() {
           </div>
           <Switch
             checked={enabled}
-            onCheckedChange={setEnabled}
+            onCheckedChange={(v) => { setEnabled(v); setIsDirty(true); }}
             data-testid="switch-human-delay-enabled"
           />
         </div>
@@ -460,8 +529,8 @@ function HumanDelaySettings() {
 
             <div className="space-y-4">
               <div>
-                <Label className="mb-2 block">Поведение в нерабочее время</Label>
-                <Select value={nightMode} onValueChange={setNightMode}>
+                <Label className="mb-2 block">Что делать вне рабочих часов</Label>
+                <Select value={nightMode} onValueChange={(v) => { setNightMode(v); setIsDirty(true); }}>
                   <SelectTrigger data-testid="select-night-mode">
                     <SelectValue placeholder="Выберите режим" />
                   </SelectTrigger>
@@ -483,11 +552,11 @@ function HumanDelaySettings() {
               {nightMode === "DELAY" && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <Label>Множитель ночной задержки: x{nightDelayMultiplier.toFixed(1)}</Label>
+                    <Label>Задержка вне рабочих часов: в {nightDelayMultiplier.toFixed(1)} раза дольше</Label>
                   </div>
                   <Slider
                     value={[nightDelayMultiplier * 10]}
-                    onValueChange={([value]) => setNightDelayMultiplier(value / 10)}
+                    onValueChange={([value]) => { setNightDelayMultiplier(value / 10); setIsDirty(true); }}
                     max={100}
                     min={10}
                     step={5}
@@ -504,7 +573,7 @@ function HumanDelaySettings() {
                   <Label className="mb-2 block">Текст автоответа</Label>
                   <Input
                     value={nightAutoReplyText}
-                    onChange={(e) => setNightAutoReplyText(e.target.value)}
+                    onChange={(e) => { setNightAutoReplyText(e.target.value); setIsDirty(true); }}
                     placeholder="Спасибо за сообщение! Мы ответим в рабочее время."
                     data-testid="input-night-auto-reply"
                   />
@@ -520,7 +589,7 @@ function HumanDelaySettings() {
                 <Input
                   type="number"
                   value={Math.round(minDelayMs / 1000)}
-                  onChange={(e) => setMinDelayMs(Number(e.target.value) * 1000)}
+                  onChange={(e) => { setMinDelayMs(Number(e.target.value) * 1000); setIsDirty(true); }}
                   min={0}
                   max={Math.round(maxDelayMs / 1000)}
                   data-testid="input-min-delay"
@@ -531,7 +600,7 @@ function HumanDelaySettings() {
                 <Input
                   type="number"
                   value={Math.round(maxDelayMs / 1000)}
-                  onChange={(e) => setMaxDelayMs(Number(e.target.value) * 1000)}
+                  onChange={(e) => { setMaxDelayMs(Number(e.target.value) * 1000); setIsDirty(true); }}
                   min={Math.round(minDelayMs / 1000)}
                   data-testid="input-max-delay"
                 />
@@ -547,7 +616,7 @@ function HumanDelaySettings() {
               </div>
               <Switch
                 checked={typingIndicatorEnabled}
-                onCheckedChange={setTypingIndicatorEnabled}
+                onCheckedChange={(v) => { setTypingIndicatorEnabled(v); setIsDirty(true); }}
                 data-testid="switch-typing-indicator"
               />
             </div>
@@ -607,7 +676,7 @@ function TrainingPoliciesSettings({ autoPartsEnabled = false }: TrainingPolicies
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/training-policies"] });
-      toast({ title: "Политики обучения сохранены" });
+      toast({ title: "Правила обучения AI сохранены" });
     },
     onError: () => {
       toast({ title: "Не удалось сохранить политики", variant: "destructive" });
@@ -653,7 +722,7 @@ function TrainingPoliciesSettings({ autoPartsEnabled = false }: TrainingPolicies
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Политики обучения AI</CardTitle>
+          <CardTitle>Правила обучения AI</CardTitle>
         </CardHeader>
         <CardContent>
           <Skeleton className="h-32 w-full" />
@@ -666,19 +735,19 @@ function TrainingPoliciesSettings({ autoPartsEnabled = false }: TrainingPolicies
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          Политики обучения AI
+          Правила обучения AI
           <Badge variant="outline" className="font-normal">Обучение</Badge>
         </CardTitle>
         <CardDescription>
-          Настройка правил обучения и поведения AI
+          Контролируйте, на каких примерах учится ваш AI
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-4">
           <div>
-            <Label className="mb-2 block">Интенты → требовать одобрения (NEED_APPROVAL)</Label>
+            <Label className="mb-2 block">Типы запросов → только с проверкой оператора</Label>
             <p className="text-xs text-muted-foreground mb-2">
-              Понижает AUTO_SEND до ручной проверки — NOT эскалация, просто требует одобрения оператора
+              Для этих типов запросов AI всегда будет ждать одобрения оператора перед отправкой
             </p>
             <div className="flex flex-wrap gap-2">
               {INTENT_OPTIONS.filter(i => autoPartsEnabled || !AUTO_PARTS_INTENTS.has(i.value)).map((intent) => (
@@ -701,9 +770,9 @@ function TrainingPoliciesSettings({ autoPartsEnabled = false }: TrainingPolicies
           <Separator />
 
           <div>
-            <Label className="mb-2 block">Интенты исключённые из обучения</Label>
+            <Label className="mb-2 block">Типы запросов, которые AI не запоминает</Label>
             <p className="text-xs text-muted-foreground mb-2">
-              Ответы с этими интентами не будут использоваться в few-shot примерах для AI
+              Ответы на эти запросы AI не будет использовать как образцы для обучения
             </p>
             <div className="flex flex-wrap gap-2">
               {INTENT_OPTIONS.filter(i => autoPartsEnabled || !AUTO_PARTS_INTENTS.has(i.value)).map((intent) => (
@@ -726,9 +795,9 @@ function TrainingPoliciesSettings({ autoPartsEnabled = false }: TrainingPolicies
           <Separator />
 
           <div>
-            <Label className="mb-2 block">Запрещённые темы</Label>
+            <Label className="mb-2 block">Темы, которые не сохраняются в базу примеров</Label>
             <p className="text-xs text-muted-foreground mb-2">
-              Разговоры содержащие эти слова не будут сохраняться в обучающий датасет
+              Диалоги с этими словами AI не будет использовать как учебные примеры
             </p>
             <div className="flex gap-2 mb-2">
               <Input
@@ -2750,6 +2819,7 @@ const settingsFormSchema = z.object({
   timezone: z.string(),
   workingHoursStart: z.string(),
   workingHoursEnd: z.string(),
+  workingDays: z.array(z.string()).optional().default(["mon","tue","wed","thu","fri"]),
   autoReplyOutsideHours: z.boolean(),
   escalationEmail: z.string().email().optional().or(z.literal("")),
   escalationTelegram: z.string().optional(),
@@ -2960,7 +3030,7 @@ function TemplatesTab() {
     <>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-xl font-semibold">Шаблоны сообщений</h2>
+          <h2 className="text-xl font-semibold">Шаблоны автоответов</h2>
           <p className="text-sm text-muted-foreground mt-1">
             Настройка шаблонов для автоматических ответов
           </p>
@@ -3312,7 +3382,7 @@ function PaymentMethodsTab() {
     <>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-xl font-semibold">Способы оплаты</h2>
+          <h2 className="text-xl font-semibold">Способы оплаты для клиентов</h2>
           <p className="text-sm text-muted-foreground mt-1">
             Список способов оплаты, предлагаемых клиентам
           </p>
@@ -3718,7 +3788,7 @@ function AIAgentSettingsCard() {
   const [objectionPayment, setObjectionPayment] = useState("");
   const [objectionOnline, setObjectionOnline] = useState("");
   const [closingScript, setClosingScript] = useState("");
-  const [customFacts, setCustomFacts] = useState<Array<{ key: string; value: string }>>([]);
+  const [companyFacts, setCompanyFacts] = useState("");
   const [showDefaultPrompt, setShowDefaultPrompt] = useState(false);
 
   const { data: settings, isLoading } = useQuery<TenantAgentSettings>({
@@ -3731,8 +3801,14 @@ function AIAgentSettingsCard() {
       setObjectionPayment(settings.objectionPayment ?? "");
       setObjectionOnline(settings.objectionOnline ?? "");
       setClosingScript(settings.closingScript ?? "");
-      const facts = (settings.customFacts as Record<string, string> | null) ?? {};
-      setCustomFacts(Object.entries(facts).map(([key, value]) => ({ key, value: String(value) })));
+      if (typeof (settings as any).companyFacts === "string") {
+        setCompanyFacts((settings as any).companyFacts ?? "");
+      } else {
+        const factsText = (settings.customFacts as any[])
+          ?.map((f: any) => `${f.key}: ${f.value}`)
+          .join("\n") ?? "";
+        setCompanyFacts(factsText);
+      }
     }
   }, [settings]);
 
@@ -3751,30 +3827,14 @@ function AIAgentSettingsCard() {
   });
 
   function handleSave() {
-    const factsObj: Record<string, string> = {};
-    for (const { key, value } of customFacts) {
-      if (key.trim()) factsObj[key.trim()] = value;
-    }
     saveMutation.mutate({
       ...(settings ?? {}),
       systemPrompt: systemPrompt.trim() || null,
       objectionPayment: objectionPayment.trim() || null,
       objectionOnline: objectionOnline.trim() || null,
       closingScript: closingScript.trim() || null,
-      customFacts: factsObj,
+      companyFacts,
     });
-  }
-
-  function addFact() {
-    setCustomFacts((prev) => [...prev, { key: "", value: "" }]);
-  }
-
-  function updateFact(index: number, field: "key" | "value", val: string) {
-    setCustomFacts((prev) => prev.map((f, i) => (i === index ? { ...f, [field]: val } : f)));
-  }
-
-  function removeFact(index: number) {
-    setCustomFacts((prev) => prev.filter((_, i) => i !== index));
   }
 
   if (isLoading) {
@@ -3797,36 +3857,65 @@ function AIAgentSettingsCard() {
   return (
     <>
       <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Системный промпт</CardTitle>
-            <CardDescription>
-              Основной характер и поведение агента. Если оставить пустым — используется стандартный промпт.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <Collapsible>
+          <CollapsibleTrigger asChild>
             <Button
+              variant="ghost"
+              className="flex w-full items-center justify-between rounded-md border px-4 py-3 text-sm font-medium hover:bg-muted"
               type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setShowDefaultPrompt(true)}
-              data-testid="button-view-default-prompt"
             >
-              <FileText className="mr-2 h-4 w-4" />
-              Посмотреть стандартный промпт
+              <span className="flex items-center gap-2">
+                <Lock className="h-4 w-4 text-muted-foreground" />
+                Расширенные настройки
+              </span>
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
             </Button>
-            <Textarea
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="Опишите как должен вести себя ваш агент..."
-              className="min-h-[200px] font-mono text-sm"
-              data-testid="textarea-system-prompt"
-            />
-            <p className="text-xs text-muted-foreground">
-              Если заполнено — полностью заменяет стандартный промпт
-            </p>
-          </CardContent>
-        </Card>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <Card className="mt-2 border-dashed">
+              <CardHeader>
+                <CardTitle className="text-base">Системный промпт</CardTitle>
+                <CardDescription>
+                  Основной характер и поведение агента. Если оставить пустым — используется стандартный промпт.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="rounded-md border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-400">
+                  ⚠️ Изменение полностью заменяет поведение агента по умолчанию.
+                  Используйте только если точно знаете что делаете.
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowDefaultPrompt(true)}
+                  data-testid="button-view-default-prompt"
+                >
+                  <FileText className="mr-2 h-4 w-4" />
+                  Посмотреть стандартный промпт
+                </Button>
+                <Textarea
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  placeholder="Опишите как должен вести себя ваш агент..."
+                  className="min-h-[200px] font-mono text-sm"
+                  data-testid="textarea-system-prompt"
+                />
+                {systemPrompt && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground"
+                    onClick={() => setSystemPrompt("")}
+                  >
+                    Сбросить до стандартного
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          </CollapsibleContent>
+        </Collapsible>
 
         <Card>
           <CardHeader>
@@ -3885,45 +3974,21 @@ function AIAgentSettingsCard() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Эти факты автоматически добавляются в промпт агента
+              Любые факты о компании, которые агент будет использовать в ответах.
+              Каждый факт с новой строки.
             </p>
-            {customFacts.map((fact, index) => (
-              <div key={index} className="flex items-center gap-2">
-                <Input
-                  value={fact.key}
-                  onChange={(e) => updateFact(index, "key", e.target.value)}
-                  placeholder="Ключ"
-                  className="flex-1"
-                  data-testid={`fact-key-${index}`}
-                />
-                <Input
-                  value={fact.value}
-                  onChange={(e) => updateFact(index, "value", e.target.value)}
-                  placeholder="Значение"
-                  className="flex-1"
-                  data-testid={`fact-value-${index}`}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => removeFact(index)}
-                  data-testid={`button-remove-fact-${index}`}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={addFact}
-              data-testid="button-add-fact"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Добавить факт
-            </Button>
+            <Textarea
+              value={companyFacts}
+              onChange={(e) => setCompanyFacts(e.target.value)}
+              placeholder={
+                "Адрес: г. Москва, ул. Ленина 5\n" +
+                "Работаем с 2015 года\n" +
+                "Доставка по всей России\n" +
+                "Самовывоз возможен по предварительному звонку"
+              }
+              className="min-h-[120px]"
+              data-testid="textarea-company-facts"
+            />
           </CardContent>
         </Card>
 
@@ -3962,6 +4027,130 @@ function AIAgentSettingsCard() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Вкладка «Приём заявок»
+// ─────────────────────────────────────────────────────────────────────────────
+
+const APP_URL = "https://aimessagehelper.online";
+
+function WebhookUrlCard({
+  title,
+  description,
+  url,
+  hint,
+}: {
+  title: string;
+  description: string;
+  url: string;
+  hint?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      toast({ title: "Ссылка скопирована" });
+    });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-2">
+          <div className="flex-1 min-w-0 rounded-md border bg-muted px-3 py-2">
+            <code className="text-sm font-mono break-all select-all text-foreground">
+              {url}
+            </code>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="shrink-0"
+            onClick={handleCopy}
+            title="Скопировать"
+          >
+            {copied ? (
+              <Check className="h-4 w-4 text-green-500" />
+            ) : (
+              <Copy className="h-4 w-4" />
+            )}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="shrink-0"
+            onClick={() => window.open(url, "_blank")}
+            title="Открыть в браузере"
+          >
+            <ExternalLink className="h-4 w-4" />
+          </Button>
+        </div>
+        {hint && (
+          <p className="text-xs text-muted-foreground">{hint}</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function LeadIntakeTab({ tenantId }: { tenantId: string }) {
+  const marquizWebhookUrl = `${APP_URL}/webhooks/marquiz/${tenantId}`;
+
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-muted-foreground">
+        Здесь находятся ссылки и настройки для приёма заявок из внешних источников.
+        Используйте эти URL в сторонних сервисах для автоматической передачи лидов в систему.
+      </p>
+
+      {/* Marquiz */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <h3 className="font-medium">Marquiz</h3>
+          <Badge variant="secondary" className="text-xs">Квизы</Badge>
+        </div>
+        <WebhookUrlCard
+          title="Webhook URL для Marquiz"
+          description="Укажите этот адрес в настройках вашего квиза: Marquiz → Настройки квиза → Интеграции → Webhook."
+          url={marquizWebhookUrl}
+          hint="Marquiz отправит данные заявки на этот URL сразу после прохождения квиза. Система автоматически определит канал (Telegram / MAX) и отправит клиенту сообщение."
+        />
+      </div>
+
+      <Separator />
+
+      {/* Placeholder for future integrations */}
+      <div className="space-y-3">
+        <h3 className="font-medium text-muted-foreground">Скоро</h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {["Tilda", "GetCourse", "amoCRM", "Bitrix24"].map((name) => (
+            <div
+              key={name}
+              className="rounded-md border border-dashed p-4 flex items-center gap-3 opacity-40"
+            >
+              <Inbox className="h-5 w-5 text-muted-foreground shrink-0" />
+              <div>
+                <p className="text-sm font-medium">{name}</p>
+                <p className="text-xs text-muted-foreground">Интеграция в разработке</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function Settings() {
   const { toast } = useToast();
   const autoPartsEnabled = useAutoPartsEnabled();
@@ -3981,6 +4170,7 @@ export default function Settings() {
       timezone: "Europe/Moscow",
       workingHoursStart: "09:00",
       workingHoursEnd: "18:00",
+      workingDays: ["mon","tue","wed","thu","fri"],
       autoReplyOutsideHours: true,
       escalationEmail: "",
       escalationTelegram: "",
@@ -3998,6 +4188,7 @@ export default function Settings() {
           timezone: tenant.timezone,
           workingHoursStart: tenant.workingHoursStart || "09:00",
           workingHoursEnd: tenant.workingHoursEnd || "18:00",
+          workingDays: tenant.workingDays ?? ["mon","tue","wed","thu","fri"],
           autoReplyOutsideHours: tenant.autoReplyOutsideHours ?? true,
           escalationEmail: tenant.escalationEmail || "",
           escalationTelegram: tenant.escalationTelegram || "",
@@ -4062,7 +4253,7 @@ export default function Settings() {
           </TabsTrigger>
           <TabsTrigger value="ai-agent" data-testid="tab-ai-agent">
             <Bot className="mr-2 h-4 w-4" />
-            AI Агент
+            Поведение AI
           </TabsTrigger>
           <TabsTrigger value="automation" data-testid="tab-automation">
             <Zap className="mr-2 h-4 w-4" />
@@ -4070,15 +4261,19 @@ export default function Settings() {
           </TabsTrigger>
           <TabsTrigger value="ai-training" data-testid="tab-ai-training">
             <MessageSquare className="mr-2 h-4 w-4" />
-            Обучение AI
+            Обучение
           </TabsTrigger>
           <TabsTrigger value="templates-payment" data-testid="tab-templates-payment">
             <FileText className="mr-2 h-4 w-4" />
-            Шаблоны и Оплата
+            Шаблоны
           </TabsTrigger>
           <TabsTrigger value="channels" data-testid="tab-channels">
             <Link2 className="mr-2 h-4 w-4" />
             Каналы
+          </TabsTrigger>
+          <TabsTrigger value="lead-intake" data-testid="tab-lead-intake">
+            <Inbox className="mr-2 h-4 w-4" />
+            Приём заявок
           </TabsTrigger>
         </TabsList>
 
@@ -4087,8 +4282,6 @@ export default function Settings() {
             {/* Tab 1: Компания */}
             <TabsContent value="company">
               <div className="space-y-6">
-                <CompanyAgentCard autoPartsEnabled={autoPartsEnabled} />
-
                 <Card>
                   <CardHeader>
                     <CardTitle>Параметры аккаунта</CardTitle>
@@ -4154,6 +4347,96 @@ export default function Settings() {
                   </CardContent>
                 </Card>
 
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Рабочие часы</CardTitle>
+                    <CardDescription>
+                      Когда AI работает в автоматическом режиме
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <FormField
+                        control={form.control}
+                        name="workingHoursStart"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Начало работы</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="time"
+                                {...field}
+                                data-testid="input-working-start"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="workingHoursEnd"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Конец работы</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="time"
+                                {...field}
+                                data-testid="input-working-end"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                    <FormField
+                      control={form.control}
+                      name="workingDays"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Рабочие дни</FormLabel>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {[
+                              { value: "mon", label: "Пн" },
+                              { value: "tue", label: "Вт" },
+                              { value: "wed", label: "Ср" },
+                              { value: "thu", label: "Чт" },
+                              { value: "fri", label: "Пт" },
+                              { value: "sat", label: "Сб" },
+                              { value: "sun", label: "Вс" },
+                            ].map(({ value, label }) => {
+                              const checked = field.value?.includes(value);
+                              return (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  onClick={() => {
+                                    const next = checked
+                                      ? field.value!.filter((d: string) => d !== value)
+                                      : [...(field.value ?? []), value];
+                                    field.onChange(next);
+                                  }}
+                                  className={cn(
+                                    "w-10 h-10 rounded-md border text-sm font-medium transition-colors",
+                                    checked
+                                      ? "bg-primary text-primary-foreground border-primary"
+                                      : "bg-background text-muted-foreground hover:bg-muted"
+                                  )}
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </CardContent>
+                </Card>
+
                 <div className="flex justify-end">
                   <Button
                     type="submit"
@@ -4170,6 +4453,8 @@ export default function Settings() {
             {/* Tab 2: AI Агент */}
             <TabsContent value="ai-agent">
               <div className="space-y-6">
+                <CompanyAgentCard autoPartsEnabled={autoPartsEnabled} />
+
                 <Card>
                   <CardHeader>
                     <CardTitle>Стиль общения</CardTitle>
@@ -4274,63 +4559,6 @@ export default function Settings() {
             {/* Tab 3: Автоматизация */}
             <TabsContent value="automation">
               <div className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Рабочие часы</CardTitle>
-                    <CardDescription>
-                      Когда AI работает в автоматическом режиме
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <FormField
-                        control={form.control}
-                        name="workingHoursStart"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Начало работы</FormLabel>
-                            <FormControl>
-                              <Input
-                                type="time"
-                                {...field}
-                                data-testid="input-working-start"
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="workingHoursEnd"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Конец работы</FormLabel>
-                            <FormControl>
-                              <Input
-                                type="time"
-                                {...field}
-                                data-testid="input-working-end"
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                    <div className="flex justify-end pt-2">
-                      <Button
-                        type="submit"
-                        disabled={updateMutation.isPending}
-                        data-testid="button-save-working-hours"
-                      >
-                        <Save className="mr-2 h-4 w-4" />
-                        Сохранить
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-
                 <Card>
                   <CardHeader>
                     <CardTitle>Скидки</CardTitle>
@@ -4471,6 +4699,18 @@ export default function Settings() {
             </TabsContent>
           </form>
         </Form>
+
+        {/* Tab 7: Приём заявок — вне <Form>, не нужна форма */}
+        <TabsContent value="lead-intake">
+          {tenant ? (
+            <LeadIntakeTab tenantId={tenant.id} />
+          ) : (
+            <div className="space-y-4">
+              <Skeleton className="h-32 w-full" />
+              <Skeleton className="h-32 w-full" />
+            </div>
+          )}
+        </TabsContent>
       </Tabs>
     </div>
   );

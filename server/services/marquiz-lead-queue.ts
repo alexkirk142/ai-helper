@@ -2,6 +2,8 @@ import { Queue } from "bullmq";
 import { getRedisConnectionConfig } from "./message-queue";
 
 export interface MarquizLeadJobData {
+  /** Tenant that owns this lead — set from URL param /webhooks/marquiz/:tenantId */
+  tenantId: string;
   quizName: string;
   phone: string;
   maxPhone: string;
@@ -44,7 +46,7 @@ export function getMarquizLeadQueue(): Queue<MarquizLeadJobData> | null {
 
   try {
     marquizLeadQueue = new Queue<MarquizLeadJobData>(QUEUE_NAME, {
-      connection: config,
+      connection: config as any,
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: "exponential", delay: 2000 },

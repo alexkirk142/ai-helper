@@ -45,6 +45,8 @@ import {
   type TelegramSession, type InsertTelegramSession,
   type MessageTemplate, type InsertMessageTemplate,
   type PaymentMethod, type InsertPaymentMethod,
+  type TenantAgentSettings, type InsertTenantAgentSettings,
+  type TransmissionIdentityCache, type InsertTransmissionIdentityCache,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import type { IStorage } from "../../storage";
@@ -101,9 +103,13 @@ export class MemStorage implements IStorage {
       autoReplyOutsideHours: true,
       escalationEmail: "owner@example.com",
       escalationTelegram: null,
+      escalationChatId: null,
       allowDiscounts: true,
       maxDiscountPercent: 10,
       templates: null,
+      templateGearboxEnabled: true,
+      templateEngineEnabled: true,
+      templateTiresEnabled: true,
       createdAt: new Date(),
     };
     this.tenants.set(tenant.id, tenant);
@@ -151,9 +157,11 @@ export class MemStorage implements IStorage {
       channelId: null,
       status: "active",
       mode: "learning",
+      isMuted: false,
       lastMessageAt: new Date(),
       unreadCount: 2,
       createdAt: new Date(Date.now() - 3600000),
+      updatedAt: new Date(Date.now() - 3600000),
     };
     this.conversations.set(conv1.id, conv1);
 
@@ -164,9 +172,11 @@ export class MemStorage implements IStorage {
       channelId: null,
       status: "escalated",
       mode: "semi-auto",
+      isMuted: false,
       lastMessageAt: new Date(Date.now() - 1800000),
       unreadCount: 1,
       createdAt: new Date(Date.now() - 7200000),
+      updatedAt: new Date(Date.now() - 7200000),
     };
     this.conversations.set(conv2.id, conv2);
 
@@ -418,6 +428,10 @@ export class MemStorage implements IStorage {
   // User Invite methods
   private userInvites: Map<string, UserInvite> = new Map();
 
+  async getUserInvite(id: string): Promise<UserInvite | undefined> {
+    return this.userInvites.get(id);
+  }
+
   async getUserInviteByTokenHash(tokenHash: string): Promise<UserInvite | undefined> {
     return Array.from(this.userInvites.values()).find((i) => i.tokenHash === tokenHash);
   }
@@ -433,6 +447,24 @@ export class MemStorage implements IStorage {
     const newInvite: UserInvite = { ...invite, id, createdAt: new Date(), usedAt: null } as UserInvite;
     this.userInvites.set(id, newInvite);
     return newInvite;
+  }
+
+  async updateUserInviteEmailStatus(inviteId: string, status: string, sentAt?: Date): Promise<void> {
+    const invite = this.userInvites.get(inviteId);
+    if (invite) {
+      invite.emailStatus = status;
+      if (sentAt) invite.emailSentAt = sentAt;
+      this.userInvites.set(inviteId, invite);
+    }
+  }
+
+  async updateUserInviteToken(inviteId: string, tokenHash: string, expiresAt: Date): Promise<void> {
+    const invite = this.userInvites.get(inviteId);
+    if (invite) {
+      invite.tokenHash = tokenHash;
+      invite.expiresAt = expiresAt;
+      this.userInvites.set(inviteId, invite);
+    }
   }
 
   async markUserInviteUsed(inviteId: string): Promise<void> {
@@ -692,7 +724,7 @@ export class MemStorage implements IStorage {
     return { ...conversation, customer, messages, currentSuggestion };
   }
 
-  async getConversationsByTenant(tenantId: string): Promise<ConversationWithCustomer[]> {
+  async getConversationsByTenant(tenantId: string, _options?: { limit?: number; offset?: number }): Promise<ConversationWithCustomer[]> {
     const convs = Array.from(this.conversations.values())
       .filter((c) => c.tenantId === tenantId)
       .sort((a, b) => new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime());
@@ -717,14 +749,17 @@ export class MemStorage implements IStorage {
   async createConversation(conversation: InsertConversation & { lastMessageAt?: Date; createdAt?: Date }): Promise<Conversation> {
     const id = randomUUID();
     const now = new Date();
+    const createdAt = conversation.createdAt || now;
     const newConv: Conversation = {
       ...conversation,
       id,
       status: conversation.status || "active",
       mode: conversation.mode || "learning",
+      isMuted: conversation.isMuted ?? false,
       unreadCount: conversation.unreadCount || 0,
       lastMessageAt: conversation.lastMessageAt || now,
-      createdAt: conversation.createdAt || now,
+      createdAt,
+      updatedAt: createdAt,
     } as Conversation;
     this.conversations.set(id, newConv);
     return newConv;
@@ -734,7 +769,7 @@ export class MemStorage implements IStorage {
   async updateConversation(id: string, _tenantId: string, data: Partial<InsertConversation>): Promise<Conversation | undefined> {
     const conv = this.conversations.get(id);
     if (!conv) return undefined;
-    const updated = { ...conv, ...data };
+    const updated = { ...conv, ...data, updatedAt: new Date() };
     this.conversations.set(id, updated);
     return updated;
   }
@@ -1098,9 +1133,11 @@ export class MemStorage implements IStorage {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const resolvedToday = convs.filter(
-      (c) => c.status === "resolved" && new Date(c.lastMessageAt || 0) >= today
-    ).length;
+    const resolvedToday = convs.filter((c) => {
+      if (c.status !== "resolved") return false;
+      const u = new Date(c.updatedAt);
+      return !Number.isNaN(u.getTime()) && u >= today;
+    }).length;
 
     const approvedSuggestions = suggestions.filter((s) => s.status === "approved").length;
     const totalSuggestions = suggestions.length;
@@ -1113,7 +1150,7 @@ export class MemStorage implements IStorage {
       activeConversations: convs.filter((c) => c.status === "active" || c.status === "waiting").length,
       escalatedConversations: convs.filter((c) => c.status === "escalated").length,
       resolvedToday,
-      avgResponseTime: 12, // Mock value
+      avgResponseTime: null,
       aiAccuracy,
       pendingSuggestions,
       productsCount: products.length,
@@ -1522,6 +1559,7 @@ export class MemStorage implements IStorage {
       channelId: data.channelId ?? null,
       authMethod: data.authMethod ?? null,
       isEnabled: data.isEnabled ?? true,
+      tgRole: data.tgRole ?? "both",
       createdAt: now,
       updatedAt: now,
     };
@@ -1643,5 +1681,79 @@ export class MemStorage implements IStorage {
         this.paymentMethodsMap.set(id, { ...m, order });
       }
     }
+  }
+
+  // ─── Tenant Agent Settings (stubs) ───────────────────────────────────────
+
+  private tenantAgentSettingsMap: Map<string, TenantAgentSettings> = new Map();
+
+  async getTenantAgentSettings(tenantId: string): Promise<TenantAgentSettings | null> {
+    return this.tenantAgentSettingsMap.get(tenantId) ?? null;
+  }
+
+  async upsertTenantAgentSettings(tenantId: string, data: Partial<InsertTenantAgentSettings>): Promise<TenantAgentSettings> {
+    const existing = this.tenantAgentSettingsMap.get(tenantId);
+    const updated: TenantAgentSettings = {
+      ...(existing ?? { tenantId }),
+      ...data,
+      tenantId,
+      updatedAt: new Date(),
+    } as TenantAgentSettings;
+    this.tenantAgentSettingsMap.set(tenantId, updated);
+    return updated;
+  }
+
+  // ─── Transmission Identity Cache (stubs) ────────────────────────────────
+
+  private transmissionIdentityMap: Map<string, TransmissionIdentityCache> = new Map();
+
+  async getTransmissionIdentity(normalizedOem: string): Promise<TransmissionIdentityCache | undefined> {
+    return this.transmissionIdentityMap.get(normalizedOem);
+  }
+
+  async saveTransmissionIdentity(data: InsertTransmissionIdentityCache): Promise<TransmissionIdentityCache> {
+    const record = { ...data, id: randomUUID(), hitCount: data.hitCount ?? 0, createdAt: new Date(), updatedAt: new Date() } as TransmissionIdentityCache;
+    this.transmissionIdentityMap.set(data.normalizedOem, record);
+    return record;
+  }
+
+  async incrementTransmissionIdentityHit(normalizedOem: string): Promise<void> {
+    const existing = this.transmissionIdentityMap.get(normalizedOem);
+    if (existing) {
+      this.transmissionIdentityMap.set(normalizedOem, { ...existing, hitCount: (existing.hitCount ?? 0) + 1 });
+    }
+  }
+
+  // ─── Conversation helpers (missing from stubs) ───────────────────────────
+
+  async getFailedLeads(tenantId: string): Promise<ConversationWithCustomer[]> {
+    const all = await this.getConversationsByTenant(tenantId);
+    return all.filter((c) => c.status === "failed");
+  }
+
+  async getConversationChannelCounts(tenantId: string): Promise<{ all: number; telegram?: number; max?: number; whatsapp?: number }> {
+    const all = await this.getConversationsByTenant(tenantId);
+    const result: { all: number; telegram?: number; max?: number; whatsapp?: number } = { all: all.length };
+    for (const c of all) {
+      const ch = (c.channel as string | undefined) ?? (c as any).customer?.channel;
+      if (ch === "telegram") result.telegram = (result.telegram ?? 0) + 1;
+      else if (ch === "max") result.max = (result.max ?? 0) + 1;
+      else if (ch === "whatsapp") result.whatsapp = (result.whatsapp ?? 0) + 1;
+    }
+    return result;
+  }
+
+  async deleteConversation(id: string, _tenantId: string): Promise<boolean> {
+    return this.conversations.delete(id);
+  }
+
+  // ─── Price snapshot / vehicle lookup helpers ─────────────────────────────
+
+  async getLatestVehicleLookupCase(conversationId: string, _tenantId: string): Promise<VehicleLookupCase | undefined> {
+    return undefined;
+  }
+
+  async getLatestPriceSnapshotForConversation(_tenantId: string, _conversationId: string): Promise<PriceSnapshot | undefined> {
+    return undefined;
   }
 }
