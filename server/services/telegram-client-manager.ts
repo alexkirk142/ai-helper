@@ -624,6 +624,7 @@ class TelegramClientManager {
       const message = event.message;
       if (message.out) return;
 
+      const connectionKey = `${tenantId}:${accountId}`;
       const senderId = message.senderId?.toString() || "";
       const chatId = message.chatId?.toString() || "";
       const text = message.text || message.message || "";
@@ -649,7 +650,6 @@ class TelegramClientManager {
         `[TelegramClientManager] New message from ${senderId} in chat ${chatId}: ${text.substring(0, 50)}${hasMedia ? " [+media]" : ""}`,
       );
 
-      const connectionKey = `${tenantId}:${accountId}`;
       const connection = this.connections.get(connectionKey);
       if (connection) {
         connection.lastActivity = new Date();

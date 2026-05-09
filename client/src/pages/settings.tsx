@@ -1020,6 +1020,8 @@ interface TelegramAccount {
   authMethod: string | null;
   isEnabled: boolean;
   isConnected: boolean;
+  isConnecting?: boolean;
+  lastError?: string | null;
   createdAt: string;
 }
 
@@ -1366,7 +1368,9 @@ function TelegramPersonalCard({ channelStatuses, featureFlags, toggleChannelMuta
                         <div className="flex items-center gap-3 min-w-0">
                           <div className={cn(
                             "h-8 w-8 rounded-full flex items-center justify-center shrink-0",
-                            account.isConnected ? "bg-green-500/10 text-green-600" : "bg-muted text-muted-foreground"
+                            account.isConnected ? "bg-green-500/10 text-green-600" :
+                            account.isConnecting ? "bg-yellow-500/10 text-yellow-600" :
+                            "bg-muted text-muted-foreground"
                           )}>
                             <User className="h-4 w-4" />
                           </div>
@@ -1376,7 +1380,13 @@ function TelegramPersonalCard({ channelStatuses, featureFlags, toggleChannelMuta
                               {account.username ? ` (@${account.username})` : ""}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              {account.isConnected ? "Активен" : account.isEnabled ? "Отключен от сервера" : "Выключен"}
+                              {account.isConnected
+                                ? "Активен"
+                                : account.isConnecting
+                                  ? "Подключается…"
+                                  : account.isEnabled
+                                    ? "Отключен от сервера"
+                                    : "Выключен"}
                               {account.authMethod === "phone" ? " · Телефон" : account.authMethod === "qr" ? " · QR" : ""}
                             </p>
                           </div>

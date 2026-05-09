@@ -91,6 +91,7 @@ router.get("/api/telegram-personal/accounts", requireAuth, requirePermission("MA
       isEnabled: a.isEnabled,
       tgRole: (a as any).tgRole ?? "both",
       isConnected: a.status === "active" && a.isEnabled && telegramClientManager.isAccountConnected(tenantId, a.id),
+      isConnecting: a.isEnabled && telegramClientManager.isConnecting(`${tenantId}:${a.id}`),
       createdAt: a.createdAt,
     }));
 
