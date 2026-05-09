@@ -86,6 +86,7 @@ router.get("/api/telegram-personal/accounts", requireAuth, requirePermission("MA
       username: a.username,
       userId: a.userId,
       status: a.status,
+      lastError: a.lastError,
       authMethod: a.authMethod,
       isEnabled: a.isEnabled,
       tgRole: (a as any).tgRole ?? "both",
@@ -97,6 +98,53 @@ router.get("/api/telegram-personal/accounts", requireAuth, requirePermission("MA
   } catch (error: any) {
     console.error("Error listing Telegram accounts:", error);
     res.status(500).json({ error: error.message || "Failed to list accounts" });
+  }
+});
+
+/**
+ * GET /api/telegram-personal/flood-status
+ * Returns current FLOOD_WAIT state for all accounts of the tenant.
+ * Reads from DB lastError + in-memory connection/timer state — no Telegram API calls made.
+ */
+router.get("/api/telegram-personal/flood-status", requireAuth, requirePermission("MANAGE_CHANNELS"), requireTenant, async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.tenantId!;
+    const { telegramClientManager } = await import("../../services/telegram-client-manager");
+    const accounts = await storage.getTelegramAccountsByTenant(tenantId);
+
+    const result = accounts.map(a => {
+      const connectionKey = `${tenantId}:${a.id}`;
+      const isConnected = telegramClientManager.isAccountConnected(tenantId, a.id);
+      const hasReconnectTimer = telegramClientManager.hasReconnectTimer(connectionKey);
+      const isConnecting = telegramClientManager.isConnecting(connectionKey);
+
+      // Parse FLOOD_WAIT seconds from lastError if present
+      let floodWaitSecondsRemaining: number | null = null;
+      if (a.lastError) {
+        const match = a.lastError.match(/reconnecting in (\d+)s/);
+        if (match) {
+          floodWaitSecondsRemaining = parseInt(match[1], 10);
+        }
+      }
+
+      return {
+        id: a.id,
+        phoneNumber: a.phoneNumber,
+        firstName: a.firstName,
+        status: a.status,
+        lastError: a.lastError,
+        isConnected,
+        hasReconnectTimer,
+        isConnecting,
+        floodWaitSecondsRemaining,
+        updatedAt: a.updatedAt,
+      };
+    });
+
+    res.json({ accounts: result, checkedAt: new Date().toISOString() });
+  } catch (error: any) {
+    console.error("Error getting flood status:", error);
+    res.status(500).json({ error: error.message || "Failed to get flood status" });
   }
 });
 

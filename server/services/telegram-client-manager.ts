@@ -191,46 +191,66 @@ class TelegramClientManager {
       clearInterval(this.healthCheckTimer);
     }
 
+    // cleanupInactiveConnections + orphan check — DB queries only, no Telegram API calls.
+    // Safe to run every 60 seconds.
     this.healthCheckTimer = setInterval(async () => {
       await this.cleanupInactiveConnections();
+      await this.orphanCheck();
     }, 60000);
 
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
     }
 
+    // getMe() ping — a REAL MTProto RPC call to Telegram servers.
+    // Running this every 15 seconds was the primary cause of FLOOD_WAIT:
+    //   2 accounts × 4 pings/min = 480 RPC calls/hour just for keepalive.
+    // Telegram enforces IP-level rate limits and issues FLOOD_WAIT when the call
+    // volume exceeds its threshold. MTProto connections are keep-alive at the
+    // protocol level (automatic ping/pong frames inside gramjs) — no application-
+    // level getMe() is needed for connection maintenance. We only call it to detect
+    // dead TCP connections that gramjs itself failed to notice.
+    // 5 minutes is more than enough; broken connections surface via send errors anyway.
     this.heartbeatTimer = setInterval(async () => {
-      await this.heartbeatCheck();
-    }, 15000);
+      await this.heartbeatPing();
+    }, 5 * 60 * 1000);
   }
 
-  private async heartbeatCheck(): Promise<void> {
-    // Part 1: ping existing connections and reconnect broken ones
+  /**
+   * Ping all active connections with getMe() to detect dead TCP sockets.
+   * Called every 5 minutes — infrequent enough to avoid IP-level FLOOD_WAIT.
+   * MTProto keepalive (protocol-level pings) is handled by gramjs internally;
+   * this is only an application-level dead-connection sweep.
+   */
+  private async heartbeatPing(): Promise<void> {
     for (const [key, connection] of Array.from(this.connections.entries())) {
       try {
         await connection.client.getMe();
-        connection.reconnectAttempts = 0; // reset on successful heartbeat
+        connection.reconnectAttempts = 0;
       } catch (error: any) {
         const msg: string = error?.message ?? String(error);
         console.warn(`[TelegramClientManager] Heartbeat FAILED: ${key} - ${msg}`);
         connection.connected = false;
 
-        // Remove from map so heartbeat won't fire on the same broken client again
         this.connections.delete(key);
         try { await connection.client.disconnect(); } catch {}
 
         this.scheduleReconnect(key, connection, msg);
       }
     }
+  }
 
-    // Part 2: detect orphaned accounts — present in DB (enabled + has session) but absent
-    // from the connections map AND not already scheduled for reconnect. This handles:
-    //   a) process restarted without initialize() completing (e.g. migration error)
-    //   b) scheduleReconnect gave up after MAX_RECONNECT_ATTEMPTS and set status="error"
-    // We intentionally use getReconnectableTelegramAccounts (not getActiveTelegramAccounts)
-    // so that accounts whose status was set to "disconnected" or "error" by the reconnect
-    // loop are also picked up here — otherwise they'd be permanently stuck after exhausting
-    // all retries.
+  /**
+   * Detect orphaned accounts — present in DB (enabled + has session) but absent
+   * from the connections map AND not already scheduled for reconnect. This handles:
+   *   a) process restarted without initialize() completing (e.g. migration error)
+   *   b) scheduleReconnect gave up after MAX_RECONNECT_ATTEMPTS and set status="error"
+   * Uses getReconnectableTelegramAccounts (not getActiveTelegramAccounts) so that
+   * accounts whose status was set to "disconnected"/"error" by the reconnect loop
+   * are also picked up — otherwise they'd be permanently stuck.
+   * DB queries only — no Telegram API calls. Safe to run frequently.
+   */
+  private async orphanCheck(): Promise<void> {
     try {
       const isEnabled = await featureFlagService.isEnabled("TELEGRAM_PERSONAL_CHANNEL_ENABLED");
       if (!isEnabled) return;
@@ -243,21 +263,17 @@ class TelegramClientManager {
         const hasPendingTimer = this.reconnectTimers.has(connectionKey);
         const isConnecting = this.connectingAccounts.has(connectionKey);
         if (!alreadyConnected && !hasPendingTimer && !isConnecting) {
-          console.log(`[TelegramClientManager] Heartbeat detected orphaned account ${connectionKey} (status=${account.status}) — resetting and reconnecting`);
-          // Reset status so scheduleReconnect gets a fresh attempts counter and
-          // the UI shows the account is being reconnected (not stuck in "error").
+          console.log(`[TelegramClientManager] Orphan check detected unconnected account ${connectionKey} (status=${account.status}) — reconnecting`);
           if (account.status !== "active") {
             storage.updateTelegramAccount(account.id, { status: "active", lastError: null }).catch(() => {});
           }
-          // Reset the persisted retry counter so the account gets a full set of fresh attempts.
           this.reconnectCounts.delete(connectionKey);
-          // Fire-and-forget; errors are handled inside connectAccount via scheduleReconnect
           this.connectAccount(account.tenantId, account.id, account.channelId, account.sessionString)
-            .catch((err: any) => console.error(`[TelegramClientManager] Heartbeat reconnect failed for ${connectionKey}:`, err.message));
+            .catch((err: any) => console.error(`[TelegramClientManager] Orphan reconnect failed for ${connectionKey}:`, err.message));
         }
       }
     } catch (err: any) {
-      console.warn(`[TelegramClientManager] Heartbeat orphan check error: ${err.message}`);
+      console.warn(`[TelegramClientManager] Orphan check error: ${err.message}`);
     }
   }
 
@@ -273,8 +289,12 @@ class TelegramClientManager {
           }
         } else {
           const account = await storage.getTelegramAccountById(connection.accountId);
-          if (!account || !account.isEnabled || account.status !== "active") {
-            console.log(`[TelegramClientManager] Cleaning up inactive account: ${key}`);
+          // Only clean up permanently disabled accounts (isEnabled=false, set exclusively by
+          // FATAL_ERROR handler for SESSION_REVOKED / USER_DEACTIVATED). Do NOT check status
+          // here — status can legitimately be "disconnected" or "error" during transient
+          // reconnect cycles, and killing the connection would cancel the pending retry timer.
+          if (!account || !account.isEnabled) {
+            console.log(`[TelegramClientManager] Cleaning up disabled account: ${key}`);
             await this.disconnectByKey(key);
           }
         }
@@ -338,6 +358,12 @@ class TelegramClientManager {
             // gramJS queues its own retry before our catch block can stop it, causing two
             // simultaneous connections with the same auth key → infinite AUTH_KEY_DUPLICATED loop.
             autoReconnect: false,
+            // floodSleepThreshold: 24 hours — gramjs must ALWAYS wait FLOOD_WAIT internally
+            // instead of throwing FloodWaitError. Without this, the default 60s threshold causes
+            // gramjs to throw on FLOOD_WAIT > 60s, which triggers our retry loop, which makes
+            // another isUserAuthorized() call, which resets Telegram's FLOOD_WAIT countdown and
+            // makes it grow exponentially (60s → 120s → 240s → 30min → 90min → ...).
+            floodSleepThreshold: 24 * 60 * 60,
           });
 
           console.log(`[TelegramClientManager] Connecting account ${connectionKey}...`);
@@ -360,15 +386,16 @@ class TelegramClientManager {
           }
         }
 
-        // Allow up to 2 hours for isUserAuthorized — gramjs handles FLOOD_WAIT internally by
-        // pausing and retrying. Cutting the timeout too short interrupts gramjs mid-wait,
-        // causing an immediate retry which resets Telegram's FLOOD_WAIT countdown indefinitely.
-        // After many restarts, FLOOD_WAIT can grow to 30–90 minutes. We must let gramjs sit
-        // through the entire wait before declaring failure.
+        // Allow up to 12 hours for isUserAuthorized — gramjs (with floodSleepThreshold=24h)
+        // handles FLOOD_WAIT internally by pausing and retrying. Cutting the timeout too short
+        // interrupts gramjs mid-wait, causing an immediate retry which resets Telegram's
+        // FLOOD_WAIT countdown indefinitely. After many restarts, FLOOD_WAIT can grow to
+        // 30–90 minutes. We must let gramjs sit through the entire wait before declaring failure.
+        // 12 hours gives comfortable headroom even for extreme IP-level FLOOD_WAITs.
         const isAuthorized = await Promise.race([
           client.isUserAuthorized(),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("isUserAuthorized timed out after 7200s")), 7200000)
+            setTimeout(() => reject(new Error("isUserAuthorized timed out after 43200s")), 43200000)
           ),
         ]);
         if (!isAuthorized) {
@@ -401,6 +428,12 @@ class TelegramClientManager {
 
         this.connections.set(connectionKey, connection);
         this.ensureHandlers(connection);
+
+        // Reset DB status to "active" so cleanupInactiveConnections does not kill this
+        // working connection. Without this, if the account went through a slow-retry cycle
+        // (status set to "disconnected" or "error" by scheduleReconnect), the connection
+        // would be destroyed within 60 seconds of successfully reconnecting.
+        storage.updateTelegramAccount(accountId, { status: "active", lastError: null }).catch(() => {});
 
         // Preload only 5 most recent dialogs on connect — old dialogs are loaded lazily on new message
         try {
@@ -488,6 +521,7 @@ class TelegramClientManager {
       client = new TelegramClient(session, apiId, apiHash, {
         connectionRetries: 0,
         autoReconnect: false,
+        floodSleepThreshold: 24 * 60 * 60,
       });
 
       console.log(`[TelegramClientManager] Connecting client for ${connectionKey}...`);
@@ -842,6 +876,60 @@ class TelegramClientManager {
         }
         return;
       }
+    }
+
+    // FLOOD_WAIT — Telegram rate limit. Parse the required wait seconds from the error message
+    // and schedule reconnect for exactly that duration. Never count against MAX_RECONNECT_ATTEMPTS:
+    // FLOOD_WAIT is always transient; the only cure is to wait. Retrying early resets Telegram's
+    // internal countdown and grows the wait exponentially (60s → 5min → 30min → 90min → ...).
+    // Note: with floodSleepThreshold=24h on the client, gramjs handles FLOOD_WAIT ≤24h internally
+    // and never surfaces it here. This path handles edge cases where gramjs still throws
+    // (e.g. during the initial connect() before floodSleepThreshold is applied, or errors from
+    // non-invoke paths).
+    const floodWaitMatch =
+      errorMessage?.match(/FLOOD_WAIT[_\s]+(\d+)/i) ??
+      errorMessage?.match(/A wait of (\d+) seconds? is required/i) ??
+      errorMessage?.match(/seconds\s*[=:]\s*(\d+)/i);
+    if (floodWaitMatch) {
+      const floodWaitSeconds = parseInt(floodWaitMatch[1], 10);
+      const delayMs = (floodWaitSeconds + 10) * 1000; // +10s buffer
+
+      console.warn(
+        `[TelegramClientManager] FLOOD_WAIT ${floodWaitSeconds}s for ${connectionKey}. ` +
+        `Waiting exactly ${floodWaitSeconds + 10}s before retry (NOT counting as reconnect attempt).`
+      );
+
+      if (!connection.accountId.startsWith("legacy_")) {
+        storage.updateTelegramAccount(connection.accountId, {
+          status: "disconnected",
+          lastError: `Telegram rate limit — reconnecting in ${Math.round(delayMs / 1000)}s`,
+        }).catch(() => {});
+      }
+
+      const existingTimer = this.reconnectTimers.get(connectionKey);
+      if (existingTimer) clearTimeout(existingTimer);
+
+      const timer = setTimeout(async () => {
+        this.reconnectTimers.delete(connectionKey);
+        const stale = this.connections.get(connectionKey);
+        if (stale) {
+          try { await stale.client.disconnect(); } catch {}
+          this.connections.delete(connectionKey);
+        }
+        if (connection.accountId.startsWith("legacy_")) {
+          await this.connect(connection.tenantId, connection.channelId!, connection.sessionString);
+        } else {
+          let freshSession = connection.sessionString;
+          try {
+            const account = await storage.getTelegramAccountById(connection.accountId);
+            if (account?.sessionString) freshSession = account.sessionString;
+          } catch {}
+          await this.connectAccount(connection.tenantId, connection.accountId, connection.channelId, freshSession);
+        }
+      }, delayMs);
+
+      this.reconnectTimers.set(connectionKey, timer);
+      return;
     }
 
     // Increment persistent counter (survives across connectAccount calls)
@@ -1255,6 +1343,16 @@ class TelegramClientManager {
     const connectionKey = `${tenantId}:${accountId}`;
     const connection = this.connections.get(connectionKey);
     return connection?.connected || false;
+  }
+
+  /** Returns true if a pending reconnect timer exists for the given connection key. */
+  hasReconnectTimer(connectionKey: string): boolean {
+    return this.reconnectTimers.has(connectionKey);
+  }
+
+  /** Returns true if connectAccount() is currently running for the given connection key. */
+  isConnecting(connectionKey: string): boolean {
+    return this.connectingAccounts.has(connectionKey);
   }
 
   /** Get all connections for a specific tenant */
