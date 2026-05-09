@@ -2828,7 +2828,7 @@ function ChannelSettings() {
 const LEAD_CHANNEL_OPTIONS = [
   { value: "whatsapp_personal", label: "WhatsApp Personal" },
   { value: "telegram",          label: "Telegram Personal" },
-  { value: "max",               label: "VK Teams / MAX" },
+  { value: "max",               label: "VK Teams / MAX Personal" },
 ] as const;
 
 const settingsFormSchema = z.object({
