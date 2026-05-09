@@ -384,6 +384,7 @@ class TelegramClientManager {
           if (connectTimedOut) {
             throw new Error("client.connect() timed out after 30s");
           }
+          console.log(`[TelegramClientManager] TCP connected for ${connectionKey}, calling isUserAuthorized()... (may wait internally for FLOOD_WAIT)`);
         }
 
         // Allow up to 12 hours for isUserAuthorized — gramjs (with floodSleepThreshold=24h)
@@ -398,6 +399,7 @@ class TelegramClientManager {
             setTimeout(() => reject(new Error("isUserAuthorized timed out after 43200s")), 43200000)
           ),
         ]);
+        console.log(`[TelegramClientManager] isUserAuthorized result for ${connectionKey}: ${isAuthorized}`);
         if (!isAuthorized) {
           console.error(`[TelegramClientManager] Session invalid for ${connectionKey}`);
           await storage.updateTelegramAccount(accountId, { status: "error", lastError: "Session invalid" });
