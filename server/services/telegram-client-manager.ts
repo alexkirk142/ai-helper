@@ -393,12 +393,27 @@ class TelegramClientManager {
         // FLOOD_WAIT countdown indefinitely. After many restarts, FLOOD_WAIT can grow to
         // 30–90 minutes. We must let gramjs sit through the entire wait before declaring failure.
         // 12 hours gives comfortable headroom even for extreme IP-level FLOOD_WAITs.
-        const isAuthorized = await Promise.race([
-          client.isUserAuthorized(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("isUserAuthorized timed out after 43200s")), 43200000)
-          ),
-        ]);
+        // Emit a progress log every 2 minutes while isUserAuthorized() is pending.
+        // gramjs (with floodSleepThreshold=24h) waits internally through FLOOD_WAIT without
+        // throwing — the call can legitimately take 30–90 minutes after heavy restart churn.
+        // The periodic log proves the process is alive and shows elapsed wait time.
+        const waitStartedAt = Date.now();
+        const waitPingInterval = setInterval(() => {
+          const elapsedMin = Math.round((Date.now() - waitStartedAt) / 60000);
+          console.log(`[TelegramClientManager] Still waiting for isUserAuthorized() for ${connectionKey} (${elapsedMin} min elapsed) — gramjs is sleeping through FLOOD_WAIT, do NOT restart`);
+        }, 2 * 60 * 1000);
+
+        let isAuthorized: boolean;
+        try {
+          isAuthorized = await Promise.race([
+            client.isUserAuthorized(),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("isUserAuthorized timed out after 43200s")), 43200000)
+            ),
+          ]);
+        } finally {
+          clearInterval(waitPingInterval);
+        }
         console.log(`[TelegramClientManager] isUserAuthorized result for ${connectionKey}: ${isAuthorized}`);
         if (!isAuthorized) {
           console.error(`[TelegramClientManager] Session invalid for ${connectionKey}`);
