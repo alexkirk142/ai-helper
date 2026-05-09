@@ -2825,6 +2825,12 @@ function ChannelSettings() {
   );
 }
 
+const LEAD_CHANNEL_OPTIONS = [
+  { value: "whatsapp_personal", label: "WhatsApp Personal" },
+  { value: "telegram",          label: "Telegram Personal" },
+  { value: "max",               label: "VK Teams / MAX" },
+] as const;
+
 const settingsFormSchema = z.object({
   name: z.string().min(1, "Название бизнеса обязательно"),
   language: z.string(),
@@ -2841,6 +2847,7 @@ const settingsFormSchema = z.object({
   escalationChatId: z.string().optional(),
   allowDiscounts: z.boolean(),
   maxDiscountPercent: z.coerce.number().min(0).max(100),
+  leadChannelPriority: z.array(z.string()).optional(),
 });
 
 type SettingsFormValues = z.infer<typeof settingsFormSchema>;
@@ -4214,6 +4221,7 @@ export default function Settings() {
       escalationChatId: "",
       allowDiscounts: false,
       maxDiscountPercent: 0,
+      leadChannelPriority: ["max", "telegram", "whatsapp_personal"],
     },
     values: tenant
       ? {
@@ -4232,6 +4240,9 @@ export default function Settings() {
           escalationChatId: (tenant as any).escalationChatId || "",
           allowDiscounts: tenant.allowDiscounts ?? false,
           maxDiscountPercent: tenant.maxDiscountPercent || 0,
+          leadChannelPriority: (tenant as any).leadChannelPriority?.length
+            ? (tenant as any).leadChannelPriority
+            : ["max", "telegram", "whatsapp_personal"],
         }
       : undefined,
   });
@@ -4256,6 +4267,7 @@ export default function Settings() {
       escalationEmail: data.escalationEmail?.trim() || null,
       escalationTelegram: (data as any).escalationTelegram?.trim() || null,
       escalationChatId: (data as any).escalationChatId?.trim() || null,
+      leadChannelPriority: data.leadChannelPriority?.length ? data.leadChannelPriority : null,
     };
     updateMutation.mutate(cleaned as SettingsFormValues);
   };
@@ -4590,12 +4602,8 @@ export default function Settings() {
                 </Card>
 
                 <AIAgentSettingsCard />
-              </div>}
-            </TabsContent>
 
-            {/* Tab 3: Автоматизация */}
-            <TabsContent value="automation">
-              {!hasAiAccess ? <AiSubscriptionRequired /> : <div className="space-y-6">
+                {/* Скидки */}
                 <Card>
                   <CardHeader>
                     <CardTitle>Скидки</CardTitle>
@@ -4649,7 +4657,91 @@ export default function Settings() {
                         )}
                       />
                     )}
+                    <div className="flex justify-end pt-2">
+                      <Button
+                        type="submit"
+                        disabled={updateMutation.isPending}
+                        data-testid="button-save-ai-discounts"
+                      >
+                        <Save className="mr-2 h-4 w-4" />
+                        Сохранить
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
 
+                <DecisionEngineSettings autoPartsEnabled={autoPartsEnabled} />
+                <HumanDelaySettings />
+              </div>}
+            </TabsContent>
+
+            {/* Tab 3: Автоматизация */}
+            <TabsContent value="automation">
+              <div className="space-y-6">
+                {/* Channel priority for Marquiz lead auto-send */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Приоритет каналов для авторассылки</CardTitle>
+                    <CardDescription>
+                      При получении заявки из Marquiz система отправит сообщение через каналы в указанном порядке.
+                      Первый успешный канал используется — остальные не задействуются.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <FormField
+                      control={form.control}
+                      name="leadChannelPriority"
+                      render={({ field }) => {
+                        const order: string[] = field.value ?? ["max", "telegram", "whatsapp_personal"];
+                        const move = (idx: number, dir: -1 | 1) => {
+                          const next = [...order];
+                          const swap = idx + dir;
+                          if (swap < 0 || swap >= next.length) return;
+                          [next[idx], next[swap]] = [next[swap], next[idx]];
+                          field.onChange(next);
+                        };
+                        return (
+                          <FormItem>
+                            <div className="space-y-2">
+                              {order.map((ch, idx) => {
+                                const opt = LEAD_CHANNEL_OPTIONS.find(o => o.value === ch);
+                                return (
+                                  <div key={ch} className="flex items-center gap-3 rounded-md border bg-card px-4 py-3">
+                                    <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
+                                    <span className="flex-1 text-sm font-medium">{opt?.label ?? ch}</span>
+                                    <span className="text-xs text-muted-foreground mr-2">#{idx + 1}</span>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7"
+                                      disabled={idx === 0}
+                                      onClick={() => move(idx, -1)}
+                                    >
+                                      <ChevronUp className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7"
+                                      disabled={idx === order.length - 1}
+                                      onClick={() => move(idx, 1)}
+                                    >
+                                      <ChevronDown className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <FormDescription className="pt-1">
+                              Перемещайте каналы стрелками для изменения порядка. WhatsApp Personal требует активного подключённого аккаунта.
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        );
+                      }}
+                    />
                     <div className="flex justify-end pt-2">
                       <Button
                         type="submit"
@@ -4663,6 +4755,7 @@ export default function Settings() {
                   </CardContent>
                 </Card>
 
+                {/* Escalation bot chat ID */}
                 <Card>
                   <CardHeader>
                     <CardTitle>Бот эскалаций — выжимка диалога</CardTitle>
@@ -4705,10 +4798,7 @@ export default function Settings() {
                     </div>
                   </CardContent>
                 </Card>
-
-                <DecisionEngineSettings autoPartsEnabled={autoPartsEnabled} />
-                <HumanDelaySettings />
-              </div>}
+              </div>
             </TabsContent>
 
             {/* Tab 4: Обучение AI */}

@@ -8,6 +8,7 @@ import type { MarquizLeadJobData } from "../services/marquiz-lead-queue";
 import { MaxPersonalAdapter } from "../services/max-personal-adapter";
 import { maxStatusKey } from "../routes/max-personal-webhook";
 import { telegramClientManager } from "../services/telegram-client-manager";
+import { WhatsAppPersonalAdapter } from "../services/whatsapp-personal-adapter";
 import { storage } from "../storage";
 import type { Tenant } from "../../shared/schema";
 import { notifyFailedLead } from "../services/escalation-bot";
@@ -464,6 +465,70 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     return { success: true };
   };
 
+  // Helper: send via WhatsApp Personal
+  const sendViaWhatsAppPersonal = async (): Promise<{ success: boolean; error?: string }> => {
+    if (!hasPhone) return { success: false, error: "No valid phone" };
+
+    if (!WhatsAppPersonalAdapter.isConnected(tenantId)) {
+      return { success: false, error: "WhatsApp Personal not connected" };
+    }
+
+    const waPhone = normalizePhone(data.phone);
+    const jid = `${waPhone}@s.whatsapp.net`;
+
+    const waAdapter = new WhatsAppPersonalAdapter(tenantId);
+    const result = await waAdapter.sendMessage(jid, text);
+
+    if (!result.success) {
+      return { success: false, error: result.error };
+    }
+
+    let customer = await storage.getCustomerByExternalId(tenantId, "whatsapp_personal", jid);
+    if (!customer) {
+      customer = await storage.createCustomer(
+        { tenantId, channel: "whatsapp_personal", externalId: jid, phone,
+          name: data.clientName || null, metadata: commonMeta },
+        tenantId,
+      );
+    }
+
+    const conversation = await storage.createConversation(
+      { tenantId, customerId: customer.id, status: "active", mode: "learning" }, tenantId,
+    );
+
+    await storage.createMessage(
+      { conversationId: conversation.id, role: "assistant", content: text,
+        metadata: { source: "marquiz_autoresponse", channel: "whatsapp_personal", externalMessageId: result.externalMessageId ?? null } },
+      tenantId,
+    );
+
+    console.log(`[MarquizWorker] Done via WhatsApp Personal — jid=${jid}`);
+    await scheduleNoReplyCheck({
+      conversationId: conversation.id,
+      tenantId,
+      channel: "whatsapp_personal",
+      clientName: data.clientName || null,
+      phone: phone || null,
+      leadInfo: {
+        quizName: data.quizName || null,
+        carInfo: data.carInfo || null,
+        vin: data.vin || null,
+        city: data.city || null,
+        gearboxType: data.gearboxType || null,
+        engineType: data.engineType || null,
+        engineVolume: data.engineVolume || null,
+        engineModel: data.engineModel || null,
+        tireSeason: data.tireSeason || null,
+        tireMethod: data.tireMethod || null,
+        tireWidth: data.tireWidth || null,
+        tireHeight: data.tireHeight || null,
+        tireDiameter: data.tireDiameter || null,
+      },
+    });
+
+    return { success: true };
+  };
+
   // ══════════════════════════════════════════════════════════════════════════
   // ROUTING
   // ══════════════════════════════════════════════════════════════════════════
@@ -501,30 +566,54 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     return;
   }
 
-  // ── AUTO: MAX first, Telegram fallback ────────────────────────────────────
-  // No channel preference — try MAX first, then Telegram if MAX fails.
+  // ── STRICT: client chose WhatsApp Personal ────────────────────────────────
+  if (preferred === "whatsapp") {
+    const r = await sendViaWhatsAppPersonal();
+    if (r.success) return;
+    console.warn(`[MarquizWorker] Client chose WhatsApp but send failed (${r.error}) — saving as failed lead`);
+    await saveFailedLead(data, tenantId, phone, commonMeta, "whatsapp_send_failed", tenant);
+    return;
+  }
+
+  // ── AUTO: priority-based routing ─────────────────────────────────────────
+  // No channel preference — use tenant's leadChannelPriority if set,
+  // otherwise fall back to legacy order: MAX → Telegram.
   if (!hasPhone && !data.telegramUsername) {
     console.warn(`[MarquizWorker] No contact info — saving as failed lead`);
     await saveFailedLead(data, tenantId, phone, commonMeta, "no_contact_info", tenant);
     return;
   }
 
-  if (hasPhone) {
-    const r = await sendViaMAX();
-    if (r.success) return;
-    console.warn(`[MarquizWorker] MAX failed (${r.error}), trying Telegram fallback`);
-  }
+  const channelOrder: string[] =
+    (tenant as any).leadChannelPriority?.length
+      ? (tenant as any).leadChannelPriority
+      : ["max", "telegram"];
 
-  // Telegram fallback
-  if (data.telegramUsername) {
-    const r = await sendViaTelegramByUsername();
-    if (r.success) return;
-    console.warn(`[MarquizWorker] Telegram username fallback failed (${r.error})`);
-  }
-  if (hasPhone) {
-    const r = await sendViaTelegramByPhone();
-    if (r.success) return;
-    console.warn(`[MarquizWorker] Telegram phone fallback failed (${r.error})`);
+  console.log(`[MarquizWorker] Auto routing, channel order: ${channelOrder.join(" → ")}`);
+
+  for (const ch of channelOrder) {
+    if (ch === "whatsapp_personal") {
+      const r = await sendViaWhatsAppPersonal();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] WhatsApp Personal failed (${r.error}), trying next channel`);
+    } else if (ch === "telegram") {
+      if (data.telegramUsername) {
+        const r = await sendViaTelegramByUsername();
+        if (r.success) return;
+        console.warn(`[MarquizWorker] Telegram username failed (${r.error}), trying phone`);
+      }
+      if (hasPhone) {
+        const r = await sendViaTelegramByPhone();
+        if (r.success) return;
+        console.warn(`[MarquizWorker] Telegram phone failed (${r.error}), trying next channel`);
+      }
+    } else if (ch === "max") {
+      if (hasPhone) {
+        const r = await sendViaMAX();
+        if (r.success) return;
+        console.warn(`[MarquizWorker] MAX failed (${r.error}), trying next channel`);
+      }
+    }
   }
 
   console.warn(`[MarquizWorker] All channels failed — saving as failed lead`);

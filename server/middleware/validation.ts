@@ -94,6 +94,7 @@ export const patchTenantSchema = z.object({
   allowDiscounts: z.boolean().optional(),
   maxDiscountPercent: z.number().int().min(0).max(100).optional(),
   templates: z.record(z.string()).optional(),
+  leadChannelPriority: z.array(z.enum(["whatsapp_personal", "telegram", "max"])).max(3).nullable().optional(),
 });
 
 // Knowledge doc validation

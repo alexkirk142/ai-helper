@@ -243,7 +243,11 @@ app.use((req, res, next) => {
           ALTER TABLE tenants
             ADD COLUMN IF NOT EXISTS escalation_chat_id TEXT;
         `);
-        log("DB column check: auto_reply_enabled + tg_role + template flags + escalation_chat_id OK", "startup");
+        await pool.query(`
+          ALTER TABLE tenants
+            ADD COLUMN IF NOT EXISTS lead_channel_priority TEXT[];
+        `);
+        log("DB column check: auto_reply_enabled + tg_role + template flags + escalation_chat_id + lead_channel_priority OK", "startup");
       } catch (err: any) {
         log(`DB column migration warning: ${err.message}`, "startup");
       }

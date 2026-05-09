@@ -92,6 +92,10 @@ export const tenants = pgTable("tenants", {
   templateTiresEnabled: boolean("template_tires_enabled").notNull().default(true),
   // Telegram escalation bot: chat ID where conversation summaries are sent
   escalationChatId: text("escalation_chat_id"),
+  // Ordered list of channels for Marquiz lead auto-send routing.
+  // e.g. ["whatsapp_personal", "telegram", "max"] — tried in order, first success wins.
+  // Defaults to null (legacy hardcoded behaviour: MAX → Telegram).
+  leadChannelPriority: text("lead_channel_priority").array(),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
