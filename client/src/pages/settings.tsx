@@ -896,28 +896,16 @@ function TelegramBotCard({
         <CardTitle className="flex items-center gap-2">
           <Bot className="h-5 w-5" />
           Telegram Bot
-          {telegramStatus?.connected ? (
-            <Badge variant="outline" className="bg-green-500/10 text-green-600">
-              <CheckCircle2 className="mr-1 h-3 w-3" />
-              Подключен
-            </Badge>
-          ) : telegramEnabled ? (
-            <Badge variant="outline" className="bg-yellow-500/10 text-yellow-600">
-              <AlertCircle className="mr-1 h-3 w-3" />
-              Не настроен
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="bg-muted text-muted-foreground">
-              <XCircle className="mr-1 h-3 w-3" />
-              Отключен
-            </Badge>
-          )}
+          <Badge variant="outline" className="bg-orange-500/10 text-orange-600 border-orange-200">
+            <Clock className="mr-1 h-3 w-3" />
+            В разработке
+          </Badge>
         </CardTitle>
         <CardDescription>
           Подключите Telegram бота для автоматических ответов клиентам
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-4 opacity-50 pointer-events-none">
         <div className="flex items-center justify-between rounded-md border p-4">
           <div>
             <Label>Включить Telegram Bot</Label>
@@ -926,9 +914,8 @@ function TelegramBotCard({
             </p>
           </div>
           <Switch
-            checked={telegramEnabled}
-            onCheckedChange={(checked) => toggleChannelMutation.mutate({ channel: "telegram", enabled: checked })}
-            disabled={toggleChannelMutation.isPending}
+            checked={false}
+            disabled
             data-testid="switch-telegram-bot-enabled"
           />
         </div>
@@ -1646,28 +1633,16 @@ function WhatsAppCard({
         <CardTitle className="flex items-center gap-2">
           <MessageSquare className="h-5 w-5" />
           WhatsApp Business
-          {whatsappStatus?.connected ? (
-            <Badge variant="outline" className="bg-green-500/10 text-green-600">
-              <CheckCircle2 className="mr-1 h-3 w-3" />
-              Подключен
-            </Badge>
-          ) : whatsappEnabled ? (
-            <Badge variant="outline" className="bg-yellow-500/10 text-yellow-600">
-              <AlertCircle className="mr-1 h-3 w-3" />
-              Не настроен
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="bg-muted text-muted-foreground">
-              <XCircle className="mr-1 h-3 w-3" />
-              Отключен
-            </Badge>
-          )}
+          <Badge variant="outline" className="bg-orange-500/10 text-orange-600 border-orange-200">
+            <Clock className="mr-1 h-3 w-3" />
+            В разработке
+          </Badge>
         </CardTitle>
         <CardDescription>
           Интеграция с WhatsApp Business API для приема и отправки сообщений
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-4 opacity-50 pointer-events-none">
         <div className="flex items-center justify-between rounded-md border p-4">
           <div>
             <Label>Включить WhatsApp Business</Label>
@@ -1676,9 +1651,8 @@ function WhatsAppCard({
             </p>
           </div>
           <Switch
-            checked={whatsappEnabled}
-            onCheckedChange={(checked) => toggleChannelMutation.mutate({ channel: "whatsapp", enabled: checked })}
-            disabled={toggleChannelMutation.isPending}
+            checked={false}
+            disabled
             data-testid="switch-whatsapp-enabled"
           />
         </div>
@@ -2683,28 +2657,16 @@ function ChannelSettings() {
               <CardTitle className="flex items-center gap-2">
                 <Link2 className="h-5 w-5" />
                 MAX Messenger
-            {maxStatus?.connected ? (
-              <Badge variant="outline" className="bg-green-500/10 text-green-600">
-                <CheckCircle2 className="mr-1 h-3 w-3" />
-                Подключен
-              </Badge>
-            ) : maxEnabled ? (
-              <Badge variant="outline" className="bg-yellow-500/10 text-yellow-600">
-                <AlertCircle className="mr-1 h-3 w-3" />
-                Не настроен
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="bg-muted text-muted-foreground">
-                <XCircle className="mr-1 h-3 w-3" />
-                Отключен
-              </Badge>
-            )}
+                <Badge variant="outline" className="bg-orange-500/10 text-orange-600 border-orange-200">
+                  <Clock className="mr-1 h-3 w-3" />
+                  В разработке
+                </Badge>
           </CardTitle>
           <CardDescription>
             Интеграция с MAX (VK Teams) для приема и отправки сообщений
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 opacity-50 pointer-events-none">
           <div className="flex items-center justify-between rounded-md border p-4">
             <div>
               <Label>Включить канал MAX</Label>
@@ -2713,9 +2675,8 @@ function ChannelSettings() {
               </p>
             </div>
             <Switch
-              checked={maxEnabled}
-              onCheckedChange={(checked) => toggleChannelMutation.mutate({ channel: "max", enabled: checked })}
-              disabled={toggleChannelMutation.isPending}
+              checked={false}
+              disabled
               data-testid="switch-max-enabled"
             />
           </div>
