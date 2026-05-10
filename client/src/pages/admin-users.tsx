@@ -45,6 +45,8 @@ interface UserDetail extends UserListItem {
   subscriptionStatus?: string;
   trialEndsAt?: string | null;
   grantEndsAt?: string | null;
+  aiSubscriptionStatus?: string | null;
+  aiGrantEndsAt?: string | null;
 }
 
 interface AuditLogEntry {
@@ -76,6 +78,8 @@ export default function AdminUsers() {
   const [actionReason, setActionReason] = useState("");
   const [subscriptionDialog, setSubscriptionDialog] = useState(false);
   const [grantDuration, setGrantDuration] = useState("30");
+  const [aiSubscriptionDialog, setAiSubscriptionDialog] = useState(false);
+  const [aiGrantDuration, setAiGrantDuration] = useState("30");
 
   const { data: usersData, isLoading: usersLoading, refetch: refetchUsers } = useQuery<{ users: UserListItem[]; total: number }>({
     queryKey: ["/api/admin/users", { q: searchQuery }],
@@ -176,13 +180,32 @@ export default function AdminUsers() {
       return res.json();
     },
     onSuccess: () => {
-      toast({ title: "Подписка продлена" });
+      toast({ title: "Подписка на каналы выдана" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
       if (selectedUser?.id) {
         queryClient.invalidateQueries({ queryKey: ["/api/admin/users", selectedUser.id, "detail"] });
       }
       setSubscriptionDialog(false);
       setGrantDuration("30");
+      setActionReason("");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Ошибка", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const aiGrantMutation = useMutation({
+    mutationFn: async ({ tenantId, days, reason }: { tenantId: string; days: number; reason: string }) => {
+      const res = await apiRequest("POST", `/api/admin/tenants/${tenantId}/ai-grant`, { days, reason });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "AI Agent подписка выдана" });
+      if (selectedUser?.id) {
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/users", selectedUser.id, "detail"] });
+      }
+      setAiSubscriptionDialog(false);
+      setAiGrantDuration("30");
       setActionReason("");
     },
     onError: (error: Error) => {
@@ -695,47 +718,88 @@ export default function AdminUsers() {
 
                     <TabsContent value="subscription" className="mt-4">
                       <div className="space-y-4">
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          <Card>
-                            <CardHeader className="pb-2">
-                              <CardTitle className="text-sm font-medium">Статус подписки</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                              <Badge variant={userDetail?.subscriptionStatus === "active" ? "default" : "secondary"}>
-                                {userDetail?.subscriptionStatus || "Нет подписки"}
-                              </Badge>
-                            </CardContent>
-                          </Card>
-                          {userDetail?.trialEndsAt && (
+
+                        {/* ── Channels subscription ── */}
+                        <div className="space-y-3">
+                          <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Каналы (чаты)</p>
+                          <div className="grid gap-3 sm:grid-cols-2">
                             <Card>
                               <CardHeader className="pb-2">
-                                <CardTitle className="text-sm font-medium">Пробный период</CardTitle>
+                                <CardTitle className="text-sm font-medium">Статус подписки</CardTitle>
                               </CardHeader>
                               <CardContent>
-                                <p className="text-sm">До: {formatDate(userDetail.trialEndsAt)}</p>
+                                <Badge variant={userDetail?.subscriptionStatus === "active" ? "default" : "secondary"}>
+                                  {userDetail?.subscriptionStatus || "Нет подписки"}
+                                </Badge>
                               </CardContent>
                             </Card>
-                          )}
-                          {userDetail?.grantEndsAt && (
-                            <Card className="border-green-500/50">
-                              <CardHeader className="pb-2">
-                                <CardTitle className="text-sm font-medium text-green-600 dark:text-green-400">Активный грант</CardTitle>
-                              </CardHeader>
-                              <CardContent>
-                                <p className="text-sm">До: {formatDate(userDetail.grantEndsAt)}</p>
-                              </CardContent>
-                            </Card>
-                          )}
+                            {userDetail?.trialEndsAt && (
+                              <Card>
+                                <CardHeader className="pb-2">
+                                  <CardTitle className="text-sm font-medium">Пробный период</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  <p className="text-sm">До: {formatDate(userDetail.trialEndsAt)}</p>
+                                </CardContent>
+                              </Card>
+                            )}
+                            {userDetail?.grantEndsAt && (
+                              <Card className="border-green-500/50">
+                                <CardHeader className="pb-2">
+                                  <CardTitle className="text-sm font-medium text-green-600 dark:text-green-400">Активный грант</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  <p className="text-sm">До: {formatDate(userDetail.grantEndsAt)}</p>
+                                </CardContent>
+                              </Card>
+                            )}
+                          </div>
+                          <Button
+                            variant="outline"
+                            onClick={() => setSubscriptionDialog(true)}
+                            disabled={!selectedUser.tenantId}
+                            data-testid="button-manage-subscription"
+                          >
+                            <Plus className="h-4 w-4 mr-2" />
+                            Выдать доступ к каналам
+                          </Button>
                         </div>
-                        <Button 
-                          variant="outline" 
-                          onClick={() => setSubscriptionDialog(true)}
-                          disabled={!selectedUser.tenantId}
-                          data-testid="button-manage-subscription"
-                        >
-                          <Plus className="h-4 w-4 mr-2" />
-                          Продлить подписку
-                        </Button>
+
+                        {/* ── AI Agent subscription ── */}
+                        <div className="space-y-3 pt-3 border-t">
+                          <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">AI Агент</p>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <Card>
+                              <CardHeader className="pb-2">
+                                <CardTitle className="text-sm font-medium">Статус AI подписки</CardTitle>
+                              </CardHeader>
+                              <CardContent>
+                                <Badge variant={userDetail?.aiSubscriptionStatus === "active" ? "default" : "secondary"}>
+                                  {userDetail?.aiSubscriptionStatus || "Не активна"}
+                                </Badge>
+                              </CardContent>
+                            </Card>
+                            {userDetail?.aiGrantEndsAt && (
+                              <Card className="border-blue-500/50">
+                                <CardHeader className="pb-2">
+                                  <CardTitle className="text-sm font-medium text-blue-600 dark:text-blue-400">Активный AI грант</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  <p className="text-sm">До: {formatDate(userDetail.aiGrantEndsAt)}</p>
+                                </CardContent>
+                              </Card>
+                            )}
+                          </div>
+                          <Button
+                            variant="outline"
+                            onClick={() => setAiSubscriptionDialog(true)}
+                            disabled={!selectedUser.tenantId}
+                            data-testid="button-grant-ai-subscription"
+                          >
+                            <Plus className="h-4 w-4 mr-2" />
+                            Выдать AI Agent подписку
+                          </Button>
+                        </div>
 
                         {selectedUser.tenantId && (
                           <Card>
@@ -1145,14 +1209,14 @@ export default function AdminUsers() {
       <Dialog open={subscriptionDialog} onOpenChange={() => { setSubscriptionDialog(false); setActionReason(""); setGrantDuration("30"); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Продлить подписку</DialogTitle>
+            <DialogTitle>Выдать доступ к каналам</DialogTitle>
             <DialogDescription>
-              Выберите период продления для {selectedUser?.username}
+              Выберите период для {selectedUser?.username}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Период продления</Label>
+              <Label>Период</Label>
               <Select value={grantDuration} onValueChange={setGrantDuration}>
                 <SelectTrigger data-testid="select-grant-duration">
                   <SelectValue placeholder="Выберите период" />
@@ -1188,7 +1252,7 @@ export default function AdminUsers() {
                   grantMutation.mutate({
                     tenantId: selectedUser.tenantId,
                     days: parseInt(grantDuration),
-                    reason: actionReason || `Продление на ${grantDuration} дней`,
+                    reason: actionReason || `Доступ к каналам на ${grantDuration} дней`,
                   });
                 }
               }}
@@ -1196,7 +1260,67 @@ export default function AdminUsers() {
               data-testid="button-confirm-grant"
             >
               {grantMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Продлить
+              Выдать
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={aiSubscriptionDialog} onOpenChange={() => { setAiSubscriptionDialog(false); setActionReason(""); setAiGrantDuration("30"); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Выдать AI Agent подписку</DialogTitle>
+            <DialogDescription>
+              Выберите период AI Agent подписки для {selectedUser?.username}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Период</Label>
+              <Select value={aiGrantDuration} onValueChange={setAiGrantDuration}>
+                <SelectTrigger data-testid="select-ai-grant-duration">
+                  <SelectValue placeholder="Выберите период" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="7">7 дней</SelectItem>
+                  <SelectItem value="14">14 дней</SelectItem>
+                  <SelectItem value="30">30 дней (1 месяц)</SelectItem>
+                  <SelectItem value="90">90 дней (3 месяца)</SelectItem>
+                  <SelectItem value="180">180 дней (6 месяцев)</SelectItem>
+                  <SelectItem value="365">365 дней (1 год)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Причина (необязательно)</Label>
+              <Textarea
+                placeholder="Например: тестирование, промо, партнёр..."
+                value={actionReason}
+                onChange={(e) => setActionReason(e.target.value)}
+                className="min-h-[60px]"
+                data-testid="input-ai-grant-reason"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setAiSubscriptionDialog(false); setActionReason(""); setAiGrantDuration("30"); }}>
+              Отмена
+            </Button>
+            <Button
+              onClick={() => {
+                if (selectedUser?.tenantId) {
+                  aiGrantMutation.mutate({
+                    tenantId: selectedUser.tenantId,
+                    days: parseInt(aiGrantDuration),
+                    reason: actionReason || `AI Agent подписка на ${aiGrantDuration} дней`,
+                  });
+                }
+              }}
+              disabled={!selectedUser?.tenantId || aiGrantMutation.isPending}
+              data-testid="button-confirm-ai-grant"
+            >
+              {aiGrantMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Выдать
             </Button>
           </DialogFooter>
         </DialogContent>

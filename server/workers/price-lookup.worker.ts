@@ -1226,6 +1226,13 @@ const OEM_PART_NUMBER_RE = /\d-|-\d/;
 async function processPriceLookup(job: Job<PriceLookupJobData>): Promise<void> {
   const { tenantId, conversationId, oem, oemModelHint, vehicleContext, searchFallback, isModelOnly } = job.data;
 
+  const { featureFlagService } = await import("../services/feature-flags");
+  const autoPartsEnabled = await featureFlagService.isEnabled("AUTO_PARTS_ENABLED", tenantId);
+  if (!autoPartsEnabled) {
+    console.log(`[PriceLookupWorker] Tenant ${tenantId} — AUTO_PARTS_ENABLED=false, skipping`);
+    return;
+  }
+
   // ── Normalize legacy "oem" field ──────────────────────────────────────────
   // If the caller did not populate the explicit fields, derive them from the
   // legacy `oem` value so the rest of the worker can use a single source of

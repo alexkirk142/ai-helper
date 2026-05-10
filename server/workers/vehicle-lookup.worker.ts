@@ -234,6 +234,13 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
 
   console.log(`[VehicleLookupWorker] Processing job: ${job.id}, caseId: ${caseId}`);
 
+  const { featureFlagService } = await import("../services/feature-flags");
+  const autoPartsEnabled = await featureFlagService.isEnabled("AUTO_PARTS_ENABLED", tenantId);
+  if (!autoPartsEnabled) {
+    console.log(`[VehicleLookupWorker] Tenant ${tenantId} — AUTO_PARTS_ENABLED=false, skipping`);
+    return;
+  }
+
   const caseRow = await storage.getVehicleLookupCaseById(caseId, tenantId);
   if (!caseRow) {
     throw new Error(`Case not found: ${caseId}`);

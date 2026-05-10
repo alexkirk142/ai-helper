@@ -757,6 +757,137 @@ router.delete(
 );
 
 // ============================================
+// AI AGENT SUBSCRIPTION GRANTS
+// ============================================
+
+// Grant AI Agent subscription for N days
+router.post(
+  "/tenants/:tenantId/ai-grant",
+  requireAuth,
+  requirePlatformAdmin(),
+  auditAdminAction("admin_ai_grant_create"),
+  async (req, res) => {
+    const { tenantId } = req.params;
+    const parsed = simpleGrantSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "Invalid request",
+        details: parsed.error.errors,
+      });
+    }
+
+    const [tenant] = await db
+      .select()
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .limit(1);
+
+    if (!tenant) {
+      return res.status(404).json({ error: "Tenant not found" });
+    }
+
+    const adminId = (req as any).user?.id;
+    if (!adminId) {
+      return res.status(403).json({ error: "Authentication required" });
+    }
+
+    const startsAt = new Date();
+    const endsAt = new Date();
+    endsAt.setDate(endsAt.getDate() + parsed.data.days);
+
+    const [grant] = await db
+      .insert(subscriptionGrants)
+      .values({
+        tenantId,
+        feature: "ai_agent",
+        startsAt,
+        endsAt,
+        grantedByUserId: adminId,
+        reason: parsed.data.reason,
+      })
+      .returning();
+
+    await db.insert(adminActions).values({
+      actionType: "admin_ai_grant_create",
+      targetType: "grant",
+      targetId: grant.id,
+      adminId,
+      reason: parsed.data.reason,
+      previousState: null,
+      metadata: {
+        tenantId,
+        feature: "ai_agent",
+        days: parsed.data.days,
+        startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      grant: {
+        id: grant.id,
+        tenantId: grant.tenantId,
+        feature: grant.feature,
+        startsAt: grant.startsAt,
+        endsAt: grant.endsAt,
+        reason: grant.reason,
+        createdAt: grant.createdAt,
+      },
+    });
+  }
+);
+
+// List active AI Agent grants for a tenant
+router.get(
+  "/tenants/:tenantId/ai-grants",
+  requireAuth,
+  requirePlatformAdmin(),
+  auditAdminAction("admin_ai_grants_list"),
+  async (req, res) => {
+    const { tenantId } = req.params;
+
+    const [tenant] = await db
+      .select()
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .limit(1);
+
+    if (!tenant) {
+      return res.status(404).json({ error: "Tenant not found" });
+    }
+
+    const grants = await db
+      .select({
+        id: subscriptionGrants.id,
+        tenantId: subscriptionGrants.tenantId,
+        feature: subscriptionGrants.feature,
+        startsAt: subscriptionGrants.startsAt,
+        endsAt: subscriptionGrants.endsAt,
+        reason: subscriptionGrants.reason,
+        grantedByUserId: subscriptionGrants.grantedByUserId,
+        revokedAt: subscriptionGrants.revokedAt,
+        revokedReason: subscriptionGrants.revokedReason,
+        createdAt: subscriptionGrants.createdAt,
+      })
+      .from(subscriptionGrants)
+      .where(
+        and(
+          eq(subscriptionGrants.tenantId, tenantId),
+          eq(subscriptionGrants.feature, "ai_agent")
+        )
+      )
+      .orderBy(desc(subscriptionGrants.createdAt))
+      .limit(50);
+
+    const active = grants.filter((g) => !g.revokedAt);
+
+    res.json({ grants: active, count: active.length });
+  }
+);
+
+// ============================================
 // INTEGRATION SECRETS MANAGEMENT
 // ============================================
 
@@ -1193,6 +1324,8 @@ router.get(
     let subscriptionStatus: string | null = null;
     let trialEndsAt: Date | null = null;
     let grantEndsAt: Date | null = null;
+    let aiSubscriptionStatus: string | null = null;
+    let aiGrantEndsAt: Date | null = null;
 
     if (user.tenantId) {
       const [tenant] = await db
@@ -1202,25 +1335,36 @@ router.get(
         .limit(1);
       tenantName = tenant?.name || null;
 
+      // Channels subscription
       const [sub] = await db
         .select({
           status: subscriptions.status,
           trialEndsAt: subscriptions.trialEndsAt,
         })
         .from(subscriptions)
-        .where(eq(subscriptions.tenantId, user.tenantId))
+        .where(and(eq(subscriptions.tenantId, user.tenantId), eq(subscriptions.feature, "channels")))
         .limit(1);
       subscriptionStatus = sub?.status || null;
       trialEndsAt = sub?.trialEndsAt || null;
 
-      // Check for active grants
+      // AI Agent subscription
+      const [aiSub] = await db
+        .select({ status: subscriptions.status })
+        .from(subscriptions)
+        .where(and(eq(subscriptions.tenantId, user.tenantId), eq(subscriptions.feature, "ai_agent")))
+        .limit(1);
+      aiSubscriptionStatus = aiSub?.status || null;
+
       const now = new Date();
+
+      // Active channels grants
       const [activeGrant] = await db
         .select({ endsAt: subscriptionGrants.endsAt })
         .from(subscriptionGrants)
         .where(
           and(
             eq(subscriptionGrants.tenantId, user.tenantId),
+            eq(subscriptionGrants.feature, "channels"),
             isNull(subscriptionGrants.revokedAt),
             sql`${subscriptionGrants.startsAt} <= ${now}`,
             sql`${subscriptionGrants.endsAt} > ${now}`
@@ -1232,6 +1376,27 @@ router.get(
       if (activeGrant) {
         subscriptionStatus = "active";
         grantEndsAt = activeGrant.endsAt;
+      }
+
+      // Active AI Agent grants
+      const [activeAiGrant] = await db
+        .select({ endsAt: subscriptionGrants.endsAt })
+        .from(subscriptionGrants)
+        .where(
+          and(
+            eq(subscriptionGrants.tenantId, user.tenantId),
+            eq(subscriptionGrants.feature, "ai_agent"),
+            isNull(subscriptionGrants.revokedAt),
+            sql`${subscriptionGrants.startsAt} <= ${now}`,
+            sql`${subscriptionGrants.endsAt} > ${now}`
+          )
+        )
+        .orderBy(desc(subscriptionGrants.endsAt))
+        .limit(1);
+
+      if (activeAiGrant) {
+        aiSubscriptionStatus = "active";
+        aiGrantEndsAt = activeAiGrant.endsAt;
       }
     }
 
@@ -1256,6 +1421,8 @@ router.get(
       subscriptionStatus,
       trialEndsAt,
       grantEndsAt,
+      aiSubscriptionStatus,
+      aiGrantEndsAt,
     });
   }
 );

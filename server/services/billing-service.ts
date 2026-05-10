@@ -3,6 +3,7 @@ import { db } from "../db";
 import { plans, subscriptions, tenants, subscriptionGrants } from "@shared/schema";
 import type { Plan, Subscription, SubscriptionStatus, BillingStatus } from "@shared/schema";
 import { eq, and, lte, gte, isNull } from "drizzle-orm";
+import type { PlanFeatureType } from "@shared/schema";
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 
@@ -273,7 +274,7 @@ export async function getPlanById(planId: string): Promise<Plan | null> {
   return plan || null;
 }
 
-export async function hasActiveGrant(tenantId: string): Promise<{ hasGrant: boolean; grantEndsAt: Date | null }> {
+export async function hasActiveGrant(tenantId: string, feature: PlanFeatureType = "channels"): Promise<{ hasGrant: boolean; grantEndsAt: Date | null }> {
   const now = new Date();
   const [grant] = await db
     .select()
@@ -281,6 +282,7 @@ export async function hasActiveGrant(tenantId: string): Promise<{ hasGrant: bool
     .where(
       and(
         eq(subscriptionGrants.tenantId, tenantId),
+        eq(subscriptionGrants.feature, feature),
         lte(subscriptionGrants.startsAt, now),
         gte(subscriptionGrants.endsAt, now),
         isNull(subscriptionGrants.revokedAt)

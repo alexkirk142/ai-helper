@@ -1141,6 +1141,7 @@ export const subscriptions = pgTable("subscriptions", {
 export const subscriptionGrants = pgTable("subscription_grants", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  feature: varchar("feature").notNull().default("channels").$type<PlanFeatureType>(),
   startsAt: timestamp("starts_at").notNull(),
   endsAt: timestamp("ends_at").notNull(),
   grantedByUserId: varchar("granted_by_user_id").notNull().references(() => users.id),

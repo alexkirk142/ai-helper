@@ -340,13 +340,14 @@ export async function getBillingStatus(tenantId: string): Promise<BillingStatus>
   const subscription = await getSubscriptionByTenant(tenantId);
   
   if (!subscription) {
-    // Even without a subscription record, check for an active grant
+    // Even without a subscription record, check for an active channels grant
     const [activeGrant] = await db
       .select({ endsAt: subscriptionGrants.endsAt })
       .from(subscriptionGrants)
       .where(
         and(
           eq(subscriptionGrants.tenantId, tenantId),
+          eq(subscriptionGrants.feature, "channels"),
           isNull(subscriptionGrants.revokedAt),
           sql`${subscriptionGrants.startsAt} <= NOW()`,
           sql`${subscriptionGrants.endsAt} > NOW()`
@@ -400,13 +401,14 @@ export async function getBillingStatus(tenantId: string): Promise<BillingStatus>
     canAccess = canAccess && (!subscription.currentPeriodEnd || new Date(subscription.currentPeriodEnd) > now);
   }
 
-  // Check for an active subscription grant (manual comp by platform admin)
+  // Check for an active channels subscription grant (manual comp by platform admin)
   const [activeGrant] = await db
     .select({ endsAt: subscriptionGrants.endsAt })
     .from(subscriptionGrants)
     .where(
       and(
         eq(subscriptionGrants.tenantId, tenantId),
+        eq(subscriptionGrants.feature, "channels"),
         isNull(subscriptionGrants.revokedAt),
         sql`${subscriptionGrants.startsAt} <= NOW()`,
         sql`${subscriptionGrants.endsAt} > NOW()`
@@ -442,20 +444,39 @@ export async function getBillingStatus(tenantId: string): Promise<BillingStatus>
 export async function getAiBillingStatus(tenantId: string): Promise<BillingStatus> {
   const subscription = await getAiSubscriptionByTenant(tenantId);
 
+  // Check for an active ai_agent grant (manual comp by platform admin)
+  const [aiGrant] = await db
+    .select({ endsAt: subscriptionGrants.endsAt })
+    .from(subscriptionGrants)
+    .where(
+      and(
+        eq(subscriptionGrants.tenantId, tenantId),
+        eq(subscriptionGrants.feature, "ai_agent"),
+        isNull(subscriptionGrants.revokedAt),
+        sql`${subscriptionGrants.startsAt} <= NOW()`,
+        sql`${subscriptionGrants.endsAt} > NOW()`
+      )
+    )
+    .orderBy(desc(subscriptionGrants.endsAt))
+    .limit(1);
+
+  const hasActiveGrant = !!aiGrant;
+  const grantEndsAt = aiGrant?.endsAt ?? null;
+
   if (!subscription) {
     return {
       hasSubscription: false,
-      status: null,
+      status: hasActiveGrant ? "active" as SubscriptionStatus : null,
       plan: null,
-      currentPeriodEnd: null,
+      currentPeriodEnd: grantEndsAt,
       cancelAtPeriodEnd: false,
-      canAccess: false,
+      canAccess: hasActiveGrant,
       isTrial: false,
       trialEndsAt: null,
       trialDaysRemaining: null,
       hadTrial: false,
-      hasActiveGrant: false,
-      grantEndsAt: null,
+      hasActiveGrant,
+      grantEndsAt,
     };
   }
 
@@ -469,9 +490,13 @@ export async function getAiBillingStatus(tenantId: string): Promise<BillingStatu
     canAccess = new Date(subscription.currentPeriodEnd) > now;
   }
 
+  if (hasActiveGrant) {
+    canAccess = true;
+  }
+
   return {
     hasSubscription: true,
-    status: subscription.status as SubscriptionStatus,
+    status: hasActiveGrant ? "active" as SubscriptionStatus : subscription.status as SubscriptionStatus,
     plan,
     currentPeriodEnd: subscription.currentPeriodEnd,
     cancelAtPeriodEnd: subscription.cancelAtPeriodEnd || false,
@@ -480,8 +505,8 @@ export async function getAiBillingStatus(tenantId: string): Promise<BillingStatu
     trialEndsAt: null,
     trialDaysRemaining: null,
     hadTrial: false,
-    hasActiveGrant: false,
-    grantEndsAt: null,
+    hasActiveGrant,
+    grantEndsAt,
   };
 }
 

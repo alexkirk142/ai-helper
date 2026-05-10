@@ -32,6 +32,13 @@ router.post("/api/conversations/:id/generate-suggestion", requireAuth, requirePe
     if (!genUser?.tenantId) {
       return res.status(403).json({ error: "User not associated with a tenant" });
     }
+
+    const { getAiBillingStatus } = await import("../services/cryptobot-billing");
+    const aiBilling = await getAiBillingStatus(genUser.tenantId);
+    if (!aiBilling.canAccess) {
+      return res.status(402).json({ error: "SUBSCRIPTION_REQUIRED", message: "Active AI Agent subscription required", code: "SUBSCRIPTION_REQUIRED" });
+    }
+
     const conversation = await storage.getConversationDetail(req.params.id, genUser.tenantId);
     if (!conversation || conversation.tenantId !== genUser.tenantId) {
       return res.status(404).json({ error: "Conversation not found" });
