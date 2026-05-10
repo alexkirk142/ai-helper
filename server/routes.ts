@@ -24,6 +24,7 @@ import vehicleLookupRouter from "./routes/vehicle-lookup.routes";
 import tenantConfigRouter from "./routes/tenant-config.routes";
 import settingsRouter from "./routes/settings.routes";
 import featureFlagsRouter from "./routes/feature-flags.routes";
+import { responseTemplatesRouter } from "./routes/response-templates.routes";
 
 // Channel management & webhook route modules
 import channelManagementRouter from "./routes/channel-management.routes";
@@ -83,6 +84,7 @@ export async function registerRoutes(
   app.use(tenantConfigRouter);
   app.use(settingsRouter);
   app.use(featureFlagsRouter);
+  app.use(responseTemplatesRouter);
 
   // ============ CHANNEL MANAGEMENT ROUTES ============
   app.use(channelManagementRouter);

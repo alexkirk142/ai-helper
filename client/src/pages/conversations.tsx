@@ -43,6 +43,9 @@ export default function Conversations() {
   const [replyAsCustomerFilePreviewUrl, setReplyAsCustomerFilePreviewUrl] = useState<string | null>(null);
   const replyAsCustomerFileRef = useRef<HTMLInputElement>(null);
 
+  // Template quick-reply: text to prefill the message input
+  const [templateMessage, setTemplateMessage] = useState<string>("");
+
   // "Новый диалог" modal state
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [newDialogChannel, setNewDialogChannel] = useState<"telegram_personal" | "max_personal" | "whatsapp_personal" | "">("");
@@ -969,7 +972,10 @@ export default function Conversations() {
                       <SheetTitle>Карточка клиента</SheetTitle>
                     </SheetHeader>
                     <div className="mt-4 flex flex-col gap-4">
-                      <CustomerCard customerId={conversationDetail.customerId} />
+                      <CustomerCard
+                        customerId={conversationDetail.customerId}
+                        onInsertTemplate={(text) => setTemplateMessage(text)}
+                      />
                       {conversations?.find(c => c.id === selectedId)?.customer?.channel === "mock" && selectedId && (
                         <div className="border-t pt-4">
                           <p className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">Тест: ответ клиента</p>
@@ -1062,6 +1068,8 @@ export default function Conversations() {
               onDeleteMessage={(msgId) => selectedId && deleteMessageMutation.mutate({ conversationId: selectedId, messageId: msgId })}
               isSendingSummary={sendSummaryMutation.isPending}
               isLoading={detailLoading}
+              prefillMessage={templateMessage}
+              onPrefillConsumed={() => setTemplateMessage("")}
             />
             {/* Desktop customer panel button */}
             {conversationDetail?.customerId && (
@@ -1077,7 +1085,10 @@ export default function Conversations() {
                       <SheetTitle>Карточка клиента</SheetTitle>
                     </SheetHeader>
                     <div className="mt-4 flex flex-col gap-4">
-                      <CustomerCard customerId={conversationDetail.customerId} />
+                      <CustomerCard
+                        customerId={conversationDetail.customerId}
+                        onInsertTemplate={(text) => setTemplateMessage(text)}
+                      />
                       {conversations?.find(c => c.id === selectedId)?.customer?.channel === "mock" && selectedId && (
                         <div className="border-t pt-4">
                           <p className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">Тест: ответ клиента</p>
@@ -1160,7 +1171,10 @@ export default function Conversations() {
         {/* Desktop customer card sidebar */}
         {conversationDetail?.customerId && (
           <div className="hidden shrink-0 border-l p-4 xl:flex xl:flex-col xl:gap-4 w-72">
-            <CustomerCard customerId={conversationDetail.customerId} />
+            <CustomerCard
+              customerId={conversationDetail.customerId}
+              onInsertTemplate={(text) => setTemplateMessage(text)}
+            />
             {conversations?.find(c => c.id === selectedId)?.customer?.channel === "mock" && selectedId && (
               <div className="border-t pt-4">
                 <p className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">Тест: ответ клиента</p>

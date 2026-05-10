@@ -1263,6 +1263,14 @@ export class DatabaseStorage implements IStorage {
     return template;
   }
 
+  async deleteTemplate(id: string, tenantId: string): Promise<boolean> {
+    const result = await db
+      .delete(responseTemplates)
+      .where(and(eq(responseTemplates.id, id), eq(responseTemplates.tenantId, tenantId)))
+      .returning({ id: responseTemplates.id });
+    return result.length > 0;
+  }
+
   async getDashboardMetrics(tenantId: string): Promise<DashboardMetrics> {
     const [convCounts, pendingResult, productsResult, docsResult, resolvedTodayResult] = await Promise.all([
       db

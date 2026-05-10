@@ -202,6 +202,7 @@ export interface IStorage {
   // Response Templates
   getTemplatesByTenant(tenantId: string): Promise<ResponseTemplate[]>;
   createTemplate(template: InsertResponseTemplate): Promise<ResponseTemplate>;
+  deleteTemplate(id: string, tenantId: string): Promise<boolean>;
 
   // Dashboard
   getDashboardMetrics(tenantId: string): Promise<DashboardMetrics>;

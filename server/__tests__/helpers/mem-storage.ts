@@ -1207,6 +1207,13 @@ export class MemStorage implements IStorage {
     return newTemplate;
   }
 
+  async deleteTemplate(id: string, tenantId: string): Promise<boolean> {
+    const tpl = this.responseTemplates.get(id);
+    if (!tpl || tpl.tenantId !== tenantId) return false;
+    this.responseTemplates.delete(id);
+    return true;
+  }
+
   // Dashboard metrics
   async getDashboardMetrics(tenantId: string): Promise<DashboardMetrics> {
     const convs = Array.from(this.conversations.values()).filter((c) => c.tenantId === tenantId);

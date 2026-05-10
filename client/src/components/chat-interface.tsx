@@ -52,6 +52,8 @@ interface ChatInterfaceProps {
   onDeleteMessage?: (messageId: string) => void;
   isSendingSummary?: boolean;
   isLoading?: boolean;
+  prefillMessage?: string;
+  onPrefillConsumed?: () => void;
 }
 
 interface UsedSource {
@@ -373,6 +375,8 @@ export function ChatInterface({
   onDeleteMessage,
   isSendingSummary,
   isLoading,
+  prefillMessage,
+  onPrefillConsumed,
 }: ChatInterfaceProps) {
   const [manualMessage, setManualMessage] = useState("");
   const [editedSuggestion, setEditedSuggestion] = useState("");
@@ -386,6 +390,27 @@ export function ChatInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevConversationId = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const autoResizeTextarea = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 300)}px`;
+  }, []);
+
+  // When a quick-reply template is selected from CustomerCard, prefill the input
+  useEffect(() => {
+    if (prefillMessage) {
+      setManualMessage(prefillMessage);
+      onPrefillConsumed?.();
+    }
+  }, [prefillMessage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-resize textarea whenever message changes (including prefill)
+  useEffect(() => {
+    autoResizeTextarea();
+  }, [manualMessage, autoResizeTextarea]);
 
   // Determine if this is a MAX Personal conversation and which account is used
   const isMaxPersonal = conversation?.customer?.channel === "max_personal";
@@ -1014,10 +1039,12 @@ export function ChatInterface({
             )}
           </Button>
           <Textarea
+            ref={textareaRef}
             placeholder="Введите сообщение вручную..."
             value={manualMessage}
             onChange={(e) => setManualMessage(e.target.value)}
-            className="min-h-[44px] max-h-[120px] resize-none"
+            className="min-h-[44px] max-h-[300px] resize-none overflow-y-auto"
+            style={{ minHeight: "44px" }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();

@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
@@ -19,14 +21,26 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
   X, Plus, User, ExternalLink, MessageSquare, Phone, Mail, Tag,
-  Ban, ShieldCheck, ChevronDown, ChevronUp,
+  Ban, ShieldCheck, ChevronDown, ChevronUp, Zap, Trash2,
 } from "lucide-react";
 import { SiTelegram, SiWhatsapp } from "react-icons/si";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@shared/schema";
+import {
+  useResponseTemplates,
+  useCreateResponseTemplate,
+  useDeleteResponseTemplate,
+} from "@/hooks/use-response-templates";
 
 // ─── CRM preset tags ─────────────────────────────────────────────────────────
 
@@ -63,16 +77,24 @@ const channelIcons: Record<string, { icon: IconComponent; label: string; color: 
 interface CustomerCardProps {
   customerId: string | null | undefined;
   compact?: boolean;
+  onInsertTemplate?: (text: string) => void;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function CustomerCard({ customerId, compact = false }: CustomerCardProps) {
+export function CustomerCard({ customerId, compact = false, onInsertTemplate }: CustomerCardProps) {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [newTag, setNewTag] = useState("");
   const [showPresets, setShowPresets] = useState(false);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState("");
+  const [newTemplateContent, setNewTemplateContent] = useState("");
+
+  const { data: templates = [] } = useResponseTemplates();
+  const createTemplate = useCreateResponseTemplate();
+  const deleteTemplate = useDeleteResponseTemplate();
 
   const { data: customer, isLoading } = useQuery<Customer>({
     queryKey: ["/api/customers", customerId],
@@ -343,6 +365,63 @@ export function CustomerCard({ customerId, compact = false }: CustomerCardProps)
 
           <Separator />
 
+          {/* ── Quick Reply Templates ── */}
+          {!compact && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+                  <Zap className="h-3 w-3" />
+                  Шаблоны ответов
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => {
+                    setNewTemplateName("");
+                    setNewTemplateContent("");
+                    setTemplateDialogOpen(true);
+                  }}
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  Добавить
+                </Button>
+              </div>
+
+              {templates.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic">Нет шаблонов</p>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {templates.map((tpl) => (
+                    <div key={tpl.id} className="flex items-center gap-1 group">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 h-7 justify-start text-xs truncate font-normal"
+                        title={tpl.content}
+                        onClick={() => onInsertTemplate?.(tpl.content)}
+                        disabled={!onInsertTemplate}
+                      >
+                        {tpl.name}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+                        onClick={() => deleteTemplate.mutate(tpl.id)}
+                        disabled={deleteTemplate.isPending}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <Separator />
+
           {/* ── Block / Unblock ── */}
           {isBlocked ? (
             <Button
@@ -369,6 +448,59 @@ export function CustomerCard({ customerId, compact = false }: CustomerCardProps)
           )}
         </CardContent>
       </Card>
+
+      {/* ── Add template dialog ── */}
+      <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Новый шаблон ответа</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="tpl-name">Название кнопки</Label>
+              <Input
+                id="tpl-name"
+                placeholder="Например: Варианты оплаты"
+                value={newTemplateName}
+                onChange={(e) => setNewTemplateName(e.target.value)}
+                maxLength={100}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="tpl-content">Текст сообщения</Label>
+              <Textarea
+                id="tpl-content"
+                placeholder="Текст который отправится клиенту..."
+                value={newTemplateContent}
+                onChange={(e) => setNewTemplateContent(e.target.value)}
+                className="min-h-[120px] resize-none text-sm"
+                maxLength={4000}
+              />
+              <p className="text-xs text-muted-foreground text-right">
+                {newTemplateContent.length}/4000
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTemplateDialogOpen(false)}>
+              Отмена
+            </Button>
+            <Button
+              disabled={!newTemplateName.trim() || !newTemplateContent.trim() || createTemplate.isPending}
+              onClick={async () => {
+                await createTemplate.mutateAsync({
+                  name: newTemplateName.trim(),
+                  content: newTemplateContent.trim(),
+                });
+                setTemplateDialogOpen(false);
+                toast({ title: "Шаблон добавлен" });
+              }}
+            >
+              Сохранить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Block confirm dialog ── */}
       <AlertDialog open={blockDialogOpen} onOpenChange={setBlockDialogOpen}>
