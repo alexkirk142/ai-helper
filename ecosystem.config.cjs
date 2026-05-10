@@ -41,20 +41,6 @@ module.exports = {
       time: true
     },
     {
-      name: 'worker-price-lookup',
-      script: 'npm',
-      args: 'run worker:price-lookup',
-      cwd: __dirname,
-      instances: 1,
-      autorestart: true,
-      watch: false,
-      max_memory_restart: '512M',
-      env: { NODE_ENV: 'production', ...envVars },
-      error_file: path.join(__dirname, '../logs/worker-price-lookup-error.log'),
-      out_file: path.join(__dirname, '../logs/worker-price-lookup-out.log'),
-      time: true
-    },
-    {
       name: 'worker-vehicle-lookup',
       script: 'npm',
       args: 'run worker:vehicle-lookup',
