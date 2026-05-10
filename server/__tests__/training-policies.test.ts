@@ -173,8 +173,12 @@ describe("Training Policies", () => {
 
       const examples = await selectFewShotExamples("tenant-1");
 
-      expect(examples.length).toBe(2);
+      // Built-in examples for non-disabled intents are also added on top of DB examples.
+      // The key guarantee: "discount" intent never appears (neither from DB nor built-ins).
       expect(examples.every(e => e.intent !== "discount")).toBe(true);
+      // price and shipping from DB must be present
+      expect(examples.some(e => e.intent === "price")).toBe(true);
+      expect(examples.some(e => e.intent === "shipping")).toBe(true);
     });
 
     it("should include all samples when no intents are disabled", async () => {
@@ -190,7 +194,10 @@ describe("Training Policies", () => {
 
       const examples = await selectFewShotExamples("tenant-1");
 
-      expect(examples.length).toBe(2);
+      // Both DB intents must be present; built-ins for other intents are also added
+      expect(examples.some(e => e.intent === "price")).toBe(true);
+      expect(examples.some(e => e.intent === "discount")).toBe(true);
+      expect(examples.length).toBeGreaterThanOrEqual(2);
     });
 
     it("should include all samples when no policy exists", async () => {
@@ -204,7 +211,10 @@ describe("Training Policies", () => {
 
       const examples = await selectFewShotExamples("tenant-1");
 
-      expect(examples.length).toBe(2);
+      // Both DB intents must be present; built-ins for other intents are also added
+      expect(examples.some(e => e.intent === "price")).toBe(true);
+      expect(examples.some(e => e.intent === "discount")).toBe(true);
+      expect(examples.length).toBeGreaterThanOrEqual(2);
     });
   });
 

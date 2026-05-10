@@ -164,8 +164,10 @@ function scoreExample(
 ): number {
   let score = 1.0;
   
-  if (sample.outcome === "EDITED") {
-    score += 0.5;   // operator corrected the AI → highest training signal
+  if (sample.outcome === "OPERATOR_MANUAL") {
+    score += 0.7;   // operator wrote from scratch → highest training signal
+  } else if (sample.outcome === "EDITED") {
+    score += 0.5;   // operator corrected the AI → strong training signal
   } else if (sample.outcome === "APPROVED") {
     score += 0.2;   // AI was already correct → lower priority
   }
@@ -187,6 +189,9 @@ function scoreExample(
 }
 
 function isHighConfidence(sample: AiTrainingSample, minConfidence: number): boolean {
+  if (sample.outcome === "OPERATOR_MANUAL") {
+    return true;  // operator wrote from scratch → always high confidence
+  }
   if (sample.decision === "AUTO_SEND") {
     return true;
   }
@@ -210,7 +215,7 @@ export async function selectFewShotExamples(
   const disabledIntents = policy?.disabledLearningIntents ?? [];
   
   const eligibleSamples = allSamples.filter(sample => {
-    if (sample.outcome !== "APPROVED" && sample.outcome !== "EDITED") {
+    if (sample.outcome !== "APPROVED" && sample.outcome !== "EDITED" && sample.outcome !== "OPERATOR_MANUAL") {
       return false;
     }
     

@@ -13,6 +13,7 @@ import {
   type KnowledgeDoc, type InsertKnowledgeDoc,
   type RagDocument, type InsertRagDocument,
   type RagChunk, type InsertRagChunk,
+  type RagDocType,
   type AiSuggestion, type InsertAiSuggestion,
   type HumanAction, type InsertHumanAction,
   type AiTrainingSample, type InsertAiTrainingSample,
@@ -42,6 +43,21 @@ import {
   type TenantAgentSettings, type InsertTenantAgentSettings,
   type TransmissionIdentityCache, type InsertTransmissionIdentityCache,
 } from "@shared/schema";
+
+/** Aggregated AI learning / RAG stats for a tenant (GET /api/ai/training-stats). */
+export interface AiTrainingStats {
+  samplesByOutcome: {
+    APPROVED: number;
+    EDITED: number;
+    REJECTED: number;
+    OPERATOR_MANUAL: number;
+  };
+  conversationRagCount: number;
+  avgConfidenceLast50: number | null;
+  topIntents: { intent: string; count: number }[];
+  totalSamples: number;
+  learningQueuePending: number;
+}
 
 export interface IStorage {
   // Tenants
@@ -160,7 +176,9 @@ export interface IStorage {
   // AI Training Samples
   createAiTrainingSample(sample: InsertAiTrainingSample): Promise<AiTrainingSample>;
   getAiTrainingSamplesByTenant(tenantId: string, outcome?: string): Promise<AiTrainingSample[]>;
+  getAiTrainingSamplesByConversation(conversationId: string, tenantId: string): Promise<AiTrainingSample[]>;
   getAiTrainingSamplesCount(tenantId: string): Promise<number>;
+  getAiTrainingStats(tenantId: string): Promise<AiTrainingStats>;
 
   // AI Training Policies
   getAiTrainingPolicy(tenantId: string): Promise<AiTrainingPolicy | undefined>;
@@ -172,6 +190,7 @@ export interface IStorage {
   getLearningQueueItem(conversationId: string): Promise<LearningQueueItem | undefined>;
   updateLearningQueueItem(id: string, data: Partial<InsertLearningQueueItem>): Promise<LearningQueueItem | undefined>;
   upsertLearningQueueItem(item: InsertLearningQueueItem): Promise<LearningQueueItem>;
+  getAllPendingLearningQueueItems(limit?: number): Promise<LearningQueueItem[]>;
 
   // Escalation Events
   getEscalationEvent(id: string, tenantId: string): Promise<EscalationEvent | undefined>;
@@ -228,15 +247,24 @@ export interface IStorage {
   createRagChunk(chunk: InsertRagChunk): Promise<RagChunk>;
 
   // RAG Cleanup
-  deleteRagBySource(tenantId: string, sourceType: "PRODUCT" | "DOC", sourceId: string): Promise<{ deletedDocs: number }>;
+  deleteRagBySource(tenantId: string, sourceType: RagDocType, sourceId: string): Promise<{ deletedDocs: number }>;
+
+  // RAG document lookup
+  findRagDocumentBySource(tenantId: string, type: RagDocType, sourceId: string): Promise<RagDocument | undefined>;
 
   // RAG Embeddings
   updateRagChunkEmbedding(chunkId: string, embedding: number[]): Promise<boolean>;
-  getRagChunksBySource(tenantId: string, sourceType: "PRODUCT" | "DOC", sourceId: string): Promise<{ id: string; chunkText: string; embedding: number[] | null }[]>;
+  getRagChunksBySource(tenantId: string, sourceType: RagDocType, sourceId: string): Promise<{ id: string; chunkText: string; embedding: number[] | null }[]>;
   getRagChunksWithoutEmbedding(tenantId: string, limit?: number): Promise<{ id: string; chunkText: string }[]>;
   getRagChunksWithStaleHash(tenantId: string, limit?: number): Promise<{ id: string; chunkText: string; storedHash: string | null; currentHash: string }[]>;
   invalidateStaleEmbeddings(tenantId: string): Promise<{ invalidated: number }>;
   getAllRagChunksWithEmbedding(tenantId: string): Promise<{ id: string; chunkText: string; chunkIndex: number; embedding: string | null; metadata: unknown }[]>;
+  searchRagChunksBySimilarity(
+    tenantId: string,
+    queryEmbedding: number[],
+    topK: number,
+    minSimilarity: number
+  ): Promise<Array<{ id: string; ragDocumentId: string; chunkText: string; tenantId: string; similarity: number; chunkIndex: number; metadata: unknown }>>;
 
   // Update History
   getUpdateHistory(): Promise<UpdateHistory[]>;

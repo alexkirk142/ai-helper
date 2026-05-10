@@ -38,6 +38,7 @@ import { startVehicleLookupWorker } from "./workers/vehicle-lookup.worker";
 import { startWorker as startMessageSendWorker } from "./workers/message-send.worker";
 import { startMarquizLeadWorker } from "./workers/marquiz-lead.worker";
 import { startNoReplyCheckWorker } from "./workers/no-reply-check.worker";
+import { startLearningQueueWorker } from "./workers/learning-queue.worker";
 import type { Worker } from "bullmq";
 import * as fs from "fs";
 import { bootstrapPlatformOwner } from "./services/owner-bootstrap";
@@ -48,6 +49,7 @@ let vehicleLookupWorker: Worker | null = null;
 let messageSendWorker: Worker | null = null;
 let marquizLeadWorker: Worker | null = null;
 let noReplyCheckWorker: Worker | null = null;
+let learningQueueWorker: Worker | null = null;
 
 // Prevent gramjs internal timeouts and other unhandled rejections from crashing the process
 process.on("unhandledRejection", (reason: unknown) => {
@@ -272,6 +274,8 @@ app.use((req, res, next) => {
       messageSendWorker = await startMessageSendWorker();
       marquizLeadWorker = startMarquizLeadWorker();
       noReplyCheckWorker = startNoReplyCheckWorker();
+      const learningQueueResult = startLearningQueueWorker();
+      learningQueueWorker = learningQueueResult?.worker ?? null;
       log("BullMQ workers started", "startup");
 
       // Wire messageBus → processIncomingMessageFull before any channel connects

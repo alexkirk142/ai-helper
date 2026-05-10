@@ -10,6 +10,7 @@ import { telegramAdapter } from "../services/telegram-adapter";
 import { whatsappAdapter } from "../services/whatsapp-adapter";
 import { maxAdapter } from "../services/max-adapter";
 import type { ParsedAttachment } from "../services/channel-adapter";
+import { recordTrainingSample } from "../services/training-sample-service";
 
 const router = Router();
 
@@ -345,6 +346,50 @@ router.post(
       }, msgUser.tenantId);
 
       await storage.updateConversation(req.params.id, msgUser.tenantId, { unreadCount: 0 });
+
+      // ── Auto-Harvest: record operator manual messages as training samples ───
+      // When an operator writes a reply without using an AI suggestion, capture
+      // it as a high-value training example (outcome=OPERATOR_MANUAL).
+      if (role === "owner" && content.trim().length > 0) {
+        try {
+          const autoLearningEnabled = await featureFlagService.isEnabled("AUTO_LEARNING_ENABLED", msgUser.tenantId);
+          if (autoLearningEnabled) {
+            const allMessages = conversation.messages;
+            const customerMessages = allMessages.filter(m => m.role === "customer");
+            const lastCustomerMsg = customerMessages[customerMessages.length - 1];
+
+            if (lastCustomerMsg) {
+              // Deduplication: check if a training sample already exists for this
+              // conversation + userMessage combination
+              const convSamples = await storage.getAiTrainingSamplesByConversation(req.params.id, msgUser.tenantId);
+              const alreadyExists = convSamples.some(
+                s => s.userMessage === lastCustomerMsg.content
+              );
+
+              if (!alreadyExists) {
+                // Synthetic AiSuggestion-like object — only the fields accessed by recordTrainingSample:
+                // suggestion.conversationId, suggestion.suggestedReply, suggestion.intent, suggestion.decision
+                const syntheticSuggestion = {
+                  conversationId: req.params.id,
+                  suggestedReply: "",
+                  intent: null,
+                  decision: null,
+                };
+                await recordTrainingSample({
+                  suggestion: syntheticSuggestion as any,
+                  userMessage: lastCustomerMsg.content,
+                  finalAnswer: content.trim(),
+                  outcome: "OPERATOR_MANUAL",
+                  tenantId: msgUser.tenantId,
+                });
+                console.log(`[AutoHarvest] Recorded OPERATOR_MANUAL sample for conv=${req.params.id}`);
+              }
+            }
+          }
+        } catch (harvestError: any) {
+          console.error("[AutoHarvest] Failed to record training sample:", harvestError.message);
+        }
+      }
 
       // ── VIN OCR for customer image uploads ─────────────────────────────────
       // When an image is uploaded explicitly as a customer message (role: "customer"),

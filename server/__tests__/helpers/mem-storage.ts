@@ -50,6 +50,7 @@ import {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import type { IStorage } from "../../storage";
+import type { AiTrainingStats } from "../../storage.types";
 
 export class MemStorage implements IStorage {
   private tenants: Map<string, Tenant> = new Map();
@@ -110,6 +111,7 @@ export class MemStorage implements IStorage {
       templateGearboxEnabled: true,
       templateEngineEnabled: true,
       templateTiresEnabled: true,
+      leadChannelPriority: null,
       createdAt: new Date(),
     };
     this.tenants.set(tenant.id, tenant);
@@ -128,6 +130,7 @@ export class MemStorage implements IStorage {
       email: null,
       tags: [],
       metadata: {},
+      isBlocked: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -144,6 +147,7 @@ export class MemStorage implements IStorage {
       email: null,
       tags: [],
       metadata: {},
+      isBlocked: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -746,6 +750,17 @@ export class MemStorage implements IStorage {
     return all.filter((c) => c.status === "active" || c.status === "waiting");
   }
 
+  async searchConversations(tenantId: string, query: string): Promise<ConversationWithCustomer[]> {
+    const q = query.toLowerCase();
+    const all = await this.getConversationsByTenant(tenantId);
+    return all.filter((c) => {
+      if (c.customer?.name?.toLowerCase().includes(q)) return true;
+      if (c.customer?.phone?.toLowerCase().includes(q)) return true;
+      if (c.lastMessage?.content?.toLowerCase().includes(q)) return true;
+      return false;
+    });
+  }
+
   async createConversation(conversation: InsertConversation & { lastMessageAt?: Date; createdAt?: Date }): Promise<Conversation> {
     const id = randomUUID();
     const now = new Date();
@@ -1004,6 +1019,64 @@ export class MemStorage implements IStorage {
       .filter(s => s.tenantId === tenantId).length;
   }
 
+  async getAiTrainingSamplesByConversation(conversationId: string, tenantId: string): Promise<AiTrainingSample[]> {
+    return Array.from(this.aiTrainingSamples.values()).filter(
+      (s) => s.conversationId === conversationId && s.tenantId === tenantId
+    );
+  }
+
+  async getAiTrainingStats(tenantId: string): Promise<AiTrainingStats> {
+    const samples = Array.from(this.aiTrainingSamples.values()).filter(s => s.tenantId === tenantId);
+
+    const samplesByOutcome: AiTrainingStats["samplesByOutcome"] = {
+      APPROVED: 0,
+      EDITED: 0,
+      REJECTED: 0,
+      OPERATOR_MANUAL: 0,
+    };
+    for (const s of samples) {
+      const key = s.outcome as keyof typeof samplesByOutcome;
+      if (key in samplesByOutcome) samplesByOutcome[key]++;
+    }
+
+    const conversationRagCount = Array.from(this.ragDocuments.values())
+      .filter(d => d.tenantId === tenantId && d.type === "CONVERSATION").length;
+
+    const tenantConvIds = new Set(
+      Array.from(this.conversations.values())
+        .filter(c => c.tenantId === tenantId)
+        .map(c => c.id)
+    );
+    const recentConfs = Array.from(this.aiSuggestions.values())
+      .filter(s => tenantConvIds.has(s.conversationId) && s.confidence != null)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 50)
+      .map(s => s.confidence as number);
+    const avgConfidenceLast50 =
+      recentConfs.length === 0 ? null : recentConfs.reduce((a, b) => a + b, 0) / recentConfs.length;
+
+    const intentCounts = new Map<string, number>();
+    for (const s of samples) {
+      if (s.intent) intentCounts.set(s.intent, (intentCounts.get(s.intent) ?? 0) + 1);
+    }
+    const topIntents = Array.from(intentCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([intent, count]) => ({ intent, count }));
+
+    const learningQueuePending = Array.from(this.learningQueue.values())
+      .filter(i => i.tenantId === tenantId && i.status === "pending").length;
+
+    return {
+      samplesByOutcome,
+      conversationRagCount,
+      avgConfidenceLast50,
+      topIntents,
+      totalSamples: samples.length,
+      learningQueuePending,
+    };
+  }
+
   // AI Training Policies methods
   async getAiTrainingPolicy(tenantId: string): Promise<AiTrainingPolicy | undefined> {
     return this.aiTrainingPolicies.get(tenantId);
@@ -1076,6 +1149,13 @@ export class MemStorage implements IStorage {
       return updated!;
     }
     return this.createLearningQueueItem(item);
+  }
+
+  async getAllPendingLearningQueueItems(limit = 50): Promise<LearningQueueItem[]> {
+    return Array.from(this.learningQueue.values())
+      .filter(item => item.status === "pending")
+      .sort((a, b) => b.learningScore - a.learningScore)
+      .slice(0, limit);
   }
 
   // Escalation Event methods
@@ -1358,12 +1438,19 @@ export class MemStorage implements IStorage {
       ...chunk,
       id,
       embedding: chunk.embedding || null,
+      embeddingVector: chunk.embeddingVector ?? null,
       metadata: chunk.metadata || {},
       createdAt: now,
       updatedAt: now,
     };
     this.ragChunks.set(id, newChunk);
     return newChunk;
+  }
+
+  async findRagDocumentBySource(tenantId: string, type: string, sourceId: string): Promise<RagDocument | undefined> {
+    return Array.from(this.ragDocuments.values()).find(
+      (d) => d.tenantId === tenantId && d.type === type && d.sourceId === sourceId
+    );
   }
 
   async deleteRagBySource(tenantId: string, sourceType: "PRODUCT" | "DOC", sourceId: string): Promise<{ deletedDocs: number }> {
@@ -1759,5 +1846,14 @@ export class MemStorage implements IStorage {
 
   async getLatestPriceSnapshotForConversation(_tenantId: string, _conversationId: string): Promise<PriceSnapshot | undefined> {
     return undefined;
+  }
+
+  async searchRagChunksBySimilarity(
+    _tenantId: string,
+    _queryEmbedding: number[],
+    _topK: number,
+    _minSimilarity: number
+  ): Promise<Array<{ id: string; ragDocumentId: string; chunkText: string; tenantId: string; similarity: number; chunkIndex: number; metadata: unknown }>> {
+    return [];
   }
 }

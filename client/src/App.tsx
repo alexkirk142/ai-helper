@@ -10,6 +10,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { useAuth } from "@/hooks/use-auth";
 import { useNotifications } from "@/hooks/use-notifications";
+import { useAiBillingStatus } from "@/hooks/use-billing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, MessageSquare, Brain, Shield } from "lucide-react";
@@ -213,6 +214,8 @@ function AuthenticatedApp() {
     enabled: !isPlatformStaff, // don't query tenant endpoints for staff
   });
 
+  const { data: aiBilling, isLoading: aiBillingLoading } = useAiBillingStatus();
+
   useNotifications();
 
   useEffect(() => {
@@ -232,15 +235,17 @@ function AuthenticatedApp() {
   }, [isPlatformStaff, location, setLocation]);
   
   useEffect(() => {
-    if (!onboardingLoading && onboardingState) {
+    if (!onboardingLoading && !aiBillingLoading && onboardingState) {
       const needsOnboarding = onboardingState.status === "NOT_STARTED" || onboardingState.status === "IN_PROGRESS";
+      const hasAiSubscription = aiBilling?.canAccess === true;
       const isOnOnboardingPage = location === "/onboarding";
-      
-      if (needsOnboarding && !isOnOnboardingPage) {
+
+      // Only redirect to onboarding after the user has paid for the AI subscription
+      if (needsOnboarding && hasAiSubscription && !isOnOnboardingPage) {
         setLocation("/onboarding");
       }
     }
-  }, [onboardingState, onboardingLoading, location, setLocation]);
+  }, [onboardingState, onboardingLoading, aiBilling, aiBillingLoading, location, setLocation]);
 
   const style = {
     "--sidebar-width": "16rem",

@@ -3836,9 +3836,15 @@ function AIAgentSettingsCard() {
       if (typeof (settings as any).companyFacts === "string") {
         setCompanyFacts((settings as any).companyFacts ?? "");
       } else {
-        const factsText = (settings.customFacts as any[])
-          ?.map((f: any) => `${f.key}: ${f.value}`)
-          .join("\n") ?? "";
+        const cf = settings.customFacts;
+        let factsText = "";
+        if (Array.isArray(cf)) {
+          factsText = cf.map((f: any) => `${f.key}: ${f.value}`).join("\n");
+        } else if (cf && typeof cf === "object") {
+          factsText = Object.entries(cf as Record<string, unknown>)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join("\n");
+        }
         setCompanyFacts(factsText);
       }
     }
@@ -3889,65 +3895,59 @@ function AIAgentSettingsCard() {
   return (
     <>
       <div className="space-y-6">
-        <Collapsible>
-          <CollapsibleTrigger asChild>
-            <Button
-              variant="ghost"
-              className="flex w-full items-center justify-between rounded-md border px-4 py-3 text-sm font-medium hover:bg-muted"
-              type="button"
-            >
-              <span className="flex items-center gap-2">
-                <Lock className="h-4 w-4 text-muted-foreground" />
-                Расширенные настройки
-              </span>
-              <ChevronDown className="h-4 w-4 text-muted-foreground" />
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <Card className="mt-2 border-dashed">
-              <CardHeader>
-                <CardTitle className="text-base">Системный промпт</CardTitle>
-                <CardDescription>
-                  Основной характер и поведение агента. Если оставить пустым — используется стандартный промпт.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="rounded-md border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-400">
-                  ⚠️ Изменение полностью заменяет поведение агента по умолчанию.
-                  Используйте только если точно знаете что делаете.
-                </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Инструкция для агента</CardTitle>
+            <CardDescription>
+              Напишите своими словами как должен вести себя ваш агент: что говорить, какой тон держать, какие темы избегать.
+              Если оставить пустым — агент будет работать в стандартном режиме.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              placeholder={'Например: «Обращайся к клиенту на "Вы". При вопросах о скидках говори, что скидки только для постоянных клиентов. Если клиент недоволен — сразу передавай живому оператору.»'}
+              className="min-h-[160px] text-sm"
+              data-testid="textarea-system-prompt"
+            />
+            <div className="flex items-center justify-between gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowDefaultPrompt(true)}
+                data-testid="button-view-default-prompt"
+              >
+                <FileText className="mr-2 h-4 w-4" />
+                Посмотреть стандартное поведение
+              </Button>
+              {systemPrompt && (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
-                  onClick={() => setShowDefaultPrompt(true)}
-                  data-testid="button-view-default-prompt"
+                  className="text-muted-foreground"
+                  onClick={() => setSystemPrompt("")}
                 >
-                  <FileText className="mr-2 h-4 w-4" />
-                  Посмотреть стандартный промпт
+                  Сбросить
                 </Button>
-                <Textarea
-                  value={systemPrompt}
-                  onChange={(e) => setSystemPrompt(e.target.value)}
-                  placeholder="Опишите как должен вести себя ваш агент..."
-                  className="min-h-[200px] font-mono text-sm"
-                  data-testid="textarea-system-prompt"
-                />
-                {systemPrompt && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="text-muted-foreground"
-                    onClick={() => setSystemPrompt("")}
-                  >
-                    Сбросить до стандартного
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          </CollapsibleContent>
-        </Collapsible>
+              )}
+            </div>
+            <div className="flex justify-end pt-1">
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleSave}
+                disabled={saveMutation.isPending}
+                data-testid="button-save-system-prompt"
+              >
+                <Save className="mr-2 h-4 w-4" />
+                Сохранить
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

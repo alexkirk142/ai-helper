@@ -1,4 +1,4 @@
-import { eq, desc, asc, and, or, ilike, inArray, sql, gte, gt, isNull, ne, count } from "drizzle-orm";
+import { eq, desc, asc, and, or, ilike, inArray, sql, gte, gt, isNull, isNotNull, ne, count } from "drizzle-orm";
 import { db } from "./db";
 import {
   tenants, channels, users, userInvites, emailTokens, customers, customerNotes, customerMemory, conversations, messages,
@@ -28,6 +28,7 @@ import {
   type KnowledgeDoc, type InsertKnowledgeDoc,
   type RagDocument, type InsertRagDocument,
   type RagChunk, type InsertRagChunk,
+  type RagDocType,
   type AiSuggestion, type InsertAiSuggestion,
   type HumanAction, type InsertHumanAction,
   type AiTrainingSample, type InsertAiTrainingSample,
@@ -57,6 +58,7 @@ import {
   type TenantAgentSettings, type InsertTenantAgentSettings,
   type TransmissionIdentityCache, type InsertTransmissionIdentityCache,
 } from "@shared/schema";
+import type { AiTrainingStats } from "./storage.types";
 import type { IStorage } from "./storage.types";
 import { encryptSessionString, decryptSessionString } from "./services/telegram-session-crypto";
 
@@ -1019,11 +1021,104 @@ export class DatabaseStorage implements IStorage {
       .limit(200);
   }
 
+  async getAiTrainingSamplesByConversation(conversationId: string, tenantId: string): Promise<AiTrainingSample[]> {
+    return db.select().from(aiTrainingSamples)
+      .where(and(
+        eq(aiTrainingSamples.tenantId, tenantId),
+        eq(aiTrainingSamples.conversationId, conversationId)
+      ))
+      .orderBy(desc(aiTrainingSamples.createdAt));
+  }
+
   async getAiTrainingSamplesCount(tenantId: string): Promise<number> {
     const result = await db.select({ count: sql<number>`count(*)` })
       .from(aiTrainingSamples)
       .where(eq(aiTrainingSamples.tenantId, tenantId));
     return Number(result[0]?.count || 0);
+  }
+
+  async getAiTrainingStats(tenantId: string): Promise<AiTrainingStats> {
+    const samplesByOutcome: AiTrainingStats["samplesByOutcome"] = {
+      APPROVED: 0,
+      EDITED: 0,
+      REJECTED: 0,
+      OPERATOR_MANUAL: 0,
+    };
+
+    const outcomeRows = await db
+      .select({
+        outcome: aiTrainingSamples.outcome,
+        cnt: count(),
+      })
+      .from(aiTrainingSamples)
+      .where(eq(aiTrainingSamples.tenantId, tenantId))
+      .groupBy(aiTrainingSamples.outcome);
+
+    for (const row of outcomeRows) {
+      const key = row.outcome as keyof typeof samplesByOutcome;
+      if (key in samplesByOutcome) {
+        samplesByOutcome[key] = Number(row.cnt);
+      }
+    }
+
+    const [convRagRow] = await db
+      .select({ cnt: count() })
+      .from(ragDocuments)
+      .where(and(eq(ragDocuments.tenantId, tenantId), eq(ragDocuments.type, "CONVERSATION")));
+
+    const recentConfidences = await db
+      .select({ confidence: aiSuggestions.confidence })
+      .from(aiSuggestions)
+      .innerJoin(conversations, eq(conversations.id, aiSuggestions.conversationId))
+      .where(eq(conversations.tenantId, tenantId))
+      .orderBy(desc(aiSuggestions.createdAt))
+      .limit(50);
+
+    const confValues = recentConfidences
+      .map((r) => r.confidence)
+      .filter((c): c is number => c != null && !Number.isNaN(c));
+    const avgConfidenceLast50 =
+      confValues.length === 0 ? null : confValues.reduce((a, b) => a + b, 0) / confValues.length;
+
+    const intentRows = await db
+      .select({
+        intent: aiTrainingSamples.intent,
+        cnt: sql<number>`count(*)`,
+      })
+      .from(aiTrainingSamples)
+      .where(
+        and(
+          eq(aiTrainingSamples.tenantId, tenantId),
+          isNotNull(aiTrainingSamples.intent),
+          ne(aiTrainingSamples.intent, "")
+        )
+      )
+      .groupBy(aiTrainingSamples.intent)
+      .orderBy(desc(sql`count(*)`))
+      .limit(5);
+
+    const topIntents = intentRows
+      .filter((r): r is { intent: string; cnt: number } => r.intent != null && r.intent !== "")
+      .map((r) => ({ intent: r.intent, count: Number(r.cnt) }));
+
+    const [totalRow] = await db
+      .select({ cnt: count() })
+      .from(aiTrainingSamples)
+      .where(eq(aiTrainingSamples.tenantId, tenantId));
+
+    const [lqRow] = await db
+      .select({ cnt: count() })
+      .from(learningQueue)
+      .where(and(eq(learningQueue.tenantId, tenantId), eq(learningQueue.status, "pending")));
+
+    return {
+      samplesByOutcome,
+      conversationRagCount: Number(convRagRow?.cnt ?? 0),
+      avgConfidenceLast50,
+      topIntents,
+      totalSamples: Number(totalRow?.cnt ?? 0),
+      learningQueuePending: Number(lqRow?.cnt ?? 0),
+    };
   }
 
   async getAiTrainingPolicy(tenantId: string): Promise<AiTrainingPolicy | undefined> {
@@ -1108,6 +1203,13 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return result;
+  }
+
+  async getAllPendingLearningQueueItems(limit = 50): Promise<LearningQueueItem[]> {
+    return db.select().from(learningQueue)
+      .where(eq(learningQueue.status, "pending"))
+      .orderBy(desc(learningQueue.learningScore))
+      .limit(limit);
   }
 
   async getEscalationEvent(id: string, tenantId: string): Promise<EscalationEvent | undefined> {
@@ -1429,11 +1531,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createRagChunk(chunk: InsertRagChunk): Promise<RagChunk> {
-    const [created] = await db.insert(ragChunks).values(chunk).returning();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [created] = await db.insert(ragChunks).values(chunk as any).returning();
     return created;
   }
 
-  async deleteRagBySource(tenantId: string, sourceType: "PRODUCT" | "DOC", sourceId: string): Promise<{ deletedDocs: number }> {
+  async deleteRagBySource(tenantId: string, sourceType: RagDocType, sourceId: string): Promise<{ deletedDocs: number }> {
     const deleted = await db.delete(ragDocuments)
       .where(and(
         eq(ragDocuments.tenantId, tenantId),
@@ -1444,16 +1547,27 @@ export class DatabaseStorage implements IStorage {
     return { deletedDocs: deleted.length };
   }
 
+  async findRagDocumentBySource(tenantId: string, type: RagDocType, sourceId: string): Promise<RagDocument | undefined> {
+    const [doc] = await db.select().from(ragDocuments)
+      .where(and(
+        eq(ragDocuments.tenantId, tenantId),
+        eq(ragDocuments.type, type),
+        eq(ragDocuments.sourceId, sourceId)
+      ))
+      .limit(1);
+    return doc;
+  }
+
   async updateRagChunkEmbedding(chunkId: string, embedding: number[]): Promise<boolean> {
     const embeddingJson = JSON.stringify(embedding);
     const result = await db.update(ragChunks)
-      .set({ embedding: embeddingJson, updatedAt: new Date() })
+      .set({ embedding: embeddingJson, embeddingVector: embedding, updatedAt: new Date() })
       .where(eq(ragChunks.id, chunkId))
       .returning({ id: ragChunks.id });
     return result.length > 0;
   }
 
-  async getRagChunksBySource(tenantId: string, sourceType: "PRODUCT" | "DOC", sourceId: string): Promise<{ id: string; chunkText: string; embedding: number[] | null }[]> {
+  async getRagChunksBySource(tenantId: string, sourceType: RagDocType, sourceId: string): Promise<{ id: string; chunkText: string; embedding: number[] | null }[]> {
     const docs = await db.select({ id: ragDocuments.id })
       .from(ragDocuments)
       .where(and(
@@ -1558,6 +1672,11 @@ export class DatabaseStorage implements IStorage {
     return { invalidated: staleChunks.length };
   }
 
+  /**
+   * @deprecated Use searchRagChunksBySimilarity for efficient pgvector-based search.
+   * This method loads all chunks into memory which is O(n) and slow at scale.
+   * Kept for backwards compatibility and tests only.
+   */
   async getAllRagChunksWithEmbedding(tenantId: string): Promise<{ id: string; chunkText: string; chunkIndex: number; embedding: string | null; metadata: unknown }[]> {
     const docs = await db.select({ id: ragDocuments.id })
       .from(ragDocuments)
@@ -1580,6 +1699,32 @@ export class DatabaseStorage implements IStorage {
       ));
     
     return chunks;
+  }
+
+  async searchRagChunksBySimilarity(
+    tenantId: string,
+    queryEmbedding: number[],
+    topK: number,
+    minSimilarity: number
+  ): Promise<Array<{ id: string; ragDocumentId: string; chunkText: string; tenantId: string; similarity: number; chunkIndex: number; metadata: unknown }>> {
+    const vectorStr = `[${queryEmbedding.join(',')}]`;
+    const result = await db.execute(sql`
+      SELECT rc.id,
+             rc.rag_document_id as "ragDocumentId",
+             rc.chunk_text as "chunkText",
+             rd.tenant_id as "tenantId",
+             rc.chunk_index as "chunkIndex",
+             rc.metadata,
+             1 - (rc.embedding_vector <=> ${vectorStr}::vector) as similarity
+      FROM rag_chunks rc
+      JOIN rag_documents rd ON rc.rag_document_id = rd.id
+      WHERE rd.tenant_id = ${tenantId}
+        AND rc.embedding_vector IS NOT NULL
+        AND 1 - (rc.embedding_vector <=> ${vectorStr}::vector) >= ${minSimilarity}
+      ORDER BY rc.embedding_vector <=> ${vectorStr}::vector
+      LIMIT ${topK}
+    `);
+    return result.rows as Array<{ id: string; ragDocumentId: string; chunkText: string; tenantId: string; similarity: number; chunkIndex: number; metadata: unknown }>;
   }
 
   // Update History methods

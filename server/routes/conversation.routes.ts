@@ -131,6 +131,11 @@ router.patch("/api/conversations/:id", requireAuth, requireOperator, requireTena
       triggerSummaryOnConversationResolved(conversation.tenantId, conversation.customerId).catch(err => {
         console.error("Failed to trigger summary on conversation resolved:", err);
       });
+
+      const { indexConversation } = await import("../services/conversation-rag-indexer");
+      indexConversation(req.params.id, tenantId).catch(err => {
+        console.error("[ConversationRAG] Failed to index resolved conversation:", err);
+      });
     }
 
     res.json(updated);

@@ -204,4 +204,14 @@ router.put("/api/agent-settings", requireAuth, requirePermission("MANAGE_TENANT_
   }
 });
 
+router.get("/api/ai/training-stats", requireAuth, requirePermission("VIEW_CONVERSATIONS"), requireTenant, async (req: Request, res: Response) => {
+  try {
+    const stats = await storage.getAiTrainingStats(req.tenantId!);
+    res.json(stats);
+  } catch (error) {
+    console.error("Error fetching AI training stats:", error);
+    res.status(500).json({ error: "Failed to fetch AI training stats" });
+  }
+});
+
 export default router;

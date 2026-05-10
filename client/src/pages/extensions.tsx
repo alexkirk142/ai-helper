@@ -16,6 +16,8 @@ import {
   BarChart3,
   Globe,
   BrainCircuit,
+  BookOpen,
+  GraduationCap,
 } from "lucide-react";
 import { SiTelegram } from "react-icons/si";
 import { useAiBillingStatus, useCreateAiCheckout, useCancelAiSubscription } from "@/hooks/use-billing";
@@ -23,11 +25,11 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 const AI_FEATURES = [
-  { icon: MessageSquare, text: "Автоматические подсказки ответов на сообщения клиентов" },
-  { icon: BrainCircuit, text: "Decision Engine: AUTO_SEND / NEED_APPROVAL / ESCALATE" },
-  { icon: BarChart3, text: "RAG-контекст из базы знаний и каталога товаров" },
-  { icon: Zap, text: "Few-shot обучение на одобренных ответах операторов" },
-  { icon: Shield, text: "Самопроверка качества ответа перед отправкой" },
+  { icon: MessageSquare, text: "Предлагает готовый ответ на каждое сообщение клиента — оператор отправляет одним кликом" },
+  { icon: Zap, text: "Простые вопросы отвечает сам, сложные или нестандартные — показывает оператору на проверку" },
+  { icon: BookOpen, text: "Отвечает строго по вашему каталогу товаров и базе знаний — без домыслов и выдуманных данных" },
+  { icon: GraduationCap, text: "Запоминает удачные ответы вашей команды и со временем становится точнее" },
+  { icon: Shield, text: "Проверяет себя перед отправкой — если не уверен в ответе, предупреждает оператора" },
 ];
 
 const COMING_SOON_EXTENSIONS = [
@@ -154,7 +156,7 @@ export default function Extensions() {
                 <div>
                   <CardTitle className="text-base">AI Ассистент</CardTitle>
                   <CardDescription className="text-xs">
-                    Умный помощник для автоматизации ответов клиентам
+                    Отвечает на вопросы клиентов и учится с каждым диалогом
                   </CardDescription>
                 </div>
               </div>

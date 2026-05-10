@@ -5,6 +5,7 @@ import { embeddingService } from "./embedding-service";
 export interface RetrievalConfig {
   productTopK: number;
   docTopK: number;
+  conversationTopK: number;
   retrievalConfidenceThreshold: number;
   minSimilarity: number;
 }
@@ -12,6 +13,7 @@ export interface RetrievalConfig {
 const DEFAULT_CONFIG: RetrievalConfig = {
   productTopK: 5,
   docTopK: 3,
+  conversationTopK: 3,
   retrievalConfidenceThreshold: 0.7,
   minSimilarity: 0.5,
 };
@@ -37,6 +39,7 @@ export interface RetrievalResult {
   chunks: RetrievedChunk[];
   productChunks: RetrievedChunk[];
   docChunks: RetrievedChunk[];
+  conversationChunks: RetrievedChunk[];
   usedDocFallback: boolean;
   queryEmbedding: number[] | null;
   topProductSimilarity: number;
@@ -73,6 +76,7 @@ export async function retrieveContext(
     chunks: [],
     productChunks: [],
     docChunks: [],
+    conversationChunks: [],
     usedDocFallback: false,
     queryEmbedding: null,
     topProductSimilarity: 0,
@@ -92,25 +96,23 @@ export async function retrieveContext(
   
   const queryEmbedding = queryResult.embedding;
 
-  const allChunks = await storage.getAllRagChunksWithEmbedding(filter.tenantId);
-  
-  if (allChunks.length === 0) {
+  // Fetch topK combined chunks via pgvector similarity search in the DB
+  const topK = cfg.productTopK + cfg.docTopK + cfg.conversationTopK;
+  const dbChunks = await storage.searchRagChunksBySimilarity(
+    filter.tenantId,
+    queryEmbedding,
+    topK,
+    cfg.minSimilarity
+  );
+
+  if (dbChunks.length === 0) {
     return { ...emptyResult, queryEmbedding };
   }
 
-  const scoredChunks: (RetrievedChunk & { embedding: number[] })[] = [];
-  
-  for (const chunk of allChunks) {
-    if (!chunk.embedding) continue;
-    
-    const embedding = typeof chunk.embedding === "string" 
-      ? JSON.parse(chunk.embedding) as number[]
-      : chunk.embedding;
-    
-    const similarity = cosineSimilarity(queryEmbedding, embedding);
-    
-    if (similarity < cfg.minSimilarity) continue;
+  // Apply optional metadata filters (category, sku) and reconstruct typed chunks
+  const scoredChunks: RetrievedChunk[] = [];
 
+  for (const chunk of dbChunks) {
     const metadata = chunk.metadata as Record<string, unknown>;
     const sourceType = metadata.sourceType as RagDocType;
     const sourceId = metadata.sourceId as string;
@@ -124,22 +126,21 @@ export async function retrieveContext(
 
     scoredChunks.push({
       chunkText: chunk.chunkText,
-      similarity,
+      similarity: chunk.similarity,
       sourceType,
       sourceId,
       metadata,
       chunkIndex: chunk.chunkIndex,
       isCritical: metadata.isCritical as boolean | undefined,
-      embedding,
     });
   }
 
-  scoredChunks.sort((a, b) => b.similarity - a.similarity);
+  // Results are already ordered by similarity ASC from the DB (ORDER BY <=>); reverse for DESC
+  // (pgvector <=> returns distance, so ORDER BY <=> gives most-similar first after our 1-dist transform)
 
   const productChunks = scoredChunks
     .filter(c => c.sourceType === "PRODUCT")
-    .slice(0, cfg.productTopK)
-    .map(({ embedding, ...rest }) => rest);
+    .slice(0, cfg.productTopK);
 
   const topProductSimilarity = productChunks.length > 0 ? productChunks[0].similarity : 0;
 
@@ -150,18 +151,23 @@ export async function retrieveContext(
     usedDocFallback = true;
     docChunks = scoredChunks
       .filter(c => c.sourceType === "DOC")
-      .slice(0, cfg.docTopK)
-      .map(({ embedding, ...rest }) => rest);
+      .slice(0, cfg.docTopK);
   }
 
   const topDocSimilarity = docChunks.length > 0 ? docChunks[0].similarity : 0;
 
-  const chunks = [...productChunks, ...docChunks];
+  // CONVERSATION chunks are always included when available (similar dialogs context)
+  const conversationChunks = scoredChunks
+    .filter(c => c.sourceType === "CONVERSATION")
+    .slice(0, cfg.conversationTopK);
+
+  const chunks = [...productChunks, ...docChunks, ...conversationChunks];
 
   return {
     chunks,
     productChunks,
     docChunks,
+    conversationChunks,
     usedDocFallback,
     queryEmbedding,
     topProductSimilarity,
@@ -190,6 +196,13 @@ export function formatContextForPrompt(result: RetrievalResult): string {
       return `[Документ ${i + 1}: ${title}, сходство: ${(chunk.similarity * 100).toFixed(0)}%]\n${chunk.chunkText}`;
     });
     sections.push("=== ДОКУМЕНТЫ ===\n" + docLines.join("\n\n"));
+  }
+
+  if (result.conversationChunks && result.conversationChunks.length > 0) {
+    const convLines = result.conversationChunks.map((chunk, i) => {
+      return `[Диалог ${i + 1}, сходство: ${(chunk.similarity * 100).toFixed(0)}%]\n${chunk.chunkText}`;
+    });
+    sections.push("=== ПОХОЖИЕ ДИАЛОГИ ===\n" + convLines.join("\n\n"));
   }
 
   return sections.join("\n\n");

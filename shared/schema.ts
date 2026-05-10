@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, jsonb, real, serial, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, jsonb, real, serial, uniqueIndex, index, customType } from "drizzle-orm/pg-core";
+
+// pgvector custom type for storing and querying OpenAI embeddings (text-embedding-3-large = 3072 dims)
+const pgVector = customType<{ data: number[]; driverData: string; config: { dimensions: number } }>({
+  dataType(config) { return `vector(${config?.dimensions ?? 3072})`; },
+  toDriver(value: number[]) { return JSON.stringify(value); },
+  fromDriver(value: string) { return JSON.parse(value as string) as number[]; },
+});
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -301,14 +308,14 @@ export const knowledgeDocChunks = pgTable("knowledge_doc_chunks", {
 });
 
 // RAG Document types
-export const RAG_DOC_TYPES = ["PRODUCT", "DOC"] as const;
+export const RAG_DOC_TYPES = ["PRODUCT", "DOC", "CONVERSATION"] as const;
 export type RagDocType = typeof RAG_DOC_TYPES[number];
 
 // RAG Documents (unified index for products and knowledge docs)
 export const ragDocuments = pgTable("rag_documents", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
-  type: text("type").notNull(), // PRODUCT | DOC
+  type: text("type").notNull(), // PRODUCT | DOC | CONVERSATION
   sourceId: varchar("source_id").notNull(), // productId or documentId
   content: text("content").notNull(),
   metadata: jsonb("metadata").default({}), // { category, sku, tags }
@@ -323,7 +330,8 @@ export const ragChunks = pgTable("rag_chunks", {
   chunkText: text("chunk_text").notNull(),
   chunkIndex: integer("chunk_index").notNull(),
   tokenCount: integer("token_count").notNull(),
-  embedding: text("embedding"), // nullable - vector stored as text for now
+  embedding: text("embedding"), // nullable - vector stored as text (legacy fallback)
+  embeddingVector: pgVector("embedding_vector", { dimensions: 3072 }), // pgvector column for fast similarity search
   metadata: jsonb("metadata").default({}),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -387,7 +395,7 @@ export const aiTrainingSamples = pgTable("ai_training_samples", {
   finalAnswer: text("final_answer"), // null for REJECTED
   intent: text("intent"),
   decision: text("decision"), // AUTO_SEND, NEED_APPROVAL, ESCALATE
-  outcome: text("outcome").notNull(), // APPROVED, EDITED, REJECTED
+  outcome: text("outcome").notNull(), // APPROVED, EDITED, REJECTED, OPERATOR_MANUAL
   rejectionReason: text("rejection_reason"), // reason for REJECTED outcomes
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
@@ -856,6 +864,7 @@ export const FEATURE_FLAG_NAMES = [
   "MAX_PERSONAL_CHANNEL_ENABLED",
   "AUTO_PARTS_ENABLED",
   "GEARBOX_TAG_MINLEN_4",
+  "AUTO_LEARNING_ENABLED",
 ] as const;
 
 // ============ Channel Types ============
@@ -1017,7 +1026,10 @@ export const insertRagDocumentSchema = createInsertSchema(ragDocuments).omit({ i
 export type InsertRagDocument = z.infer<typeof insertRagDocumentSchema>;
 export type RagDocument = typeof ragDocuments.$inferSelect;
 
-export const insertRagChunkSchema = createInsertSchema(ragChunks).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertRagChunkSchema = createInsertSchema(ragChunks, {
+  // drizzle-zod infers customType columns as z.array(z.unknown()); override to keep number[] typing
+  embeddingVector: z.array(z.number()).nullable().optional(),
+}).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertRagChunk = z.infer<typeof insertRagChunkSchema>;
 export type RagChunk = typeof ragChunks.$inferSelect;
 

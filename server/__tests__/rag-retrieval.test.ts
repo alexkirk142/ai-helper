@@ -1,4 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// rag-retrieval → embedding-service → feature-flags → db requires DATABASE_URL; mock the chain
+vi.mock("../storage", () => ({
+  storage: {
+    searchRagChunksBySimilarity: vi.fn().mockResolvedValue([]),
+  },
+}));
+vi.mock("../services/embedding-service", () => ({
+  embeddingService: {
+    isAvailable: vi.fn().mockReturnValue(false),
+    createEmbedding: vi.fn().mockResolvedValue(null),
+  },
+}));
+
 import { ragRetrieval } from "../services/rag-retrieval";
 
 describe("RAG Retrieval", () => {

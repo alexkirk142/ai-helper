@@ -1,4 +1,4 @@
-export type { IStorage } from "./storage.types";
+export type { IStorage, AiTrainingStats } from "./storage.types";
 
 import { DatabaseStorage } from "./database-storage";
 

@@ -1,7 +1,31 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { UsedSource } from "@shared/schema";
 import { PENALTY_CODES, type DecisionSettings } from "@shared/schema";
 import type { RetrievedChunk, RetrievalResult } from "../services/rag-retrieval";
+
+// decision-engine transitively imports storage, feature-flags (→db), embedding-service — mock all
+vi.mock("../storage", () => ({
+  storage: {
+    searchRagChunksBySimilarity: vi.fn().mockResolvedValue([]),
+    getDecisionSettings: vi.fn().mockResolvedValue(undefined),
+    getAiTrainingSamplesByTenant: vi.fn().mockResolvedValue([]),
+    getAiTrainingPolicy: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+vi.mock("../services/feature-flags", () => ({
+  featureFlagService: {
+    isEnabled: vi.fn().mockResolvedValue(false),
+    isFeatureEnabled: vi.fn().mockReturnValue(false),
+  },
+}));
+vi.mock("../services/embedding-service", () => ({
+  embeddingService: {
+    isAvailable: vi.fn().mockReturnValue(false),
+    createEmbedding: vi.fn().mockResolvedValue(null),
+    createEmbeddings: vi.fn().mockResolvedValue([]),
+  },
+}));
+
 import { _testing } from "../services/decision-engine";
 
 const { applyPenalties, STALE_DATA_THRESHOLD_MS, LOW_SIMILARITY_THRESHOLD } = _testing;

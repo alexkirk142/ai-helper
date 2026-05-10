@@ -2,7 +2,7 @@ import { storage } from "../storage";
 import type { AiSuggestion, InsertAiTrainingSample, AiTrainingSample } from "@shared/schema";
 import { sanitizeForPrompt } from "../utils/sanitizer";
 
-export type TrainingOutcome = "APPROVED" | "EDITED" | "REJECTED";
+export type TrainingOutcome = "APPROVED" | "EDITED" | "REJECTED" | "OPERATOR_MANUAL";
 
 interface RecordSampleParams {
   suggestion: AiSuggestion;

@@ -61,6 +61,10 @@ const DEFAULT_FLAGS: Record<FeatureFlagName, { description: string; enabled: boo
     description: "Allow 4-character gearbox tag OCR codes (e.g. S4TA, A131, K312) through the quality gate. Routes to clarification flow only — never to direct price lookup. Disabled by default.",
     enabled: false,
   },
+  AUTO_LEARNING_ENABLED: {
+    description: "Enable auto-harvest of operator manual replies as training samples (OPERATOR_MANUAL outcome)",
+    enabled: false,
+  },
 };
 
 class FeatureFlagService {
