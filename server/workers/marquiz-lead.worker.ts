@@ -223,7 +223,8 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
 
   // ══════════════════════════════════════════════════════════════════════════
   // STRICT ROUTING: respect the channel the client chose in Marquiz.
-  // If preferred is set — use ONLY that channel, no cross-channel fallback.
+  // If preferred is set — try that channel first, then fall back to other
+  // available channels before giving up.
   // If not set — use best-effort auto logic (Telegram first, then MAX).
   // ══════════════════════════════════════════════════════════════════════════
 
@@ -552,26 +553,63 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
       if (r.success) return;
       console.warn(`[MarquizWorker] MAX Personal fallback also failed (${r.error})`);
     }
-    console.warn(`[MarquizWorker] Client chose Telegram but all methods failed — saving as failed lead`);
-    await saveFailedLead(data, tenantId, phone, commonMeta, "telegram_failed", tenant);
+    // MAX also failed — last attempt via WhatsApp Personal.
+    if (hasPhone) {
+      console.warn(`[MarquizWorker] MAX failed — falling back to WhatsApp Personal`);
+      const r = await sendViaWhatsAppPersonal();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] WhatsApp Personal fallback also failed (${r.error})`);
+    }
+    console.warn(`[MarquizWorker] Client chose Telegram but all channels failed — saving as failed lead`);
+    await saveFailedLead(data, tenantId, phone, commonMeta, "Все каналы недоступны — клиент не зарегистрирован ни в одном мессенджере", tenant);
     return;
   }
 
   // ── STRICT: client chose MAX ───────────────────────────────────────────────
   if (preferred === "max") {
-    const r = await sendViaMAX();
-    if (r.success) return;
-    console.warn(`[MarquizWorker] Client chose MAX but send failed (${r.error}) — saving as failed lead`);
-    await saveFailedLead(data, tenantId, phone, commonMeta, r.error === "No valid MAX phone" ? "max_no_phone" : "max_send_failed", tenant);
+    {
+      const r = await sendViaMAX();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] MAX send failed (${r.error}) — falling back to Telegram`);
+    }
+    // MAX failed — try Telegram by phone.
+    if (hasPhone) {
+      const r = await sendViaTelegramByPhone();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] Telegram phone fallback failed (${r.error}) — falling back to WhatsApp`);
+    }
+    // Telegram also failed — last attempt via WhatsApp Personal.
+    if (hasPhone) {
+      const r = await sendViaWhatsAppPersonal();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] WhatsApp Personal fallback also failed (${r.error})`);
+    }
+    console.warn(`[MarquizWorker] Client chose MAX but all channels failed — saving as failed lead`);
+    await saveFailedLead(data, tenantId, phone, commonMeta, "Все каналы недоступны — клиент не зарегистрирован ни в одном мессенджере", tenant);
     return;
   }
 
   // ── STRICT: client chose WhatsApp Personal ────────────────────────────────
   if (preferred === "whatsapp") {
-    const r = await sendViaWhatsAppPersonal();
-    if (r.success) return;
-    console.warn(`[MarquizWorker] Client chose WhatsApp but send failed (${r.error}) — saving as failed lead`);
-    await saveFailedLead(data, tenantId, phone, commonMeta, "whatsapp_send_failed", tenant);
+    {
+      const r = await sendViaWhatsAppPersonal();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] WhatsApp send failed (${r.error}) — falling back to MAX`);
+    }
+    // WhatsApp failed — try MAX Personal.
+    if (hasPhone) {
+      const r = await sendViaMAX();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] MAX fallback failed (${r.error}) — falling back to Telegram`);
+    }
+    // MAX also failed — last attempt via Telegram by phone.
+    if (hasPhone) {
+      const r = await sendViaTelegramByPhone();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] Telegram phone fallback also failed (${r.error})`);
+    }
+    console.warn(`[MarquizWorker] Client chose WhatsApp but all channels failed — saving as failed lead`);
+    await saveFailedLead(data, tenantId, phone, commonMeta, "Все каналы недоступны — клиент не зарегистрирован ни в одном мессенджере", tenant);
     return;
   }
 
@@ -580,7 +618,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   // otherwise fall back to legacy order: MAX → Telegram.
   if (!hasPhone && !data.telegramUsername) {
     console.warn(`[MarquizWorker] No contact info — saving as failed lead`);
-    await saveFailedLead(data, tenantId, phone, commonMeta, "no_contact_info", tenant);
+    await saveFailedLead(data, tenantId, phone, commonMeta, "Нет контактных данных — ни телефона, ни Telegram", tenant);
     return;
   }
 
@@ -617,7 +655,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   }
 
   console.warn(`[MarquizWorker] All channels failed — saving as failed lead`);
-  await saveFailedLead(data, tenantId, phone, commonMeta, "all_channels_failed", tenant);
+  await saveFailedLead(data, tenantId, phone, commonMeta, "Все каналы недоступны — клиент не зарегистрирован ни в одном мессенджере", tenant);
 }
 
 // ---------------------------------------------------------------------------
