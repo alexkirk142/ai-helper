@@ -136,7 +136,30 @@ interface DecisionEngineSettingsProps {
 
 function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSettingsProps) {
   const { toast } = useToast();
-  
+
+  const { data: featureFlag } = useQuery<{ name: string; enabled: boolean }>({
+    queryKey: ["/api/feature-flags/DECISION_ENGINE_ENABLED/check"],
+  });
+
+  const decisionEngineEnabled = featureFlag?.enabled ?? true;
+
+  const toggleDecisionEngineMutation = useMutation({
+    mutationFn: async (data: { enabled: boolean }) => {
+      return apiRequest("POST", "/api/admin/feature-flags/DECISION_ENGINE_ENABLED/toggle", data);
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/feature-flags/DECISION_ENGINE_ENABLED/check"] });
+      toast({
+        title: variables.enabled
+          ? "Движок принятия решений включён"
+          : "Движок принятия решений выключен",
+      });
+    },
+    onError: () => {
+      toast({ title: "Не удалось изменить настройку", variant: "destructive" });
+    },
+  });
+
   const { data: settings, isLoading } = useQuery<DecisionSettings>({
     queryKey: ["/api/settings/decision"],
   });
@@ -252,7 +275,27 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
             Есть несохранённые изменения — не забудьте нажать «Сохранить»
           </div>
         )}
-        <div className="space-y-4">
+        <div className="flex items-center justify-between rounded-lg border p-4">
+          <div className="space-y-0.5">
+            <Label className="text-base">Движок принятия решений</Label>
+            <p className="text-sm text-muted-foreground">
+              Когда включён — ИИ сам решает отправлять ответ автоматически,
+              отправить на проверку оператору или эскалировать.
+              Когда выключен — все ответы всегда идут на проверку оператору.
+            </p>
+          </div>
+          <Switch
+            checked={decisionEngineEnabled}
+            onCheckedChange={(checked) => toggleDecisionEngineMutation.mutate({ enabled: checked })}
+            disabled={toggleDecisionEngineMutation.isPending}
+          />
+        </div>
+        {!decisionEngineEnabled && (
+          <p className="text-sm text-muted-foreground text-center py-1">
+            Включите движок принятия решений чтобы настроить пороги
+          </p>
+        )}
+        <div className={cn("space-y-4", !decisionEngineEnabled && "opacity-50 pointer-events-none")}>
           <div>
             <div className="flex items-center justify-between mb-2">
               <Label>Уверенность для авто-отправки: {Math.round(tAuto * 100)}%</Label>
@@ -319,7 +362,7 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
 
         <Separator />
 
-        <div className="space-y-2">
+        <div className={cn("space-y-2", !decisionEngineEnabled && "opacity-50 pointer-events-none")}>
           <Label>Поведение AI по типам запросов</Label>
           <p className="text-xs text-muted-foreground mb-3">
             Определите, что делать с каждым типом запроса от клиента
