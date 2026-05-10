@@ -57,34 +57,6 @@ const DEFAULT_FLAGS: Record<FeatureFlagName, { description: string; enabled: boo
     description: "Enable Max (VK Teams) Personal channel",
     enabled: false,
   },
-  AI_PRICE_ESTIMATE_ENABLED: {
-    description: "Enable AI-based price estimate fallback when web search returns no results",
-    enabled: true,
-  },
-  PRICE_ESCALATION_ENABLED: {
-    description: "Enable structured escalation to operator when Yandex price search is insufficient",
-    enabled: true,
-  },
-  GPT_WEB_SEARCH_ENABLED: {
-    description: "Enable GPT web_search as fallback when Yandex price search is insufficient",
-    enabled: true,
-  },
-  YANDEX_PREFER_MODELNAME: {
-    description: "Prefer identified market model name over raw OEM/PN as Yandex search anchor (PN inputs)",
-    enabled: false,
-  },
-  OUTLIER_GUARD_SMALL_SAMPLE: {
-    description: "Apply symmetric median guard to small price samples (n=2–3) to remove extreme outliers before min/max calculation",
-    enabled: false,
-  },
-  INTL_PRICE_CAP_ENABLED: {
-    description: "Remove intl listings priced above 2.5× RU median when Russian results exist (prevents intl inflation of maxPrice)",
-    enabled: false,
-  },
-  INTL_PRICE_DISCOUNT_ENABLED: {
-    description: "Apply 0.75× discount to intl listing prices when used as the sole price source (intl-only fallback)",
-    enabled: false,
-  },
   GEARBOX_TAG_MINLEN_4: {
     description: "Allow 4-character gearbox tag OCR codes (e.g. S4TA, A131, K312) through the quality gate. Routes to clarification flow only — never to direct price lookup. Disabled by default.",
     enabled: false,

@@ -33,23 +33,18 @@ import { errorHandler } from "./middleware/error-handler";
 import { pool } from "./db";
 import { closeQueue } from "./services/message-queue";
 import { closeVehicleLookupQueue } from "./services/vehicle-lookup-queue";
-import { closePriceLookupQueue } from "./services/price-lookup-queue";
 import { closeNoReplyCheckQueue } from "./services/no-reply-check-queue";
 import { startVehicleLookupWorker } from "./workers/vehicle-lookup.worker";
-import { startPriceLookupWorker } from "./workers/price-lookup.worker";
 import { startWorker as startMessageSendWorker } from "./workers/message-send.worker";
 import { startMarquizLeadWorker } from "./workers/marquiz-lead.worker";
 import { startNoReplyCheckWorker } from "./workers/no-reply-check.worker";
 import type { Worker } from "bullmq";
 import * as fs from "fs";
-import { spawn, ChildProcess } from "child_process";
 import { bootstrapPlatformOwner } from "./services/owner-bootstrap";
 import { featureFlagService } from "./services/feature-flags";
 import { sanitizeForLog } from "./utils/sanitizer";
 
-let podzamenuProcess: ChildProcess | null = null;
 let vehicleLookupWorker: Worker | null = null;
-let priceLookupWorker: Worker | null = null;
 let messageSendWorker: Worker | null = null;
 let marquizLeadWorker: Worker | null = null;
 let noReplyCheckWorker: Worker | null = null;
@@ -273,15 +268,7 @@ app.use((req, res, next) => {
       // Pass the real tenant UUID to map file system "default" folder to database UUID
       await restoreWhatsAppSessions(tenant.id);
       
-      // Auto-start Podzamenu lookup service
-      startPodzamenuService();
-
-      // Wait for Podzamenu service to be ready (poll port 8200) — max 20s
-      await waitForPodzamenu(20_000);
-      log("Podzamenu ready, starting BullMQ workers", "startup");
-
       vehicleLookupWorker = await startVehicleLookupWorker();
-      priceLookupWorker = await startPriceLookupWorker();
       messageSendWorker = await startMessageSendWorker();
       marquizLeadWorker = startMarquizLeadWorker();
       noReplyCheckWorker = startNoReplyCheckWorker();
@@ -298,24 +285,6 @@ app.use((req, res, next) => {
     },
   );
 })();
-
-// Poll Podzamenu FastAPI service on port 8200 until it responds or timeout expires
-async function waitForPodzamenu(timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch("http://127.0.0.1:8200/health", { signal: AbortSignal.timeout(1_000) });
-      if (res.ok) {
-        log("Podzamenu service is ready", "startup");
-        return;
-      }
-    } catch {
-      // not ready yet
-    }
-    await new Promise((r) => setTimeout(r, 1_000));
-  }
-  log("Podzamenu did not respond within timeout, proceeding anyway", "startup");
-}
 
 // Restore saved WhatsApp Personal sessions on server start.
 // Collects tenant IDs from BOTH the file system and the DB so sessions
@@ -383,62 +352,6 @@ async function restoreWhatsAppSessions(realTenantId: string) {
   }
 }
 
-// Auto-start Podzamenu Python lookup service (FastAPI, port 8200)
-function startPodzamenuService() {
-  const scriptPath = "./podzamenu_lookup_service.py";
-
-  if (!fs.existsSync(scriptPath)) {
-    log("Podzamenu service script not found, skipping auto-start", "podzamenu");
-    return;
-  }
-
-  if (podzamenuProcess && !podzamenuProcess.killed) {
-    log("Podzamenu service already running", "podzamenu");
-    return;
-  }
-
-  try {
-    log("Starting Podzamenu lookup service...", "podzamenu");
-
-    podzamenuProcess = spawn("python3", [scriptPath], {
-      detached: false,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        PORT: "8200",
-      },
-    });
-
-    podzamenuProcess.stdout?.on("data", (data: Buffer) => {
-      const lines = data.toString().trim().split("\n");
-      lines.forEach(line => {
-        if (line.includes("Uvicorn running")) {
-          log("Podzamenu service started on port 8200", "podzamenu");
-        }
-      });
-    });
-
-    podzamenuProcess.stderr?.on("data", (data: Buffer) => {
-      const msg = data.toString().trim();
-      if (!msg.includes("INFO:")) {
-        console.error("[Podzamenu]", msg);
-      }
-    });
-
-    podzamenuProcess.on("error", (err) => {
-      log(`Podzamenu service error: ${err.message}`, "podzamenu");
-    });
-
-    podzamenuProcess.on("exit", (code, signal) => {
-      log(`Podzamenu service exited (code: ${code}, signal: ${signal})`, "podzamenu");
-      podzamenuProcess = null;
-    });
-
-  } catch (err: any) {
-    log(`Failed to start Podzamenu service: ${err.message}`, "podzamenu");
-  }
-}
-
 // Graceful shutdown — ordered teardown on SIGTERM / SIGINT
 let isShuttingDown = false;
 
@@ -447,12 +360,6 @@ async function gracefulShutdown(signal: string): Promise<void> {
   isShuttingDown = true;
 
   log(`Received ${signal}, starting graceful shutdown`, "shutdown");
-
-  // Kill Python subprocesses first so they stop producing new work
-  if (podzamenuProcess && !podzamenuProcess.killed) {
-    podzamenuProcess.kill();
-    log("Podzamenu service stopped", "shutdown");
-  }
 
   // Step 1 + 2: Stop accepting new connections; drain in-flight with 5 s timeout
   await new Promise<void>((resolve) => {
@@ -481,7 +388,6 @@ async function gracefulShutdown(signal: string): Promise<void> {
   // Step 3b: Close BullMQ workers (stop accepting new jobs, drain active ones)
   await Promise.allSettled([
     vehicleLookupWorker?.close(),
-    priceLookupWorker?.close(),
     messageSendWorker?.close(),
     marquizLeadWorker?.close(),
   ]);
@@ -491,7 +397,6 @@ async function gracefulShutdown(signal: string): Promise<void> {
   await Promise.allSettled([
     closeQueue(),
     closeVehicleLookupQueue(),
-    closePriceLookupQueue(),
     closeNoReplyCheckQueue(),
   ]);
   log("BullMQ queues closed", "shutdown");

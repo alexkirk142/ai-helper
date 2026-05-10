@@ -17,8 +17,6 @@ import {
   type Tenant,
   type CustomerMemory,
   type TenantAgentSettings,
-  type VehicleLookupCase,
-  type PriceSnapshot,
   PENALTY_CODES,
   INTENT_TYPES,
   VEHICLE_LOOKUP_INTENTS,
@@ -631,56 +629,6 @@ export async function generateWithDecisionEngine(
 
   let ragResult: RetrievalResult | null = null;
   let contextParts: string[] = [];
-
-  // Inject fresh price snapshot if available for this conversation
-  let priceSnapshotBlock: string | null = null;
-  try {
-    // Get the latest vehicle lookup case for this conversation
-    const latestCase = await storage.getLatestVehicleLookupCase(
-      context.conversationId,
-      context.tenantId
-    );
-    if (latestCase?.normalizedValue) {
-      // Try to find a fresh price snapshot using the OEM from the case
-      // The case stores the VIN/FRAME — we need to find associated OEM
-      // Look in price_snapshots by conversation context
-      const recentSnapshot = await storage.getLatestPriceSnapshotForConversation(
-        context.tenantId,
-        context.conversationId
-      );
-      if (recentSnapshot && recentSnapshot.minPrice && recentSnapshot.maxPrice) {
-        const freshness = recentSnapshot.createdAt
-          ? Math.round(
-              (Date.now() - new Date(recentSnapshot.createdAt).getTime())
-              / 1000 / 60
-            )
-          : null;
-        priceSnapshotBlock = [
-          "АКТУАЛЬНЫЕ ЦЕНЫ (только что найдены системой):",
-          `Модель КПП: ${recentSnapshot.modelName ?? recentSnapshot.oem}`,
-          `Диапазон цен: ${recentSnapshot.minPrice.toLocaleString("ru-RU")} — ${recentSnapshot.maxPrice.toLocaleString("ru-RU")} ₽`,
-          recentSnapshot.avgPrice
-            ? `Средняя цена: ${recentSnapshot.avgPrice.toLocaleString("ru-RU")} ₽`
-            : null,
-          recentSnapshot.listingsCount
-            ? `Найдено объявлений: ${recentSnapshot.listingsCount}`
-            : null,
-          freshness !== null
-            ? `Данные получены: ${freshness} мин. назад`
-            : null,
-          "ВАЖНО: Используй ТОЛЬКО эти цены в своём ответе. Игнорируй любые другие цены из контекста.",
-        ]
-          .filter(Boolean)
-          .join("\n");
-      }
-    }
-  } catch (err) {
-    console.warn("[DecisionEngine] Price snapshot injection failed:", err);
-  }
-
-  if (priceSnapshotBlock) {
-    contextParts.unshift(priceSnapshotBlock); // inject FIRST, highest priority
-  }
 
   if (ragEnabled) {
     try {

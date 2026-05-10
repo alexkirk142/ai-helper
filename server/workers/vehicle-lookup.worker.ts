@@ -9,11 +9,6 @@ import {
 } from "../services/podzamenu-lookup-client";
 import type { GearboxInfo } from "../services/podzamenu-lookup-client";
 import { fillGearboxTemplate } from "../services/gearbox-templates";
-import { detectGearboxType } from "../services/price-sources/types";
-import {
-  fromVehicleContextGearboxType,
-  toPriceSearchGearboxType,
-} from "../services/gearbox/gearbox-kind";
 import { storage } from "../storage";
 import { identifyTransmissionByOem, type VehicleContext } from "../services/transmission-identifier";
 import { getSecret } from "../services/secret-resolver";
@@ -130,104 +125,6 @@ async function createResultSuggestionIfNeeded(params: {
   console.log(`[VehicleLookupWorker] Created result suggestion ${suggestion.id} for conversation ${conversationId}`);
 }
 
-async function getLastCustomerMessageText(conversationId: string, tenantId: string): Promise<string | null> {
-  const msgs = await storage.getMessagesByConversation(conversationId, tenantId);
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].role === "customer" && msgs[i].content) {
-      return msgs[i].content;
-    }
-  }
-  return null;
-}
-
-async function tryFallbackPriceLookup(params: {
-  tenantId: string;
-  conversationId: string;
-  messageId?: string;
-  gearbox: GearboxInfo;
-  vehicleMeta?: { make?: string; model?: string; year?: number };
-  vehicleGearboxType?: string | null;
-}): Promise<void> {
-  const { tenantId, conversationId, messageId, gearbox, vehicleMeta, vehicleGearboxType } = params;
-
-  const lastMessage = await getLastCustomerMessageText(conversationId, tenantId);
-  const gearboxTypeFromText = lastMessage ? detectGearboxType(lastMessage) : "unknown";
-
-  // Derive gearbox type from customer text first; fall back to structured
-  // vehicle context (e.g. AT/CVT/MT from PartsAPI) when the customer sent
-  // only images with no accompanying text.
-  const gearboxTypeFromContext = vehicleGearboxType
-    ? toPriceSearchGearboxType(fromVehicleContextGearboxType(vehicleGearboxType))
-    : "unknown";
-
-  const gearboxType = gearboxTypeFromText !== "unknown"
-    ? gearboxTypeFromText
-    : gearboxTypeFromContext;
-
-  if (gearboxType === "unknown") {
-    console.log("[VehicleLookupWorker] Gearbox type unknown from both customer text and vehicleContext — skipping fallback price lookup");
-    return;
-  }
-
-  if (gearboxTypeFromText === "unknown" && gearboxTypeFromContext !== "unknown") {
-    console.log(`[VehicleLookupWorker] Gearbox type resolved from vehicleContext: ${gearboxType}`);
-  }
-
-  const make = vehicleMeta?.make ?? null;
-  const model = vehicleMeta?.model ?? null;
-
-  const templates = await storage.getTenantTemplates(tenantId);
-  const fallbackText = fillGearboxTemplate(templates.gearboxLookupFallback, {
-    gearboxType: gearboxType.toUpperCase(),
-    make: make ?? "",
-    model: model ?? "",
-  });
-
-  const recentSuggestions = await storage.getSuggestionsByConversation(conversationId, tenantId);
-  const cutoff = new Date(Date.now() - DUPLICATE_SUGGESTION_WINDOW_MS);
-  const hasDuplicate = recentSuggestions
-    .slice(0, 5)
-    .some((s) => s.suggestedReply === fallbackText && s.createdAt >= cutoff);
-
-  if (!hasDuplicate) {
-    const suggestion = await storage.createAiSuggestion({
-      conversationId,
-      messageId: messageId ?? null,
-      suggestedReply: fallbackText,
-      intent: "gearbox_fallback_search",
-      confidence: 0.5,
-      needsApproval: true,
-      needsHandoff: false,
-      questionsToAsk: [],
-      usedSources: [],
-      status: "pending",
-      decision: "NEED_APPROVAL",
-      autosendEligible: false,
-    }, tenantId);
-
-    try {
-      const { realtimeService } = await import("../services/websocket-server");
-      realtimeService.broadcastNewSuggestion(tenantId, conversationId, suggestion.id);
-    } catch {
-      // Skip broadcast if import fails
-    }
-    console.log(`[VehicleLookupWorker] Created fallback suggestion ${suggestion.id}`);
-  }
-
-  const { enqueuePriceLookup } = await import("../services/price-lookup-queue");
-  await enqueuePriceLookup({
-    tenantId,
-    conversationId,
-    oem: null,
-    searchFallback: {
-      make,
-      model,
-      gearboxType,
-      gearboxModel: gearbox.model ?? null,
-    },
-  });
-  console.log(`[VehicleLookupWorker] Fallback price lookup started: ${gearboxType} for ${make ?? "?"} ${model ?? "?"}`);
-}
 
 async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<void> {
   const { caseId, tenantId, conversationId, idType, normalizedValue } = job.data;
@@ -248,9 +145,6 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
 
   await storage.updateVehicleLookupCaseStatus(caseId, tenantId, { status: "RUNNING" });
 
-  // Hoisted outside try so it is accessible in the PODZAMENU_NOT_FOUND catch branch
-  // (Strategy 3: use PartsAPI result even when Podzamenu returns NOT_FOUND).
-  // Initialised to a resolved-null promise; reassigned inside try after getSecret.
   let partsApiPromise: Promise<PartsApiResult | null> = Promise.resolve(null);
 
   try {
@@ -512,107 +406,17 @@ async function processVehicleLookup(job: Job<VehicleLookupJobData>): Promise<voi
       gearboxType: gearboxLabel,
     });
 
-    // ── Price lookup routing ───────────────────────────────────────────────────
-    const isModelOnly = gearbox.oemStatus === "MODEL_ONLY" && !!gearbox.model;
-
-    if (isModelOnly) {
-      const lastMessage = await getLastCustomerMessageText(conversationId, tenantId);
-      const detectedFromText = lastMessage ? detectGearboxType(lastMessage) : "unknown" as const;
-      // When text detection is inconclusive, fall back to the structured
-      // vehicleContext.gearboxType ("AT"|"MT"|"CVT") and convert it to the
-      // price-search GearboxType ("акпп"|"мкпп"|"вариатор"|...) so that
-      // SearchFallback always receives the correct representation.
-      const gearboxType = detectedFromText !== "unknown"
-        ? detectedFromText
-        : toPriceSearchGearboxType(fromVehicleContextGearboxType(vehicleContext.gearboxType));
-
-      const { enqueuePriceLookup } = await import("../services/price-lookup-queue");
-      await enqueuePriceLookup({
-        tenantId,
-        conversationId,
-        oem: null,
-        searchFallback: {
-          make: vehicleContext.make ?? null,
-          model: vehicleContext.model ?? null,
-          gearboxType,
-          gearboxModel: gearbox.model ?? null,
-        },
-        isModelOnly: true,
-      });
-      console.log(`[VehicleLookupWorker] Auto-started price lookup (VW Group MODEL_ONLY, model: ${gearbox.model}).`);
-    } else if (lookupConfidence >= 0.80 && gearbox.oemStatus === "FOUND" && gearbox.oem) {
-      const { enqueuePriceLookup } = await import("../services/price-lookup-queue");
-      await enqueuePriceLookup({
-        tenantId,
-        conversationId,
-        oem: gearbox.oem, // keep for compatibility
-        oemPartNumber: gearbox.oem,
-        transmissionCode: gearboxModelHint ?? null,
-        oemModelHint: gearboxModelHint,
-        vehicleContext,
-      });
-      console.log("[VehicleLookupWorker] Auto-started price lookup (high confidence OEM).");
-    } else if (gearbox.oemStatus !== "FOUND" || !gearbox.oem) {
-      await tryFallbackPriceLookup({
-        tenantId,
-        conversationId,
-        messageId: caseRow.messageId ?? undefined,
-        gearbox,
-        vehicleMeta: {
-          make: vehicleContext.make ?? undefined,
-          model: vehicleContext.model ?? undefined,
-        },
-        vehicleGearboxType: vehicleContext.gearboxType ?? null,
-      });
-    }
   } catch (error) {
     // Treat PARSE_FAILED (podzamenu scraped page but couldn't extract data, HTTP 500)
-    // the same as NOT_FOUND for purposes of PartsAPI fallback: if PartsAPI decoded the VIN
-    // successfully we can still run a fallback price search using vehicle make/model.
+    // the same as NOT_FOUND: mark the case as FAILED in both situations.
     const isParseFailed =
       error instanceof PodzamenuLookupError &&
       error.code === "LOOKUP_ERROR" &&
       error.statusCode === 500;
 
     if (error instanceof PodzamenuLookupError && (error.code === PODZAMENU_NOT_FOUND || isParseFailed)) {
-      // partsApiPromise already settled (it has its own .catch), re-awaiting is instant and never throws.
-      const partsApi = await partsApiPromise;
-      if (partsApi?.make) {
-        const reason = isParseFailed ? "PARSE_FAILED" : "NOT_FOUND";
-        console.log(
-          `[VehicleLookupWorker] Podzamenu ${reason} but PartsAPI decoded VIN — running fallback for ${normalizedValue}`
-        );
-        const partsApiKppHint =
-          partsApi.kpp && isValidTransmissionModel(partsApi.kpp) ? partsApi.kpp : null;
-        const minimalGearbox: GearboxInfo = {
-          model: partsApiKppHint,
-          factoryCode: null,
-          oem: null,
-          oemCandidates: [],
-          oemStatus: "NOT_AVAILABLE",
-        };
-        await storage.updateVehicleLookupCaseStatus(caseId, tenantId, {
-          status: "COMPLETED",
-          verificationStatus: "NEED_TAG_OPTIONAL",
-        });
-        await tryFallbackPriceLookup({
-          tenantId,
-          conversationId,
-          messageId: caseRow.messageId ?? undefined,
-          gearbox: minimalGearbox,
-          vehicleMeta: {
-            make: partsApi.make ?? undefined,
-            model: partsApi.modelName ?? undefined,
-            year: partsApi.year ? Number(partsApi.year) : undefined,
-          },
-          vehicleGearboxType: partsApi.gearboxType ?? null,
-        });
-        return;
-      }
-
-      // Both APIs failed
       const failReason = isParseFailed ? "PARSE_FAILED" : "NOT_FOUND";
-      console.log(`[VehicleLookupWorker] Case not found (Podzamenu ${failReason}, PartsAPI empty): ${caseId}`);
+      console.log(`[VehicleLookupWorker] Case not found (Podzamenu ${failReason}): ${caseId}`);
       await storage.updateVehicleLookupCaseStatus(caseId, tenantId, {
         status: "FAILED",
         error: failReason,

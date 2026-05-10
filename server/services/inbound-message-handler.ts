@@ -794,27 +794,6 @@ export async function processIncomingMessageFull(
       return;
     }
 
-    // ── 9. Transmission code path (score >= 0.70) ────────────────────────────
-    if (
-      autoPartsEnabled &&
-      best &&
-      (best.type === "TRANSMISSION_CODE" || best.type === "OCR_TRANSMISSION_CODE") &&
-      best.score >= 0.70
-    ) {
-      incr("detector.route_price_lookup", { kind: "transmissionCode" });
-      console.log(
-        `[InboundHandler] Transmission code (${best.value} score=${best.score.toFixed(2)}) — enqueueing price lookup for ${result.conversationId}`,
-      );
-      const { enqueuePriceLookup } = await import("./price-lookup-queue");
-      await enqueuePriceLookup({
-        tenantId,
-        conversationId: result.conversationId,
-        transmissionCode: best.value,
-        oem: best.value, // legacy alias for backward compatibility
-      });
-      return;
-    }
-
     // ── 10. Gearbox type only ────────────────────────────────────────────────
     if (best?.type === "GEARBOX_TYPE") {
       incr("detector.route_no_vin");
