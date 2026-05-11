@@ -436,7 +436,18 @@ router.delete("/api/telegram-personal/accounts/:id", requireAuth, requirePermiss
     }
 
     const { telegramClientManager } = await import("../../services/telegram-client-manager");
-    await telegramClientManager.disconnectAccount(tenantId, accountId);
+    await telegramClientManager.disconnectAccount(tenantId, accountId, true);
+
+    // Fallback: if account was not in active connections, spin up a temporary client for auth.LogOut
+    if (account.sessionString && !telegramClientManager.isAccountConnected(tenantId, accountId)) {
+      try {
+        const { TelegramPersonalAdapter } = await import("../../services/telegram-personal-adapter");
+        await TelegramPersonalAdapter.logOutSession(account.sessionString);
+        console.log(`[TelegramPersonal] Fallback auth.LogOut sent for account ${accountId}`);
+      } catch (fallbackErr: any) {
+        console.warn(`[TelegramPersonal] Fallback auth.LogOut failed for account ${accountId}: ${fallbackErr.message}`);
+      }
+    }
 
     await storage.deleteTelegramAccount(accountId);
 

@@ -661,4 +661,23 @@ export class TelegramPersonalAdapter implements ChannelAdapter {
       return { success: false, error: errorMessage };
     }
   }
+
+  static async logOutSession(sessionString: string): Promise<void> {
+    const credentials = await getTelegramCredentials();
+    if (!credentials) throw new Error("No Telegram API credentials");
+
+    const { apiId, apiHash } = credentials;
+    const session = new StringSession(sessionString);
+    const client = new TelegramClient(session, apiId, apiHash, {
+      connectionRetries: 1,
+      autoReconnect: false,
+    });
+
+    await client.connect();
+    try {
+      await client.invoke(new Api.auth.LogOut());
+    } finally {
+      await client.disconnect();
+    }
+  }
 }

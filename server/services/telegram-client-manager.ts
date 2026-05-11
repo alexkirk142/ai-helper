@@ -1090,14 +1090,22 @@ class TelegramClientManager {
     }
   }
 
-  async disconnectAccount(tenantId: string, accountId: string): Promise<void> {
+  async disconnectAccount(tenantId: string, accountId: string, logOut: boolean = false): Promise<void> {
     const connectionKey = `${tenantId}:${accountId}`;
-    await this.disconnectByKey(connectionKey);
+    await this.disconnectByKey(connectionKey, logOut);
   }
 
-  private async disconnectByKey(connectionKey: string): Promise<void> {
+  private async disconnectByKey(connectionKey: string, logOut: boolean = false): Promise<void> {
     const connection = this.connections.get(connectionKey);
     if (connection) {
+      if (logOut) {
+        try {
+          await connection.client.invoke(new Api.auth.LogOut());
+          console.log(`[TelegramClientManager] auth.LogOut sent for ${connectionKey}`);
+        } catch (logOutErr: any) {
+          console.warn(`[TelegramClientManager] auth.LogOut failed for ${connectionKey}: ${logOutErr.message}`);
+        }
+      }
       try {
         await connection.client.disconnect();
       } catch (error: any) {
@@ -1475,10 +1483,15 @@ class TelegramClientManager {
           const tgMessages = await connection.client.getMessages(dialog.id, { limit: messageLimit });
 
           const existingMessages = await storage.getMessagesByConversation(conversationId, tenantId);
-          const existingMsgIds = new Set(
-            existingMessages
-              .filter(m => m.metadata && typeof m.metadata === 'object' && 'telegramMsgId' in (m.metadata as object))
-              .map(m => (m.metadata as { telegramMsgId: string }).telegramMsgId)
+          const existingMsgIds = new Set<string>(
+            existingMessages.flatMap(m => {
+              if (!m.metadata || typeof m.metadata !== 'object') return [];
+              const meta = m.metadata as Record<string, unknown>;
+              const ids: string[] = [];
+              if (typeof meta.telegramMsgId === 'string') ids.push(meta.telegramMsgId);
+              if (typeof meta.externalId === 'string') ids.push(meta.externalId);
+              return ids;
+            })
           );
 
           for (const msg of tgMessages.reverse()) {
@@ -1548,10 +1561,15 @@ class TelegramClientManager {
     try {
       const tgMessages = await connection.client.getMessages(chatId, { limit: messageLimit });
       const existingMessages = await storage.getMessagesByConversation(conversationId, tenantId);
-      const existingMsgIds = new Set(
-        existingMessages
-          .filter(m => m.metadata && typeof m.metadata === "object" && "telegramMsgId" in (m.metadata as object))
-          .map(m => (m.metadata as { telegramMsgId: string }).telegramMsgId),
+      const existingMsgIds = new Set<string>(
+        existingMessages.flatMap(m => {
+          if (!m.metadata || typeof m.metadata !== 'object') return [];
+          const meta = m.metadata as Record<string, unknown>;
+          const ids: string[] = [];
+          if (typeof meta.telegramMsgId === 'string') ids.push(meta.telegramMsgId);
+          if (typeof meta.externalId === 'string') ids.push(meta.externalId);
+          return ids;
+        })
       );
 
       let imported = 0;
