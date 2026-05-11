@@ -1870,6 +1870,7 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
   const [qrLoading, setQrLoading] = useState(false);
   const [checkingStatus, setCheckingStatus] = useState<string | null>(null);
   const [reregisteringWebhook, setReregisteringWebhook] = useState<string | null>(null);
+  const [togglingAutoReply, setTogglingAutoReply] = useState<string | null>(null);
   const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastQrFetchRef = useRef<number>(0);
 
@@ -1891,6 +1892,7 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
   };
 
   const toggleAutoReply = async (accountId: string, enabled: boolean) => {
+    setTogglingAutoReply(accountId);
     try {
       await apiRequest("PATCH", `/api/channels/max-personal/${accountId}/auto-reply`, { enabled });
       toast({
@@ -1902,6 +1904,8 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
       refetchAccounts();
     } catch {
       toast({ title: "Ошибка", variant: "destructive" });
+    } finally {
+      setTogglingAutoReply(null);
     }
   };
 
@@ -2078,6 +2082,7 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
                   size="sm"
                   variant={acc.autoReplyEnabled !== false ? "default" : "outline"}
                   onClick={() => toggleAutoReply(acc.accountId, acc.autoReplyEnabled === false)}
+                  disabled={togglingAutoReply === acc.accountId}
                   className="shrink-0"
                 >
                   {acc.autoReplyEnabled !== false ? "Включена" : "Выключена"}

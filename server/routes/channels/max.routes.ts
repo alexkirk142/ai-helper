@@ -15,7 +15,7 @@ router.get("/api/channels/max-personal/accounts", requireAuth, async (req: Reque
 
     const { db } = await import("../../db");
     const { maxPersonalAccounts } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
+    const { eq, asc } = await import("drizzle-orm");
     const rows = await db.select({
       accountId: maxPersonalAccounts.accountId,
       idInstance: maxPersonalAccounts.idInstance,
@@ -24,7 +24,9 @@ router.get("/api/channels/max-personal/accounts", requireAuth, async (req: Reque
       status: maxPersonalAccounts.status,
       webhookRegistered: maxPersonalAccounts.webhookRegistered,
       autoReplyEnabled: maxPersonalAccounts.autoReplyEnabled,
-    }).from(maxPersonalAccounts).where(eq(maxPersonalAccounts.tenantId, tenantId));
+    }).from(maxPersonalAccounts)
+      .where(eq(maxPersonalAccounts.tenantId, tenantId))
+      .orderBy(asc(maxPersonalAccounts.createdAt));
 
     return res.json({ accounts: rows });
   } catch (error) {
