@@ -11,6 +11,7 @@ import { whatsappAdapter } from "../services/whatsapp-adapter";
 import { maxAdapter } from "../services/max-adapter";
 import type { ParsedAttachment } from "../services/channel-adapter";
 import { recordTrainingSample } from "../services/training-sample-service";
+import { realtimeService } from "../services/websocket-server";
 
 const router = Router();
 
@@ -362,6 +363,13 @@ router.post(
       }, msgUser.tenantId);
 
       await storage.updateConversation(req.params.id, msgUser.tenantId, { unreadCount: 0 });
+
+      // Broadcast to all connected operator clients so the sidebar updates in real-time
+      realtimeService.broadcastNewMessage(msgUser.tenantId, message, req.params.id);
+      realtimeService.broadcastConversationUpdate(msgUser.tenantId, {
+        id: req.params.id,
+        lastMessageAt: message.createdAt,
+      });
 
       // ── Auto-Harvest: record operator manual messages as training samples ───
       // When an operator writes a reply without using an AI suggestion, capture

@@ -5,6 +5,7 @@ import { ChatInterface } from "@/components/chat-interface";
 import { CustomerCard, CRM_PRESET_TAGS, getTagColor } from "@/components/customer-card";
 import { ChannelTabs } from "@/components/channel-tabs";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { wsClient } from "@/lib/websocket";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -108,10 +109,18 @@ export default function Conversations() {
     setHasNextPage(convPage.length >= CONV_LIMIT);
   }, [convPage, convOffset]);
 
-  // When React Query invalidates conversations (new message), reset to first page
+  // When new messages or conversations arrive via WebSocket, reset to page 0
+  // so the list re-fetches from the top and the moved-up conversation is visible.
   useEffect(() => {
-    setConvOffset(0);
-  }, []); // only on mount
+    const unsubMsg = wsClient.subscribe("new_message", () => setConvOffset(0));
+    const unsubConv = wsClient.subscribe("new_conversation", () => setConvOffset(0));
+    const unsubUpd = wsClient.subscribe("conversation_update", () => setConvOffset(0));
+    return () => {
+      unsubMsg();
+      unsubConv();
+      unsubUpd();
+    };
+  }, []);
 
   const conversations = allConversations;
   const isFetchingNextPage = convFetching && convOffset > 0;
