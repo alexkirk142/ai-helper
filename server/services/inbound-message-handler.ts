@@ -186,9 +186,12 @@ export async function handleIncomingMessage(
   }
 
   const existingMessages = await storage.getMessagesByConversation(conversationId, tenant.id);
-  const existingMessage = existingMessages.find(m =>
-    m.metadata && (m.metadata as any).externalId === parsed.externalMessageId
-  );
+  const existingMessage = existingMessages.find(m => {
+    if (!m.metadata) return false;
+    const meta = m.metadata as Record<string, unknown>;
+    return meta.externalId === parsed.externalMessageId ||
+           meta.telegramMsgId === parsed.externalMessageId;
+  });
 
   if (existingMessage) {
     console.log(`[InboundHandler] Duplicate message ignored: ${parsed.externalMessageId}`);
