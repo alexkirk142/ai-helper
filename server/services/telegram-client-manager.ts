@@ -21,6 +21,7 @@ interface ActiveConnection {
   lastActivity: Date;
   handlersAttached: boolean;
   reconnectAttempts: number;
+  tgRole?: string;
 }
 
 interface PendingOutboundMessage {
@@ -431,6 +432,12 @@ class TelegramClientManager {
         // Register this account's Telegram userId so inter-account bridge messages can be filtered.
         this.registerOwnUserId(tenantId, (me as any)?.id);
 
+        let tgRole: string | undefined;
+        try {
+          const acct = await storage.getTelegramAccountById(accountId);
+          tgRole = (acct as any)?.tgRole ?? undefined;
+        } catch {}
+
         const connection: ActiveConnection = {
           tenantId,
           accountId,
@@ -441,6 +448,7 @@ class TelegramClientManager {
           lastActivity: new Date(),
           handlersAttached: false,
           reconnectAttempts: 0,
+          tgRole,
         };
 
         this.connections.set(connectionKey, connection);
@@ -1325,19 +1333,25 @@ class TelegramClientManager {
 
   /** Find a connection by tenantId and channelId (supports both legacy and multi-account) */
   private findConnection(tenantId: string, channelId: string): ActiveConnection | null {
-    // Try legacy key first
     const legacyKey = `${tenantId}:legacy_${channelId}`;
     const legacy = this.connections.get(legacyKey);
     if (legacy?.connected) return legacy;
 
-    // Try to find by channelId in multi-account connections
+    const candidates: ActiveConnection[] = [];
     for (const conn of this.connections.values()) {
       if (conn.tenantId === tenantId && conn.channelId === channelId && conn.connected) {
-        return conn;
+        candidates.push(conn);
       }
     }
+    if (candidates.length === 0) return null;
 
-    return null;
+    // Prefer sender/both over resolver — resolver must never send to clients
+    return (
+      candidates.find(c => c.tgRole === "sender") ??
+      candidates.find(c => c.tgRole === "both") ??
+      candidates.find(c => c.tgRole !== "resolver") ??
+      candidates[0]
+    );
   }
 
   getClient(tenantId: string, channelId: string): TelegramClient | null {

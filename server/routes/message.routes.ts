@@ -196,9 +196,25 @@ router.post(
       }
       // For multi-account channels (max_personal): prefer accountId from last customer msg,
       // then fall back to any message that carries one (e.g. the initial outbound message).
-      const effectiveAccountId: string | undefined =
+      let effectiveAccountId: string | undefined =
         ((lastCustomerMsg?.metadata as any)?.accountId as string | undefined) ??
         (conversation.messages.find((m) => (m.metadata as any)?.accountId)?.metadata as any)?.accountId;
+      // For telegram_personal: always override with the designated sender account
+      // to avoid accidentally sending via the resolver account when the stored
+      // accountId refers to a deleted/replaced Telegram session.
+      if (effectiveChannelType === "telegram_personal") {
+        try {
+          const tgAccounts = await storage.getTelegramAccountsByTenant(conversation.tenantId);
+          const senderAcc = tgAccounts.find(
+            (a: any) => a.tgRole === "sender" || a.tgRole === "both"
+          );
+          if (senderAcc) {
+            effectiveAccountId = senderAcc.id;
+          }
+        } catch {
+          // keep existing effectiveAccountId as fallback
+        }
+      }
 
       console.log(
         `[OutboundHandler] channel=${effectiveChannelType}, channelId=${effectiveChannelId}, hasFile=${!!uploadedFile}`,
