@@ -196,4 +196,9 @@ router.post("/webhooks/cryptobot", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/api/billing/public-config", async (_req: Request, res: Response) => {
+  const notifyBotUsername = process.env.TELEGRAM_NOTIFY_BOT_USERNAME ?? null;
+  res.json({ notifyBotUsername });
+});
+
 export default router;

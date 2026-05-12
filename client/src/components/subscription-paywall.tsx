@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -6,9 +7,11 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { 
   Lock, 
   Zap, 
@@ -19,10 +22,19 @@ import {
   Loader2,
   ExternalLink,
   Clock,
+  Bell,
+  PartyPopper,
 } from "lucide-react";
 import { SiTelegram } from "react-icons/si";
 import { useCreateCheckout, useBillingStatus } from "@/hooks/use-billing";
 import { useToast } from "@/hooks/use-toast";
+
+function usePublicBillingConfig() {
+  return useQuery<{ notifyBotUsername: string | null }>({
+    queryKey: ["/api/billing/public-config"],
+    staleTime: 5 * 60 * 1000,
+  });
+}
 
 interface SubscriptionPaywallProps {
   open: boolean;
@@ -264,5 +276,84 @@ export function SubscriptionBadge() {
       <Lock className="mr-1 h-3 w-3" />
       Нет подписки
     </Badge>
+  );
+}
+
+const SUCCESS_FEATURES = [
+  { icon: MessageSquare, text: "Отправка сообщений через все каналы" },
+  { icon: Bot,          text: "AI-подсказки и автоответы" },
+  { icon: Zap,          text: "Telegram Personal, WhatsApp Personal, Max Personal" },
+  { icon: Shield,       text: "Полная защита данных" },
+];
+
+interface PaymentSuccessDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export function PaymentSuccessDialog({ open, onOpenChange }: PaymentSuccessDialogProps) {
+  const { data: config } = usePublicBillingConfig();
+  const notifyBotUsername = config?.notifyBotUsername;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md" data-testid="payment-success-dialog">
+        <DialogHeader className="items-center text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-500/10 mb-2">
+            <PartyPopper className="h-7 w-7 text-green-600" />
+          </div>
+          <DialogTitle className="text-xl">Подписка активирована!</DialogTitle>
+          <DialogDescription>
+            Теперь все каналы связи доступны. Вы можете начать работу прямо сейчас.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-2 py-2">
+          {SUCCESS_FEATURES.map(({ icon: Icon, text }) => (
+            <div key={text} className="flex items-center gap-3 rounded-md bg-muted/50 px-3 py-2">
+              <Icon className="h-4 w-4 text-green-600 shrink-0" />
+              <span className="text-sm">{text}</span>
+            </div>
+          ))}
+        </div>
+
+        {notifyBotUsername && (
+          <>
+            <Separator />
+            <div className="rounded-md border border-blue-500/20 bg-blue-500/5 p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <Bell className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-sm">Уведомления об окончании подписки</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Подключите бота, чтобы получать напоминания за 3 дня и 1 день до окончания подписки.
+                  </p>
+                </div>
+              </div>
+              <Button
+                className="w-full"
+                variant="outline"
+                onClick={() => window.open(`https://t.me/${notifyBotUsername}`, "_blank")}
+              >
+                <SiTelegram className="mr-2 h-4 w-4 text-[#2AABEE]" />
+                Подключить уведомления в Telegram
+                <ExternalLink className="ml-2 h-3 w-3 opacity-60" />
+              </Button>
+            </div>
+          </>
+        )}
+
+        <DialogFooter>
+          <Button
+            className="w-full"
+            onClick={() => onOpenChange(false)}
+            data-testid="button-payment-success-close"
+          >
+            <Check className="mr-2 h-4 w-4" />
+            Отлично, начать работу
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

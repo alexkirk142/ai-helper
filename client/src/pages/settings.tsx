@@ -80,7 +80,7 @@ import {
 } from "lucide-react";
 import { useBillingStatus, useAiBillingStatus, isSubscriptionRequired } from "@/hooks/use-billing";
 import { useAutoPartsEnabled } from "@/hooks/useAutoPartsEnabled";
-import { SubscriptionPaywall, ChannelPaywallOverlay, SubscriptionBadge } from "@/components/subscription-paywall";
+import { SubscriptionPaywall, ChannelPaywallOverlay, SubscriptionBadge, PaymentSuccessDialog } from "@/components/subscription-paywall";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -4292,6 +4292,17 @@ export default function Settings() {
   const autoPartsEnabled = useAutoPartsEnabled();
   const { data: aiBilling } = useAiBillingStatus();
   const hasAiAccess = aiBilling?.canAccess ?? false;
+  const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("billing") === "success") {
+      setShowPaymentSuccess(true);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("billing");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, []);
 
   const { data: tenant, isLoading } = useQuery<Tenant>({
     queryKey: ["/api/tenant"],
@@ -4381,6 +4392,11 @@ export default function Settings() {
 
   return (
     <div className="space-y-6 p-6">
+      <PaymentSuccessDialog
+        open={showPaymentSuccess}
+        onOpenChange={setShowPaymentSuccess}
+      />
+
       <div>
         <h1 className="text-3xl font-semibold">Настройки</h1>
         <p className="mt-1 text-sm text-muted-foreground">
