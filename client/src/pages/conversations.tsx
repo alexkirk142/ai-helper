@@ -29,13 +29,6 @@ const CHANNEL_FAMILY_TYPES: Record<Exclude<ChannelFilter, "all" | "marquiz">, st
 export default function Conversations() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mobileShowChat, setMobileShowChat] = useState(false);
-  const [testDialogOpen, setTestDialogOpen] = useState(false);
-  const [testName, setTestName] = useState("");
-  const [testPhone, setTestPhone] = useState("");
-  const [testMessage, setTestMessage] = useState("");
-  const [testImage, setTestImage] = useState<File | null>(null);
-  const [testImagePreviewUrl, setTestImagePreviewUrl] = useState<string | null>(null);
-  const testImageInputRef = useRef<HTMLInputElement>(null);
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>("all");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [replyAsCustomerText, setReplyAsCustomerText] = useState("");
@@ -132,12 +125,15 @@ export default function Conversations() {
     queryKey: ["/api/conversations/channel-counts"],
   });
 
-  // Count marquiz leads from already-loaded conversations (client-side)
+  // Count unread messages from marquiz leads (client-side)
   const marquizCount = useMemo(() => {
     if (!conversations) return 0;
-    return conversations.filter(
-      (c) => (c.customer?.metadata as any)?.source === "marquiz"
-    ).length;
+    return conversations.reduce((sum, c) => {
+      if ((c.customer?.metadata as any)?.source === "marquiz") {
+        return sum + (c.unreadCount ?? 0);
+      }
+      return sum;
+    }, 0);
   }, [conversations]);
 
   const { data: personalChannelStatus } = useQuery<{ telegram_personal: boolean; max_personal: boolean; whatsapp_personal: boolean }>({
@@ -507,35 +503,17 @@ export default function Conversations() {
     },
   });
 
-  const clearTestImage = () => {
-    if (testImagePreviewUrl) URL.revokeObjectURL(testImagePreviewUrl);
-    setTestImage(null);
-    setTestImagePreviewUrl(null);
-    if (testImageInputRef.current) testImageInputRef.current.value = "";
-  };
-
-  const simulateMessageMutation = useMutation({
-    mutationFn: async (data: { customerName: string; customerPhone: string; message: string; imageBase64?: string; imageMimeType?: string }) => {
-      const res = await apiRequest("POST", "/api/test/simulate-message", data);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Ошибка создания диалога");
-      return json;
+  const markAllReadMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/conversations/read-all", {});
+      if (!res.ok) throw new Error("Failed");
     },
-    onSuccess: (data: { conversation?: { id?: string } }) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
-      setTestDialogOpen(false);
-      setTestName("");
-      setTestPhone("");
-      setTestMessage("");
-      clearTestImage();
-      toast({ title: "Тестовый диалог создан" });
-      if (data.conversation?.id) {
-        setSelectedId(data.conversation.id);
-        setMobileShowChat(true);
-      }
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations/channel-counts"] });
     },
-    onError: (error: Error) => {
-      toast({ title: "Не удалось создать диалог", description: error.message, variant: "destructive" });
+    onError: () => {
+      toast({ title: "Не удалось отметить все как прочитанные", variant: "destructive" });
     },
   });
 
@@ -569,34 +547,6 @@ export default function Conversations() {
       toast({ title: "Не удалось отправить сообщение от клиента", description: error.message, variant: "destructive" });
     },
   });
-
-  const handleSimulateSubmit = async () => {
-    if (!testName.trim() || !testPhone.trim() || (!testMessage.trim() && !testImage)) {
-      toast({ title: "Заполните имя, телефон и сообщение (или прикрепите фото)", variant: "destructive" });
-      return;
-    }
-    let imageBase64: string | undefined;
-    let imageMimeType: string | undefined;
-    if (testImage) {
-      imageMimeType = testImage.type || "image/jpeg";
-      imageBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
-          resolve(dataUrl.split(",")[1]);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(testImage);
-      });
-    }
-    simulateMessageMutation.mutate({
-      customerName: testName.trim(),
-      customerPhone: testPhone.trim(),
-      message: testMessage.trim(),
-      imageBase64,
-      imageMimeType,
-    });
-  };
 
   const clearReplyAsCustomerFile = () => {
     if (replyAsCustomerFilePreviewUrl) URL.revokeObjectURL(replyAsCustomerFilePreviewUrl);
@@ -713,8 +663,9 @@ export default function Conversations() {
           selectedId={selectedId || undefined}
           onSelect={handleSelectConversation}
           onDelete={(id) => deleteConversationMutation.mutate(id)}
+          onMarkAllRead={() => markAllReadMutation.mutate()}
+          isMarkingAllRead={markAllReadMutation.isPending}
           onNewDialog={handleNewDialogOpen}
-          onCreateTestDialog={() => setTestDialogOpen(true)}
           isLoading={conversationsLoading}
           hasMoreServer={hasNextPage && !tagFilter && channelFilter === "all"}
           isFetchingMore={isFetchingNextPage}
@@ -722,111 +673,6 @@ export default function Conversations() {
         />
       </div>
 
-      {/* Test Dialog */}
-      <Dialog open={testDialogOpen} onOpenChange={(open) => {
-        if (!open) clearTestImage();
-        setTestDialogOpen(open);
-      }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Создать тестовый диалог</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-4 py-2">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="test-name">Имя клиента</Label>
-              <Input
-                id="test-name"
-                placeholder="Тест Иванов"
-                value={testName}
-                onChange={(e) => setTestName(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="test-phone">Телефон</Label>
-              <Input
-                id="test-phone"
-                placeholder="+79001234567"
-                value={testPhone}
-                onChange={(e) => setTestPhone(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="test-message">Сообщение</Label>
-              <Textarea
-                id="test-message"
-                placeholder="WVWZZZ7MZ6V025007"
-                rows={3}
-                value={testMessage}
-                onChange={(e) => setTestMessage(e.target.value)}
-                onPaste={(e) => {
-                  const files = Array.from(e.clipboardData.files);
-                  const img = files.find((f) => f.type.startsWith("image/"));
-                  if (img) {
-                    e.preventDefault();
-                    if (testImagePreviewUrl) URL.revokeObjectURL(testImagePreviewUrl);
-                    setTestImage(img);
-                    setTestImagePreviewUrl(URL.createObjectURL(img));
-                  }
-                }}
-              />
-            </div>
-            {/* File picker */}
-            <input
-              ref={testImageInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0] ?? null;
-                if (!file) return;
-                if (testImagePreviewUrl) URL.revokeObjectURL(testImagePreviewUrl);
-                setTestImage(file);
-                setTestImagePreviewUrl(URL.createObjectURL(file));
-                e.target.value = "";
-              }}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="w-fit gap-2"
-              onClick={() => testImageInputRef.current?.click()}
-            >
-              📎 Прикрепить фото
-            </Button>
-            {/* Image preview */}
-            {testImage && testImagePreviewUrl && (
-              <div className="relative w-fit">
-                <img
-                  src={testImagePreviewUrl}
-                  alt="Превью"
-                  className="max-h-40 rounded-lg border object-cover"
-                />
-                <button
-                  type="button"
-                  onClick={clearTestImage}
-                  className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground text-xs shadow"
-                  aria-label="Удалить фото"
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground">
-              💡 Можно вставить фото из буфера обмена (Ctrl+V) в поле сообщения
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { clearTestImage(); setTestDialogOpen(false); }}>
-              Отмена
-            </Button>
-            <Button onClick={handleSimulateSubmit} disabled={simulateMessageMutation.isPending}>
-              {simulateMessageMutation.isPending ? "Создание..." : "Создать"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      
       {/* Новый диалог */}
       <Dialog open={newDialogOpen} onOpenChange={(open) => {
         if (!newDialogPending) setNewDialogOpen(open);

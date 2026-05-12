@@ -63,6 +63,23 @@ async function getUserForConversations(userId: string) {
   return user;
 }
 
+router.post("/api/conversations/read-all", requireAuth, requirePermission("VIEW_CONVERSATIONS"), async (req: Request, res: Response) => {
+  try {
+    if (!req.userId || req.userId === "system") {
+      return res.status(403).json({ error: "User authentication required" });
+    }
+    const user = await getUserForConversations(req.userId);
+    if (!user?.tenantId) {
+      return res.status(403).json({ error: "User not associated with a tenant" });
+    }
+    await storage.markAllConversationsRead(user.tenantId);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error marking all conversations as read:", error);
+    res.status(500).json({ error: "Failed to mark all conversations as read" });
+  }
+});
+
 router.post("/api/conversations/:id/read", requireAuth, requirePermission("VIEW_CONVERSATIONS"), async (req: Request, res: Response) => {
   try {
     if (!req.userId || req.userId === "system") {

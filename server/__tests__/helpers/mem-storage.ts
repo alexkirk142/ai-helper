@@ -1841,6 +1841,14 @@ export class MemStorage implements IStorage {
     return result;
   }
 
+  async markAllConversationsRead(tenantId: string): Promise<void> {
+    for (const [, conv] of this.conversations) {
+      if (conv.tenantId === tenantId) {
+        (conv as any).unreadCount = 0;
+      }
+    }
+  }
+
   async deleteConversation(id: string, _tenantId: string): Promise<boolean> {
     return this.conversations.delete(id);
   }

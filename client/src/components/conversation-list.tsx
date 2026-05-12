@@ -14,7 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Search, MessageCircle, Trash2, MessageSquarePlus, Loader2 } from "lucide-react";
+import { Search, MessageCircle, Trash2, MessageSquarePlus, CheckCheck, Loader2 } from "lucide-react";
 import { SiTelegram, SiWhatsapp } from "react-icons/si";
 import { cn } from "@/lib/utils";
 import type { ConversationWithCustomer } from "@shared/schema";
@@ -52,7 +52,8 @@ interface ConversationListProps {
   selectedId?: string;
   onSelect: (id: string) => void;
   onDelete?: (id: string) => void;
-  onCreateTestDialog?: () => void;
+  onMarkAllRead?: () => void;
+  isMarkingAllRead?: boolean;
   onNewDialog?: () => void;
   isLoading?: boolean;
   hasMoreServer?: boolean;
@@ -106,7 +107,8 @@ export function ConversationList({
   selectedId,
   onSelect,
   onDelete,
-  onCreateTestDialog,
+  onMarkAllRead,
+  isMarkingAllRead,
   onNewDialog,
   isLoading,
   hasMoreServer,
@@ -229,29 +231,36 @@ export function ConversationList({
             Найдено: {searchResults.length} {searchResults.length === 1 ? "диалог" : "диалогов"} · по всем сообщениям
           </p>
         )}
-        {onNewDialog && (
-          <Button
-            variant="default"
-            size="sm"
-            className="w-full gap-2"
-            onClick={onNewDialog}
-            data-testid="button-new-dialog"
-          >
-            <MessageSquarePlus className="h-4 w-4" />
-            Новый диалог
-          </Button>
-        )}
-        {onCreateTestDialog && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full gap-2"
-            onClick={onCreateTestDialog}
-          >
-            <MessageSquarePlus className="h-4 w-4" />
-            Создать тестовый диалог
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {onNewDialog && (
+            <Button
+              variant="default"
+              size="sm"
+              className="flex-1 gap-2"
+              onClick={onNewDialog}
+              data-testid="button-new-dialog"
+            >
+              <MessageSquarePlus className="h-4 w-4" />
+              Новый диалог
+            </Button>
+          )}
+          {onMarkAllRead && (
+            <Button
+              variant="outline"
+              size="sm"
+              className={onNewDialog ? "gap-1.5 px-3" : "flex-1 gap-2"}
+              onClick={onMarkAllRead}
+              disabled={isMarkingAllRead}
+              title="Отметить все как прочитанные"
+              data-testid="button-mark-all-read"
+            >
+              {isMarkingAllRead
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <CheckCheck className="h-4 w-4" />}
+              {!onNewDialog && "Прочитать все"}
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">

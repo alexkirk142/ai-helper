@@ -135,6 +135,7 @@ export interface IStorage {
   getConversationChannelCounts(tenantId: string): Promise<{ all: number; telegram?: number; max?: number; whatsapp?: number }>;
   createConversation(conversation: InsertConversation & { lastMessageAt?: Date; createdAt?: Date }, tenantId: string): Promise<Conversation>;
   updateConversation(id: string, tenantId: string, data: Partial<InsertConversation>): Promise<Conversation | undefined>;
+  markAllConversationsRead(tenantId: string): Promise<void>;
   deleteConversation(id: string, tenantId: string): Promise<boolean>;
 
   // Messages

@@ -718,6 +718,13 @@ export class DatabaseStorage implements IStorage {
     return conv;
   }
 
+  async markAllConversationsRead(tenantId: string): Promise<void> {
+    await db
+      .update(conversations)
+      .set({ unreadCount: 0, updatedAt: new Date() })
+      .where(and(eq(conversations.tenantId, tenantId), gt(conversations.unreadCount, 0)));
+  }
+
   async deleteConversation(id: string, tenantId: string): Promise<boolean> {
     return db.transaction(async (tx) => {
       // Get ai_suggestion IDs first to delete human_actions
