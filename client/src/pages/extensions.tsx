@@ -98,12 +98,18 @@ export default function Extensions() {
     apiRequest("POST", "/api/billing/ai/verify-payment")
       .then((r) => r.json())
       .then((data: any) => {
-        queryClient.invalidateQueries({ queryKey: ["/api/billing/ai/me"] });
         if (data?.activated) {
+          // Prevent the global onboarding redirect from firing before the toast shows
+          sessionStorage.setItem("ai_billing_success", "1");
+          queryClient.invalidateQueries({ queryKey: ["/api/billing/ai/me"] });
           toast({
             title: "AI Ассистент активирован!",
             description: "Подписка активна. AI начнёт генерировать подсказки в разговорах.",
           });
+          // Allow onboarding redirect after the toast has been visible
+          setTimeout(() => sessionStorage.removeItem("ai_billing_success"), 4000);
+        } else {
+          queryClient.invalidateQueries({ queryKey: ["/api/billing/ai/me"] });
         }
       })
       .catch(() => {});

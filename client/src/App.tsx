@@ -270,8 +270,10 @@ function AuthenticatedApp() {
       const hasAiSubscription = aiBilling?.canAccess === true;
       const isOnOnboardingPage = location === "/onboarding";
 
-      // Only redirect to onboarding after the user has paid for the AI subscription
-      if (needsOnboarding && hasAiSubscription && !isOnOnboardingPage) {
+      // Only redirect to onboarding after the user has paid for the AI subscription.
+      // Skip if billing success is being shown (toast/dialog in progress).
+      const billingSuccessShowing = sessionStorage.getItem("ai_billing_success") === "1";
+      if (needsOnboarding && hasAiSubscription && !isOnOnboardingPage && !billingSuccessShowing) {
         setLocation("/onboarding");
       }
     }
