@@ -197,8 +197,19 @@ router.post("/webhooks/cryptobot", async (req: Request, res: Response) => {
 });
 
 router.get("/api/billing/public-config", async (_req: Request, res: Response) => {
-  const notifyBotUsername = process.env.TELEGRAM_NOTIFY_BOT_USERNAME ?? null;
-  res.json({ notifyBotUsername });
+  try {
+    const { getSecret } = await import("../services/secret-resolver");
+    const token = await getSecret({ scope: "global", keyName: "TELEGRAM_ESCALATION_BOT_TOKEN" });
+    if (!token) {
+      return res.json({ notifyBotUsername: null });
+    }
+    const tgRes = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    const tgJson = (await tgRes.json()) as { ok: boolean; result?: { username?: string } };
+    const notifyBotUsername = tgJson.ok ? (tgJson.result?.username ?? null) : null;
+    res.json({ notifyBotUsername });
+  } catch {
+    res.json({ notifyBotUsername: null });
+  }
 });
 
 export default router;

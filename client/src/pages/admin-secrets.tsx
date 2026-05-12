@@ -98,8 +98,8 @@ const INTEGRATIONS: IntegrationConfig[] = [
   },
   {
     id: "telegram-escalation",
-    name: "Telegram для эскалаций",
-    description: "Бот для отправки уведомлений об эскалированных разговорах",
+    name: "Telegram-бот уведомлений",
+    description: "Бот для эскалации диалогов и уведомлений об истечении подписки",
     icon: <Bell className="h-6 w-6" />,
     color: "bg-[#FF6B35]",
     secrets: [
@@ -108,7 +108,7 @@ const INTEGRATIONS: IntegrationConfig[] = [
         label: "Bot Token",
         placeholder: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
         required: true,
-        hint: "Создайте отдельного бота у @BotFather для уведомлений",
+        hint: "Создайте бота у @BotFather. Он используется для эскалаций и напоминаний о подписке.",
       },
     ],
   },
