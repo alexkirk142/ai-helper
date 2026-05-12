@@ -4306,7 +4306,7 @@ export default function Settings() {
     window.history.replaceState({}, "", url.toString());
 
     // Fallback: verify payment server-side in case the webhook was not delivered
-    fetch("/api/billing/verify-payment", { method: "POST", credentials: "include" })
+    apiRequest("POST", "/api/billing/verify-payment")
       .then((r) => r.json())
       .then((data: any) => {
         // Mark as shown so the global check in AuthenticatedApp doesn't double-show

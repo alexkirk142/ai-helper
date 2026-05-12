@@ -296,7 +296,6 @@ export function SubscriptionBadge() {
 
 const SUCCESS_FEATURES = [
   { icon: MessageSquare, text: "Отправка сообщений через все каналы" },
-  { icon: Bot,          text: "AI-подсказки и автоответы" },
   { icon: Zap,          text: "Telegram Personal, WhatsApp Personal, Max Personal" },
   { icon: Shield,       text: "Полная защита данных" },
 ];
