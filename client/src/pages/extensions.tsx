@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import { useAiBillingStatus, useCreateAiCheckout, useCancelAiSubscription } from
 import { usePublicBillingConfig } from "@/components/subscription-paywall";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 
 const AI_FEATURES = [
   { icon: MessageSquare, text: "Предлагает готовый ответ на каждое сообщение клиента — оператор отправляет одним кликом" },
@@ -85,6 +86,28 @@ export default function Extensions() {
   const isActive = billing?.canAccess === true;
   const isExpired = !billing?.canAccess && billing?.hasSubscription && billing?.status === "canceled";
   const isPastDue = billing?.status === "past_due";
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("billing") !== "success") return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete("billing");
+    window.history.replaceState({}, "", url.toString());
+
+    apiRequest("POST", "/api/billing/ai/verify-payment")
+      .then((r) => r.json())
+      .then((data: any) => {
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/ai/me"] });
+        if (data?.activated) {
+          toast({
+            title: "AI Ассистент активирован!",
+            description: "Подписка активна. AI начнёт генерировать подсказки в разговорах.",
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const handlePurchase = async () => {
     setPurchaseLoading(true);
