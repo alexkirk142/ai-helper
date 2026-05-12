@@ -81,6 +81,7 @@ import {
 import { useBillingStatus, useAiBillingStatus, isSubscriptionRequired } from "@/hooks/use-billing";
 import { useAutoPartsEnabled } from "@/hooks/useAutoPartsEnabled";
 import { SubscriptionPaywall, ChannelPaywallOverlay, SubscriptionBadge, PaymentSuccessDialog } from "@/components/subscription-paywall";
+import { markSubscriptionDialogShown } from "@/App";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -4304,6 +4305,11 @@ export default function Settings() {
 
     // Fallback: verify payment server-side in case the webhook was not delivered
     fetch("/api/billing/verify-payment", { method: "POST", credentials: "include" })
+      .then((r) => r.json())
+      .then((data: any) => {
+        // Mark as shown so the global check in AuthenticatedApp doesn't double-show
+        markSubscriptionDialogShown(data?.billingStatus?.currentPeriodEnd);
+      })
       .catch(() => {/* silent — webhook may have already activated */})
       .finally(() => setShowPaymentSuccess(true));
   }, []);

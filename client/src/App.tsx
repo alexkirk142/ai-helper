@@ -1,5 +1,5 @@
 import { Switch, Route, useLocation } from "wouter";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -10,7 +10,8 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { useAuth } from "@/hooks/use-auth";
 import { useNotifications } from "@/hooks/use-notifications";
-import { useAiBillingStatus } from "@/hooks/use-billing";
+import { useAiBillingStatus, useBillingStatus } from "@/hooks/use-billing";
+import { PaymentSuccessDialog } from "@/components/subscription-paywall";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, MessageSquare, Brain, Shield } from "lucide-react";
@@ -202,6 +203,14 @@ interface OnboardingState {
   currentStep: string;
 }
 
+const SUB_SHOWN_KEY = "sub_activated_shown_period";
+
+export function markSubscriptionDialogShown(periodEnd: string | null | undefined) {
+  try {
+    localStorage.setItem(SUB_SHOWN_KEY, periodEnd ?? "");
+  } catch {/* ignore */}
+}
+
 function AuthenticatedApp() {
   const { user, logout, isLoggingOut } = useAuth();
   const [location, setLocation] = useLocation();
@@ -211,10 +220,31 @@ function AuthenticatedApp() {
 
   const { data: onboardingState, isLoading: onboardingLoading } = useQuery<OnboardingState>({
     queryKey: ["/api/onboarding/state"],
-    enabled: !isPlatformStaff, // don't query tenant endpoints for staff
+    enabled: !isPlatformStaff,
   });
 
   const { data: aiBilling, isLoading: aiBillingLoading } = useAiBillingStatus();
+  const { data: channelsBilling } = useBillingStatus();
+  const [showGlobalSuccess, setShowGlobalSuccess] = useState(false);
+
+  // Show success dialog when subscription becomes active and user hasn't seen it yet for this period
+  useEffect(() => {
+    if (!channelsBilling) return;
+    if (channelsBilling.status !== "active" || channelsBilling.isTrial) return;
+    const periodEnd = channelsBilling.currentPeriodEnd
+      ? String(channelsBilling.currentPeriodEnd)
+      : "";
+    try {
+      const shown = localStorage.getItem(SUB_SHOWN_KEY);
+      if (shown === periodEnd) return; // already shown for this billing period
+    } catch {/* ignore */}
+    // Don't fire on /settings when ?billing=success is still in the URL
+    // (settings.tsx handles that case itself and will call markSubscriptionDialogShown)
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("billing") === "success") return;
+    markSubscriptionDialogShown(periodEnd);
+    setShowGlobalSuccess(true);
+  }, [channelsBilling]);
 
   useNotifications();
 
@@ -254,6 +284,7 @@ function AuthenticatedApp() {
 
   return (
     <SidebarProvider style={style as React.CSSProperties}>
+      <PaymentSuccessDialog open={showGlobalSuccess} onOpenChange={setShowGlobalSuccess} />
       <div className="flex h-screen w-full">
         <AppSidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
