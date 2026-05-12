@@ -12,6 +12,7 @@ import {
   tenantAgentSettings,
   transmissionIdentityCache,
   maxPersonalAccounts,
+  whatsappAuthSessions,
 } from "@shared/schema";
 import {
   type Tenant, type InsertTenant,
@@ -658,9 +659,17 @@ export class DatabaseStorage implements IStorage {
       .where(eq(maxPersonalAccounts.tenantId, tenantId))
       .limit(1);
 
+    // WhatsApp Personal sessions live in whatsapp_auth_sessions, not in channels table —
+    // check it separately so the "WhatsApp" tab appears for whatsapp_personal-only tenants.
+    const waSession = await db
+      .select({ tenantId: whatsappAuthSessions.tenantId })
+      .from(whatsappAuthSessions)
+      .where(eq(whatsappAuthSessions.tenantId, tenantId))
+      .limit(1);
+
     const hasTelegram = connectedTypes.has("telegram") || connectedTypes.has("telegram_personal");
     const hasMax = connectedTypes.has("max") || connectedTypes.has("max_personal") || mpAccounts.length > 0;
-    const hasWhatsApp = connectedTypes.has("whatsapp") || connectedTypes.has("whatsapp_personal");
+    const hasWhatsApp = connectedTypes.has("whatsapp") || connectedTypes.has("whatsapp_personal") || waSession.length > 0;
 
     // Join with customers so we can resolve the channel family for conversations
     // that have no channelId (e.g. max_personal conversations created via start-conversation).

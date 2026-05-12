@@ -646,7 +646,7 @@ export default function Conversations() {
       <div className={`w-80 shrink-0 border-r flex flex-col overflow-hidden ${mobileShowChat ? 'hidden md:flex' : 'flex'}`}>
         <ChannelTabs
           activeFilter={channelFilter}
-          onFilterChange={(f) => { setChannelFilter(f); setTagFilter(null); setConvOffset(0); setAllConversations([]); }}
+          onFilterChange={(f) => { setChannelFilter(f); setTagFilter(null); }}
           counts={{
             ...(channelCounts ?? { all: 0 }),
             ...(marquizCount > 0 ? { marquiz: marquizCount } : {}),

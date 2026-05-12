@@ -1,3 +1,6 @@
+# Cursor local MCP config (may contain tokens)
+.cursor/mcp.json
+
 # Dependencies
 node_modules/
 
