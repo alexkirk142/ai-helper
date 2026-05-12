@@ -4309,8 +4309,10 @@ export default function Settings() {
     apiRequest("POST", "/api/billing/verify-payment")
       .then((r) => r.json())
       .then((data: any) => {
-        // Mark as shown so the global check in AuthenticatedApp doesn't double-show
         markSubscriptionDialogShown(data?.billingStatus?.currentPeriodEnd);
+        // Refresh billing status so the UI reflects the new active subscription
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/me"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/ai/me"] });
       })
       .catch(() => {/* silent — webhook may have already activated */})
       .finally(() => setShowPaymentSuccess(true));
