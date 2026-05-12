@@ -300,10 +300,17 @@ router.post(
 
     await db
       .update(subscriptions)
-      .set({ status: "canceled", cancelAtPeriodEnd: false, updatedAt: new Date() })
+      .set({
+        status: "canceled",
+        cancelAtPeriodEnd: false,
+        // Set period end to now so access is revoked immediately
+        // (getBillingStatus grants access while currentPeriodEnd is in the future)
+        currentPeriodEnd: new Date(),
+        updatedAt: new Date(),
+      })
       .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, feature)));
 
-    console.log(`[Admin] Subscription ${feature} for tenant ${tenantId} canceled by ${req.userId}`);
+    console.log(`[Admin] Subscription ${feature} for tenant ${tenantId} immediately revoked by ${req.userId}`);
     res.json({ success: true });
   }
 );
