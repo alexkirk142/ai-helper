@@ -121,6 +121,14 @@ export async function handleIncomingMessage(
 
   let customer = await storage.getCustomerByExternalId(tenant.id, parsed.channel, parsed.externalUserId);
 
+  if (!customer && parsed.channel === "whatsapp_personal" && parsed.externalUserId.endsWith("@s.whatsapp.net")) {
+    const legacyId = parsed.externalUserId.replace("@s.whatsapp.net", "");
+    customer = await storage.getCustomerByExternalId(tenant.id, parsed.channel, legacyId);
+    if (customer) {
+      console.log(`[InboundHandler] Found customer by legacy ID (${legacyId}) for ${parsed.externalUserId}`);
+    }
+  }
+
   if (!customer) {
     const customerName = (parsed.metadata?.pushName as string) ||
                          (parsed.metadata?.firstName as string) ||
@@ -153,6 +161,12 @@ export async function handleIncomingMessage(
       await storage.updateCustomer(customer.id, tenant.id, { name: inboundName });
       customer = { ...customer, name: inboundName };
       console.log(`[InboundHandler] Updated customer ${customer.id} name from inbound message: "${inboundName}"`);
+    }
+    const inboundPhone = (parsed.metadata?.phone as string) || "";
+    if (!customer.phone && inboundPhone) {
+      await storage.updateCustomer(customer.id, tenant.id, { phone: inboundPhone });
+      customer = { ...customer, phone: inboundPhone };
+      console.log(`[InboundHandler] Updated customer ${customer.id} phone from inbound message: "${inboundPhone}"`);
     }
   }
 

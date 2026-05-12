@@ -280,6 +280,13 @@ router.post(
           customer = await storage.getCustomerByExternalId(tenantId, "whatsapp_personal", primaryExternalId);
           if (!customer) throw e;
         }
+      } else if (!customer.phone) {
+        try {
+          await storage.updateCustomer(customer.id, tenantId, { phone: `+${cleanDigits}` });
+          customer = { ...customer, phone: `+${cleanDigits}` };
+        } catch {
+          // best-effort
+        }
       }
 
       const allConversations = await storage.getConversationsByTenant(tenantId);

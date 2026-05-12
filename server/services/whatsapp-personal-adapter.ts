@@ -379,7 +379,7 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
         return null;
       }
 
-      const userId = isLid ? jid : (msg.key.participant || phone);
+      const userId = isLid ? jid : (msg.key.participant || (isGroup ? phone : jid));
       
       return {
         externalMessageId: msg.key.id || `wap_${Date.now()}`,
