@@ -197,7 +197,7 @@ const pricesSchema = z.object({
 router.put(
   "/billing/prices",
   requireAuth,
-  requirePlatformOwner,
+  requirePlatformOwner(),
   async (req, res) => {
     const parsed = pricesSchema.safeParse(req.body);
     if (!parsed.success) {
