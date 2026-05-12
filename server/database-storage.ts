@@ -11,8 +11,6 @@ import {
   messageTemplates, paymentMethods,
   tenantAgentSettings,
   transmissionIdentityCache,
-  maxPersonalAccounts,
-  whatsappAuthSessions,
 } from "@shared/schema";
 import {
   type Tenant, type InsertTenant,
@@ -644,33 +642,6 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getConversationChannelCounts(tenantId: string): Promise<{ all: number; telegram?: number; max?: number; whatsapp?: number }> {
-    const tenantChannels = await db
-      .select({ type: channels.type })
-      .from(channels)
-      .where(eq(channels.tenantId, tenantId));
-
-    const connectedTypes = new Set(tenantChannels.map(c => c.type));
-
-    // MAX Personal accounts live in max_personal_accounts, not in channels table —
-    // check it separately so the "MAX" tab appears for max_personal-only tenants.
-    const mpAccounts = await db
-      .select({ id: maxPersonalAccounts.id })
-      .from(maxPersonalAccounts)
-      .where(eq(maxPersonalAccounts.tenantId, tenantId))
-      .limit(1);
-
-    // WhatsApp Personal sessions live in whatsapp_auth_sessions, not in channels table —
-    // check it separately so the "WhatsApp" tab appears for whatsapp_personal-only tenants.
-    const waSession = await db
-      .select({ tenantId: whatsappAuthSessions.tenantId })
-      .from(whatsappAuthSessions)
-      .where(eq(whatsappAuthSessions.tenantId, tenantId))
-      .limit(1);
-
-    const hasTelegram = connectedTypes.has("telegram") || connectedTypes.has("telegram_personal");
-    const hasMax = connectedTypes.has("max") || connectedTypes.has("max_personal") || mpAccounts.length > 0;
-    const hasWhatsApp = connectedTypes.has("whatsapp") || connectedTypes.has("whatsapp_personal") || waSession.length > 0;
-
     // Join with customers so we can resolve the channel family for conversations
     // that have no channelId (e.g. max_personal conversations created via start-conversation).
     const rows = await db
@@ -684,21 +655,25 @@ export class DatabaseStorage implements IStorage {
     let telegram = 0;
     let max = 0;
     let whatsapp = 0;
+    let telegramTotal = 0;
+    let maxTotal = 0;
+    let whatsappTotal = 0;
 
     for (const row of rows) {
       const unread = row.unread ?? 0;
       all += unread;
       const t = row.channelType ?? row.customerChannel ?? "";
-      if (t === "telegram" || t === "telegram_personal") telegram += unread;
-      else if (t === "max" || t === "max_personal") max += unread;
-      else if (t === "whatsapp" || t === "whatsapp_personal") whatsapp += unread;
+      if (t === "telegram" || t === "telegram_personal") { telegram += unread; telegramTotal++; }
+      else if (t === "max" || t === "max_personal") { max += unread; maxTotal++; }
+      else if (t === "whatsapp" || t === "whatsapp_personal") { whatsapp += unread; whatsappTotal++; }
     }
 
+    // Include a channel tab only when there are actual conversations in that channel.
     return {
       all,
-      ...(hasTelegram ? { telegram } : {}),
-      ...(hasMax ? { max } : {}),
-      ...(hasWhatsApp ? { whatsapp } : {}),
+      ...(telegramTotal > 0 ? { telegram } : {}),
+      ...(maxTotal > 0 ? { max } : {}),
+      ...(whatsappTotal > 0 ? { whatsapp } : {}),
     };
   }
 
