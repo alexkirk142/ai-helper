@@ -243,6 +243,71 @@ router.put(
   }
 );
 
+// ── Subscription management ──────────────────────────────────────────────────
+
+router.get(
+  "/billing/subscriptions",
+  requireAuth,
+  requirePlatformAdmin(),
+  async (_req, res) => {
+    const rows = await db
+      .select({
+        id: subscriptions.id,
+        tenantId: subscriptions.tenantId,
+        tenantName: tenants.name,
+        feature: subscriptions.feature,
+        status: subscriptions.status,
+        currentPeriodEnd: subscriptions.currentPeriodEnd,
+        cancelAtPeriodEnd: subscriptions.cancelAtPeriodEnd,
+        updatedAt: subscriptions.updatedAt,
+      })
+      .from(subscriptions)
+      .leftJoin(tenants, eq(subscriptions.tenantId, tenants.id))
+      .where(
+        or(
+          eq(subscriptions.status, "active"),
+          eq(subscriptions.status, "trialing"),
+          eq(subscriptions.status, "incomplete"),
+        )
+      )
+      .orderBy(desc(subscriptions.updatedAt));
+
+    res.json(rows);
+  }
+);
+
+router.post(
+  "/billing/subscriptions/:tenantId/cancel",
+  requireAuth,
+  requirePlatformOwner(),
+  async (req, res) => {
+    const { tenantId } = req.params;
+    const { feature } = req.body as { feature?: string };
+
+    if (!feature || (feature !== "channels" && feature !== "ai_agent")) {
+      return res.status(400).json({ error: "feature must be 'channels' or 'ai_agent'" });
+    }
+
+    const [sub] = await db
+      .select()
+      .from(subscriptions)
+      .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, feature)))
+      .limit(1);
+
+    if (!sub) {
+      return res.status(404).json({ error: "Subscription not found" });
+    }
+
+    await db
+      .update(subscriptions)
+      .set({ status: "canceled", cancelAtPeriodEnd: false, updatedAt: new Date() })
+      .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, feature)));
+
+    console.log(`[Admin] Subscription ${feature} for tenant ${tenantId} canceled by ${req.userId}`);
+    res.json({ success: true });
+  }
+);
+
 router.get(
   "/tenants/search",
   requireAuth,

@@ -12,13 +12,35 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Shield, Loader2, ArrowLeft, Users, Clock, CreditCard, 
-  TrendingUp, Calendar, DollarSign, Settings2, Save
+  TrendingUp, Calendar, DollarSign, Settings2, Save, Ban, Bot, MessageSquare
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 interface PricesData {
   subscriptionPrice: number;
   aiAgentPrice: number;
   trialHours: number;
+}
+
+interface SubscriptionRow {
+  id: string;
+  tenantId: string;
+  tenantName: string | null;
+  feature: string;
+  status: string;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  updatedAt: string | null;
 }
 
 interface BillingMetrics {
@@ -76,6 +98,35 @@ export default function AdminBilling() {
       setTrialHours(String(prices.trialHours));
     }
   }, [prices]);
+
+  const { data: allSubscriptions, isLoading: subsLoading, refetch: refetchSubs } = useQuery<SubscriptionRow[]>({
+    queryKey: ["/api/admin/billing/subscriptions"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/billing/subscriptions", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch subscriptions");
+      return res.json();
+    },
+    enabled: !!user?.isPlatformOwner || !!user?.isPlatformAdmin,
+  });
+
+  const cancelSubMutation = useMutation({
+    mutationFn: async ({ tenantId, feature }: { tenantId: string; feature: string }) => {
+      const res = await apiRequest("POST", `/api/admin/billing/subscriptions/${tenantId}/cancel`, { feature });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to cancel subscription");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchSubs();
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/billing/metrics"] });
+      toast({ title: "Подписка аннулирована" });
+    },
+    onError: (e: any) => {
+      toast({ title: "Ошибка", description: e.message, variant: "destructive" });
+    },
+  });
 
   const savepricesMutation = useMutation({
     mutationFn: async () => {
@@ -294,6 +345,97 @@ export default function AdminBilling() {
                   )}
                   Сохранить цены
                 </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ── Subscription management ── */}
+        <Card data-testid="card-subscriptions">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5" />
+              Управление подписками
+            </CardTitle>
+            <CardDescription>
+              Активные, триальные и незавершённые подписки. Аннулирование действует немедленно.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {subsLoading ? (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Загрузка…
+              </div>
+            ) : !allSubscriptions?.length ? (
+              <p className="text-center text-muted-foreground py-8">Нет активных подписок</p>
+            ) : (
+              <div className="space-y-2">
+                {allSubscriptions.map((sub) => (
+                  <div
+                    key={sub.id}
+                    className="flex items-center justify-between p-3 rounded-lg bg-muted/50 gap-3 flex-wrap"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      {sub.feature === "ai_agent" ? (
+                        <Bot className="h-4 w-4 text-purple-500 shrink-0" />
+                      ) : (
+                        <MessageSquare className="h-4 w-4 text-blue-500 shrink-0" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{sub.tenantName || sub.tenantId}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {sub.feature === "ai_agent" ? "AI Агент" : "Каналы"} ·{" "}
+                          {sub.currentPeriodEnd
+                            ? `до ${formatDate(sub.currentPeriodEnd)}`
+                            : "без даты окончания"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge
+                        variant={sub.status === "active" ? "default" : sub.status === "trialing" ? "secondary" : "outline"}
+                      >
+                        {sub.status === "active" ? "Активна" :
+                         sub.status === "trialing" ? "Триал" :
+                         sub.status === "incomplete" ? "Ожидает оплаты" : sub.status}
+                      </Badge>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            disabled={cancelSubMutation.isPending}
+                          >
+                            <Ban className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Аннулировать подписку?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Подписка <strong>{sub.feature === "ai_agent" ? "AI Агент" : "Каналы"}</strong> для{" "}
+                              <strong>{sub.tenantName || sub.tenantId}</strong> будет немедленно отменена.
+                              Пользователь потеряет доступ прямо сейчас.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Отмена</AlertDialogCancel>
+                            <AlertDialogAction
+                              className="bg-destructive hover:bg-destructive/90"
+                              onClick={() =>
+                                cancelSubMutation.mutate({ tenantId: sub.tenantId, feature: sub.feature })
+                              }
+                            >
+                              Аннулировать
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </CardContent>
