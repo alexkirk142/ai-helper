@@ -336,7 +336,7 @@ export function PaymentSuccessDialog({ open, onOpenChange }: PaymentSuccessDialo
                 onClick={() => window.open(`https://t.me/${notifyBotUsername}`, "_blank")}
               >
                 <SiTelegram className="mr-2 h-4 w-4 text-[#2AABEE]" />
-                Подключить уведомления в Telegram
+                Подключить уведомления об окончании подписки в Telegram
                 <ExternalLink className="ml-2 h-3 w-3 opacity-60" />
               </Button>
             </div>
