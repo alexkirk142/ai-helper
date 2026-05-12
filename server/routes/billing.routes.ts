@@ -183,7 +183,7 @@ router.post("/webhooks/cryptobot", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Missing signature" });
     }
     
-    if (!verifyWebhookSignature(rawBody, signature)) {
+    if (!await verifyWebhookSignature(rawBody, signature)) {
       console.error("[CryptoBot Webhook] Invalid signature");
       return res.status(400).json({ error: "Invalid signature" });
     }

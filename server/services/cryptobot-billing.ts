@@ -5,20 +5,14 @@ import type { Plan, Subscription, SubscriptionStatus, BillingStatus, PlanFeature
 import { eq, and, isNull, desc, sql } from "drizzle-orm";
 import crypto from "crypto";
 import { SUBSCRIPTION_PRICE_USDT, AI_SUBSCRIPTION_PRICE_USDT, TRIAL_PERIOD_HOURS } from "../config/business-constants";
+import { getSecret } from "./secret-resolver";
 
-const CRYPTO_PAY_TOKEN = process.env.CRYPTO_PAY_API_TOKEN;
 const IS_TESTNET = process.env.CRYPTO_PAY_TESTNET === "true";
 
-if (!CRYPTO_PAY_TOKEN) {
-  console.warn("[CryptoBilling] CRYPTO_PAY_API_TOKEN not configured");
+async function getCryptoPayToken(): Promise<string | null> {
+  const fromDb = await getSecret({ scope: "global", keyName: "CRYPTO_PAY_API_TOKEN" });
+  return fromDb ?? process.env.CRYPTO_PAY_API_TOKEN ?? null;
 }
-
-const cryptoPay = CRYPTO_PAY_TOKEN
-  ? new CryptoPay(CRYPTO_PAY_TOKEN, {
-      hostname: IS_TESTNET ? "testnet-pay.crypt.bot" : "pay.crypt.bot",
-      protocol: "https",
-    })
-  : null;
 
 const PLAN_CONFIG = {
   name: "AI Sales Operator Pro",
@@ -40,11 +34,15 @@ const AI_PLAN_CONFIG = {
   interval: "month" as const,
 };
 
-export function getCryptoPay(): CryptoPay {
-  if (!cryptoPay) {
-    throw new Error("CryptoBot is not configured. Set CRYPTO_PAY_API_TOKEN environment variable.");
+export async function getCryptoPay(): Promise<CryptoPay> {
+  const token = await getCryptoPayToken();
+  if (!token) {
+    throw new Error("CryptoBot is not configured. Set CRYPTO_PAY_API_TOKEN environment variable or add it via admin panel.");
   }
-  return cryptoPay;
+  return new CryptoPay(token, {
+    hostname: IS_TESTNET ? "testnet-pay.crypt.bot" : "pay.crypt.bot",
+    protocol: "https",
+  });
 }
 
 export async function ensurePlanExists(): Promise<Plan> {
@@ -103,7 +101,7 @@ export async function createInvoice(
   tenantId: string,
   successUrl: string
 ): Promise<{ payUrl: string; invoiceId: number }> {
-  const cryptoPayInstance = getCryptoPay();
+  const cryptoPayInstance = await getCryptoPay();
   const plan = await ensurePlanExists();
 
   const [existingSub] = await db
@@ -165,7 +163,7 @@ export async function createAiInvoice(
   tenantId: string,
   successUrl: string
 ): Promise<{ payUrl: string; invoiceId: number }> {
-  const cryptoPayInstance = getCryptoPay();
+  const cryptoPayInstance = await getCryptoPay();
   const plan = await ensureAiPlanExists();
 
   const [existingSub] = await db
@@ -224,7 +222,7 @@ export async function createAiInvoice(
 }
 
 export async function checkInvoiceStatus(invoiceId: string): Promise<"active" | "paid" | "expired"> {
-  const cryptoPayInstance = getCryptoPay();
+  const cryptoPayInstance = await getCryptoPay();
   
   const invoices = await cryptoPayInstance.getInvoices({
     invoice_ids: [Number(invoiceId)],
@@ -257,15 +255,15 @@ export interface CryptoWebhookPayload {
   };
 }
 
-export function verifyWebhookSignature(body: string, signature: string): boolean {
-  if (!CRYPTO_PAY_TOKEN) {
+export async function verifyWebhookSignature(body: string, signature: string): Promise<boolean> {
+  const token = await getCryptoPayToken();
+  if (!token) {
     console.error("[CryptoBilling] Cannot verify webhook: no API token");
     return false;
   }
 
-  const secret = crypto.createHash("sha256").update(CRYPTO_PAY_TOKEN).digest();
-  const checkString = body;
-  const hmac = crypto.createHmac("sha256", secret).update(checkString).digest("hex");
+  const secret = crypto.createHash("sha256").update(token).digest();
+  const hmac = crypto.createHmac("sha256", secret).update(body).digest("hex");
   
   return hmac === signature;
 }
@@ -711,7 +709,7 @@ export async function refreshExpiredSubscriptions(): Promise<void> {
 
 export async function testConnection(): Promise<boolean> {
   try {
-    const cryptoPayInstance = getCryptoPay();
+    const cryptoPayInstance = await getCryptoPay();
     const me = await cryptoPayInstance.getMe();
     console.log(`[CryptoBilling] Connected as: ${me.name} (App ID: ${me.app_id})`);
     return true;
