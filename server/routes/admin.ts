@@ -170,6 +170,76 @@ router.get(
   }
 );
 
+// ── Pricing management ──────────────────────────────────────────────────────
+
+router.get(
+  "/billing/prices",
+  requireAuth,
+  requirePlatformAdmin(),
+  async (_req, res) => {
+    const { getSubscriptionPriceUsdt, getAiSubscriptionPriceUsdt, getTrialPeriodHours } =
+      await import("../services/cryptobot-billing");
+    const [subscriptionPrice, aiAgentPrice, trialHours] = await Promise.all([
+      getSubscriptionPriceUsdt(),
+      getAiSubscriptionPriceUsdt(),
+      getTrialPeriodHours(),
+    ]);
+    res.json({ subscriptionPrice, aiAgentPrice, trialHours });
+  }
+);
+
+const pricesSchema = z.object({
+  subscriptionPrice: z.number().positive().optional(),
+  aiAgentPrice:      z.number().positive().optional(),
+  trialHours:        z.number().int().positive().optional(),
+});
+
+router.put(
+  "/billing/prices",
+  requireAuth,
+  requirePlatformOwner,
+  async (req, res) => {
+    const parsed = pricesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid price data", details: parsed.error.errors });
+    }
+    const { subscriptionPrice, aiAgentPrice, trialHours } = parsed.data;
+
+    const priceEntries: Array<{ keyName: string; value: string }> = [];
+    if (subscriptionPrice !== undefined) priceEntries.push({ keyName: "PRICE_SUBSCRIPTION_USDT", value: String(subscriptionPrice) });
+    if (aiAgentPrice      !== undefined) priceEntries.push({ keyName: "PRICE_AI_AGENT_USDT",    value: String(aiAgentPrice) });
+    if (trialHours        !== undefined) priceEntries.push({ keyName: "PRICE_TRIAL_HOURS",      value: String(trialHours) });
+
+    for (const entry of priceEntries) {
+      const { ciphertext, meta, last4 } = encryptSecret(entry.value);
+      const condition = and(
+        eq(integrationSecrets.scope, "global"),
+        isNull(integrationSecrets.tenantId),
+        eq(integrationSecrets.keyName, entry.keyName),
+        isNull(integrationSecrets.revokedAt)
+      );
+      const [existing] = await db.select().from(integrationSecrets).where(condition).limit(1);
+      if (existing) {
+        await db.update(integrationSecrets)
+          .set({ encryptedValue: ciphertext, encryptionMeta: meta, last4, rotatedAt: new Date(), updatedAt: new Date() })
+          .where(eq(integrationSecrets.id, existing.id));
+      } else {
+        await db.insert(integrationSecrets).values({
+          scope: "global",
+          keyName: entry.keyName,
+          encryptedValue: ciphertext,
+          encryptionMeta: meta,
+          last4,
+        });
+      }
+      clearSecretCache("global", entry.keyName);
+    }
+
+    console.log(`[Admin] Prices updated by ${req.userId}`);
+    res.json({ success: true });
+  }
+);
+
 router.get(
   "/tenants/search",
   requireAuth,

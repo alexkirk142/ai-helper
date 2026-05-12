@@ -1,14 +1,24 @@
 import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { useToast } from "@/hooks/use-toast";
 import { 
   Shield, Loader2, ArrowLeft, Users, Clock, CreditCard, 
-  TrendingUp, Calendar, DollarSign
+  TrendingUp, Calendar, DollarSign, Settings2, Save
 } from "lucide-react";
+
+interface PricesData {
+  subscriptionPrice: number;
+  aiAgentPrice: number;
+  trialHours: number;
+}
 
 interface BillingMetrics {
   activeSubscriptions: number;
@@ -31,6 +41,8 @@ interface BillingMetrics {
 export default function AdminBilling() {
   const [, navigate] = useLocation();
   const { user, isLoading: authLoading } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const { data: metrics, isLoading: metricsLoading } = useQuery<BillingMetrics>({
     queryKey: ["/api/admin/billing/metrics"],
@@ -40,6 +52,58 @@ export default function AdminBilling() {
       return res.json();
     },
     enabled: !!user?.isPlatformOwner || !!user?.isPlatformAdmin,
+  });
+
+  const { data: prices, isLoading: pricesLoading } = useQuery<PricesData>({
+    queryKey: ["/api/admin/billing/prices"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/billing/prices", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch prices");
+      return res.json();
+    },
+    enabled: !!user?.isPlatformOwner || !!user?.isPlatformAdmin,
+  });
+
+  const [subscriptionPrice, setSubscriptionPrice] = useState("");
+  const [aiAgentPrice, setAiAgentPrice]           = useState("");
+  const [trialHours, setTrialHours]               = useState("");
+
+  useEffect(() => {
+    if (prices) {
+      setSubscriptionPrice(String(prices.subscriptionPrice));
+      setAiAgentPrice(String(prices.aiAgentPrice));
+      setTrialHours(String(prices.trialHours));
+    }
+  }, [prices]);
+
+  const savepricesMutation = useMutation({
+    mutationFn: async () => {
+      const body: Record<string, number> = {};
+      const sp = parseFloat(subscriptionPrice);
+      const ap = parseFloat(aiAgentPrice);
+      const th = parseInt(trialHours, 10);
+      if (!isNaN(sp) && sp > 0) body.subscriptionPrice = sp;
+      if (!isNaN(ap) && ap > 0) body.aiAgentPrice = ap;
+      if (!isNaN(th) && th > 0) body.trialHours = th;
+      const res = await fetch("/api/admin/billing/prices", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to save prices");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/billing/prices"] });
+      toast({ title: "Цены сохранены", description: "Новые цены вступят в силу для следующих счётов" });
+    },
+    onError: (e: any) => {
+      toast({ title: "Ошибка", description: e.message, variant: "destructive" });
+    },
   });
 
   if (authLoading || metricsLoading) {
@@ -184,6 +248,109 @@ export default function AdminBilling() {
                 </span>
               </div>
             </div>
+          </CardContent>
+        </Card>
+        {/* ── Price settings ── */}
+        <Card data-testid="card-prices">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Settings2 className="h-5 w-5" />
+              Цены и условия
+            </CardTitle>
+            <CardDescription>
+              Изменения вступают в силу для новых счётов — существующие подписки не пересчитываются
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {pricesLoading ? (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Загрузка цен…
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="price-subscription">
+                      Подписка на каналы (USDT/мес)
+                    </Label>
+                    <div className="relative">
+                      <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="price-subscription"
+                        type="number"
+                        min="1"
+                        step="0.01"
+                        className="pl-9"
+                        value={subscriptionPrice}
+                        onChange={(e) => setSubscriptionPrice(e.target.value)}
+                        data-testid="input-subscription-price"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Telegram Personal, WhatsApp, MAX Personal
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="price-ai">
+                      AI-агент (USDT/мес)
+                    </Label>
+                    <div className="relative">
+                      <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="price-ai"
+                        type="number"
+                        min="1"
+                        step="0.01"
+                        className="pl-9"
+                        value={aiAgentPrice}
+                        onChange={(e) => setAiAgentPrice(e.target.value)}
+                        data-testid="input-ai-price"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Расширение AI-ответов и автоматизация
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="price-trial">
+                      Триальный период (часы)
+                    </Label>
+                    <div className="relative">
+                      <Clock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="price-trial"
+                        type="number"
+                        min="1"
+                        step="1"
+                        className="pl-9"
+                        value={trialHours}
+                        onChange={(e) => setTrialHours(e.target.value)}
+                        data-testid="input-trial-hours"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Применяется к новым тенантам
+                    </p>
+                  </div>
+                </div>
+
+                <Button
+                  onClick={() => savepricesMutation.mutate()}
+                  disabled={savepricesMutation.isPending}
+                  data-testid="button-save-prices"
+                >
+                  {savepricesMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-2 h-4 w-4" />
+                  )}
+                  Сохранить цены
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       </main>

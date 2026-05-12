@@ -18,6 +18,33 @@ async function getIsTestnet(): Promise<boolean> {
   return process.env.CRYPTO_PAY_TESTNET === "true";
 }
 
+export async function getSubscriptionPriceUsdt(): Promise<number> {
+  const val = await getSecret({ scope: "global", keyName: "PRICE_SUBSCRIPTION_USDT" });
+  if (val !== null) {
+    const n = parseFloat(val);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  return SUBSCRIPTION_PRICE_USDT;
+}
+
+export async function getAiSubscriptionPriceUsdt(): Promise<number> {
+  const val = await getSecret({ scope: "global", keyName: "PRICE_AI_AGENT_USDT" });
+  if (val !== null) {
+    const n = parseFloat(val);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  return AI_SUBSCRIPTION_PRICE_USDT;
+}
+
+export async function getTrialPeriodHours(): Promise<number> {
+  const val = await getSecret({ scope: "global", keyName: "PRICE_TRIAL_HOURS" });
+  if (val !== null) {
+    const n = parseInt(val, 10);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  return TRIAL_PERIOD_HOURS;
+}
+
 const PLAN_CONFIG = {
   name: "AI Sales Operator Pro",
   planType: "channels" as PlanFeatureType,
@@ -105,8 +132,11 @@ export async function createInvoice(
   tenantId: string,
   successUrl: string
 ): Promise<{ payUrl: string; invoiceId: number }> {
-  const cryptoPayInstance = await getCryptoPay();
-  const plan = await ensurePlanExists();
+  const [cryptoPayInstance, plan, priceUsdt] = await Promise.all([
+    getCryptoPay(),
+    ensurePlanExists(),
+    getSubscriptionPriceUsdt(),
+  ]);
 
   const [existingSub] = await db
     .select()
@@ -121,7 +151,7 @@ export async function createInvoice(
 
   const invoice = await cryptoPayInstance.createInvoice(
     Assets.USDT,
-    plan.cryptoAmount || String(SUBSCRIPTION_PRICE_USDT),
+    String(priceUsdt),
     {
       description: `${plan.name} - месячная подписка`,
       expires_in: 3600,
@@ -178,8 +208,11 @@ export async function createAiInvoice(
   tenantId: string,
   successUrl: string
 ): Promise<{ payUrl: string; invoiceId: number }> {
-  const cryptoPayInstance = await getCryptoPay();
-  const plan = await ensureAiPlanExists();
+  const [cryptoPayInstance, plan, priceUsdt] = await Promise.all([
+    getCryptoPay(),
+    ensureAiPlanExists(),
+    getAiSubscriptionPriceUsdt(),
+  ]);
 
   const [existingSub] = await db
     .select()
@@ -194,7 +227,7 @@ export async function createAiInvoice(
 
   const invoice = await cryptoPayInstance.createInvoice(
     Assets.USDT,
-    plan.cryptoAmount || String(AI_SUBSCRIPTION_PRICE_USDT),
+    String(priceUsdt),
     {
       description: `${plan.name} - месячная подписка`,
       expires_in: 3600,
@@ -596,7 +629,8 @@ export async function startTrial(tenantId: string): Promise<{ success: boolean; 
   }
   
   const now = new Date();
-  const trialEndsAt = new Date(now.getTime() + TRIAL_PERIOD_HOURS * 60 * 60 * 1000);
+  const trialHours = await getTrialPeriodHours();
+  const trialEndsAt = new Date(now.getTime() + trialHours * 60 * 60 * 1000);
   
   if (existingSub) {
     // Update existing subscription to trialing
