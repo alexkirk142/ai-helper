@@ -12,16 +12,21 @@ const CHANNEL_LABELS: Record<ChannelFilter, string> = {
 
 const ALL_FILTERS: ChannelFilter[] = ["all", "telegram", "max", "whatsapp", "marquiz"];
 
+interface ChannelCounts {
+  all: number;
+  telegram?: number;
+  max?: number;
+  whatsapp?: number;
+  marquiz?: number;
+}
+
 interface ChannelTabsProps {
   activeFilter: ChannelFilter;
   onFilterChange: (filter: ChannelFilter) => void;
-  counts: {
-    all: number;
-    telegram?: number;
-    max?: number;
-    whatsapp?: number;
-    marquiz?: number;
-  };
+  /** Which tabs to show — key presence means the tab is visible (value ignored for visibility). */
+  counts: ChannelCounts;
+  /** Unread counts shown as badges. Falls back to counts when omitted. */
+  unreadCounts?: ChannelCounts;
 }
 
 function UnreadBadge({ count }: { count: number }) {
@@ -33,10 +38,13 @@ function UnreadBadge({ count }: { count: number }) {
   );
 }
 
-export function ChannelTabs({ activeFilter, onFilterChange, counts }: ChannelTabsProps) {
+export function ChannelTabs({ activeFilter, onFilterChange, counts, unreadCounts }: ChannelTabsProps) {
+  const badge = unreadCounts ?? counts;
+
+  // Show a tab when the key exists in counts, regardless of value.
   const visibleFilters: ChannelFilter[] = ALL_FILTERS.filter((f) => {
     if (f === "all") return true;
-    return counts[f] !== undefined && counts[f]! > 0;
+    return counts[f] !== undefined;
   });
 
   if (visibleFilters.length <= 1) return null;
@@ -45,7 +53,7 @@ export function ChannelTabs({ activeFilter, onFilterChange, counts }: ChannelTab
     <div className="flex gap-0.5 border-b px-2 pt-1 shrink-0">
       {visibleFilters.map((filter) => {
         const isActive = activeFilter === filter;
-        const count = filter === "all" ? counts.all : (counts[filter] ?? 0);
+        const unread = filter === "all" ? badge.all : (badge[filter] ?? 0);
         return (
           <button
             key={filter}
@@ -60,7 +68,7 @@ export function ChannelTabs({ activeFilter, onFilterChange, counts }: ChannelTab
             )}
           >
             {CHANNEL_LABELS[filter]}
-            <UnreadBadge count={count} />
+            <UnreadBadge count={unread} />
           </button>
         );
       })}

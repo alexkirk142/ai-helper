@@ -125,15 +125,18 @@ export default function Conversations() {
     queryKey: ["/api/conversations/channel-counts"],
   });
 
-  // Count unread messages from marquiz leads (client-side)
-  const marquizCount = useMemo(() => {
-    if (!conversations) return 0;
-    return conversations.reduce((sum, c) => {
+  // Total marquiz conversations (for tab visibility) and unread count (for badge).
+  const { marquizTotal, marquizUnread } = useMemo(() => {
+    if (!conversations) return { marquizTotal: 0, marquizUnread: 0 };
+    let total = 0;
+    let unread = 0;
+    for (const c of conversations) {
       if ((c.customer?.metadata as any)?.source === "marquiz") {
-        return sum + (c.unreadCount ?? 0);
+        total++;
+        unread += c.unreadCount ?? 0;
       }
-      return sum;
-    }, 0);
+    }
+    return { marquizTotal: total, marquizUnread: unread };
   }, [conversations]);
 
   const { data: personalChannelStatus } = useQuery<{ telegram_personal: boolean; max_personal: boolean; whatsapp_personal: boolean }>({
@@ -599,7 +602,14 @@ export default function Conversations() {
           onFilterChange={(f) => { setChannelFilter(f); setTagFilter(null); }}
           counts={{
             ...(channelCounts ?? { all: 0 }),
-            ...(marquizCount > 0 ? { marquiz: marquizCount } : {}),
+            ...(marquizTotal > 0 ? { marquiz: marquizTotal } : {}),
+          }}
+          unreadCounts={{
+            all: channelCounts?.all ?? 0,
+            ...(channelCounts?.telegram !== undefined ? { telegram: channelCounts.telegram } : {}),
+            ...(channelCounts?.max !== undefined ? { max: channelCounts.max } : {}),
+            ...(channelCounts?.whatsapp !== undefined ? { whatsapp: channelCounts.whatsapp } : {}),
+            ...(marquizUnread > 0 ? { marquiz: marquizUnread } : {}),
           }}
         />
 
