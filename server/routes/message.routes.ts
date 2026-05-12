@@ -3,6 +3,7 @@ import { z } from "zod";
 import multer from "multer";
 import { storage } from "../storage";
 import { requireAuth, requirePermission } from "../middleware/rbac";
+import { requireActiveSubscription } from "../middleware/subscription";
 import { conversationRateLimiter, tenantConversationLimiter } from "../middleware/rate-limiter";
 import { featureFlagService } from "../services/feature-flags";
 import { WhatsAppPersonalAdapter } from "../services/whatsapp-personal-adapter";
@@ -143,6 +144,7 @@ router.post(
   "/api/conversations/:id/messages",
   requireAuth,
   requirePermission("MANAGE_CONVERSATIONS"),
+  requireActiveSubscription,
   messageUpload.single("file"),
   conversationRateLimiter,
   tenantConversationLimiter,

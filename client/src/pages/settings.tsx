@@ -1862,7 +1862,7 @@ interface WhatsAppPersonalCardProps {
 type WhatsAppAuthStatus = "disconnected" | "connecting" | "qr_ready" | "pairing_code_ready" | "connected" | "error" | "reconnecting";
 type WhatsAppAuthMethod = "qr" | "phone";
 
-function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "channelStatuses">) {
+function MaxPersonalCard({ channelStatuses, canAccess, onSubscribeClick }: Pick<WhatsAppPersonalCardProps, "channelStatuses"> & { canAccess: boolean; onSubscribeClick: () => void }) {
   const { toast } = useToast();
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [qrAccountId, setQrAccountId] = useState<string | null>(null);
@@ -2032,6 +2032,27 @@ function MaxPersonalCard({ channelStatuses }: Pick<WhatsAppPersonalCardProps, "c
           <CardDescription>Личный аккаунт MAX</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
+          {!canAccess && (
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
+              <div className="flex items-start gap-3">
+                <Lock className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-amber-700 dark:text-amber-400">Требуется подписка</p>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    Max Personal доступен только при активной платной подписке. Триальный период не включает этот канал.
+                  </p>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                onClick={onSubscribeClick}
+                className="shrink-0 w-full sm:w-auto"
+              >
+                <Zap className="mr-2 h-4 w-4" />
+                Оформить подписку
+              </Button>
+            </div>
+          )}
           {allAccounts.length === 0 && (
             <div className="rounded-md border p-4 flex items-start gap-3">
               <XCircle className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
@@ -2710,6 +2731,35 @@ function ChannelSettings() {
 
       <ChannelPaywallOverlay canAccess={canAccess} onSubscribeClick={() => setShowPaywall(true)}>
         <div className="space-y-6">
+          <TelegramPersonalCard
+            channelStatuses={channelStatuses}
+            featureFlags={featureFlags}
+            toggleChannelMutation={toggleChannelMutation}
+            refetch={refetch}
+          />
+
+          <WhatsAppPersonalCard
+            channelStatuses={channelStatuses}
+            featureFlags={featureFlags}
+            toggleChannelMutation={toggleChannelMutation}
+            refetch={refetch}
+          />
+
+          <MaxPersonalCard
+            channelStatuses={channelStatuses}
+            canAccess={canAccess}
+            onSubscribeClick={() => setShowPaywall(true)}
+          />
+
+          <div className="flex items-center gap-3 pt-2">
+            <Separator className="flex-1" />
+            <span className="text-xs text-muted-foreground flex items-center gap-1.5 shrink-0">
+              <Clock className="h-3 w-3" />
+              В разработке
+            </span>
+            <Separator className="flex-1" />
+          </div>
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -2851,13 +2901,6 @@ function ChannelSettings() {
         testingConnection={testingConnection}
       />
 
-      <TelegramPersonalCard 
-        channelStatuses={channelStatuses}
-        featureFlags={featureFlags}
-        toggleChannelMutation={toggleChannelMutation}
-        refetch={refetch}
-      />
-
       <WhatsAppCard 
         channelStatuses={channelStatuses}
         featureFlags={featureFlags}
@@ -2865,17 +2908,6 @@ function ChannelSettings() {
         testConnection={testConnection}
         saveWhatsAppConfigMutation={saveWhatsAppConfigMutation}
         testingConnection={testingConnection}
-      />
-
-      <WhatsAppPersonalCard
-        channelStatuses={channelStatuses}
-        featureFlags={featureFlags}
-        toggleChannelMutation={toggleChannelMutation}
-        refetch={refetch}
-      />
-
-      <MaxPersonalCard
-        channelStatuses={channelStatuses}
       />
         </div>
       </ChannelPaywallOverlay>

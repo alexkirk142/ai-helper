@@ -614,7 +614,7 @@ router.post("/api/telegram-personal/disconnect", requireAuth, requirePermission(
   }
 });
 
-router.post("/api/telegram-personal/start-conversation", requireAuth, requireTenant, async (req: Request, res: Response) => {
+router.post("/api/telegram-personal/start-conversation", requireAuth, requireActiveSubscription, requireTenant, async (req: Request, res: Response) => {
   try {
     const tenantId = req.tenantId!;
 

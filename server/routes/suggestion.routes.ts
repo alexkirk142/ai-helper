@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { storage } from "../storage";
 import { requireAuth, requirePermission } from "../middleware/rbac";
+import { requireActiveSubscription } from "../middleware/subscription";
 import { aiRateLimiter, tenantAiLimiter } from "../middleware/rate-limiter";
 import { featureFlagService } from "../services/feature-flags";
 import { auditLog } from "../services/audit-log";
@@ -266,7 +267,7 @@ async function sendToChannel(conversationId: string, text: string, tenantId: str
   return channelSendResult;
 }
 
-router.post("/api/suggestions/:id/approve", requireAuth, requirePermission("MANAGE_CONVERSATIONS"), async (req: Request, res: Response) => {
+router.post("/api/suggestions/:id/approve", requireAuth, requirePermission("MANAGE_CONVERSATIONS"), requireActiveSubscription, async (req: Request, res: Response) => {
   try {
     const approveUser = await getUserForConversations(req.userId ?? "");
     if (!approveUser?.tenantId) {
@@ -396,7 +397,7 @@ router.post("/api/suggestions/:id/approve", requireAuth, requirePermission("MANA
   }
 });
 
-router.post("/api/suggestions/:id/edit", requireAuth, requirePermission("MANAGE_CONVERSATIONS"), async (req: Request, res: Response) => {
+router.post("/api/suggestions/:id/edit", requireAuth, requirePermission("MANAGE_CONVERSATIONS"), requireActiveSubscription, async (req: Request, res: Response) => {
   try {
     const { editedText } = req.body;
 
