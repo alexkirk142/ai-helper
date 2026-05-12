@@ -1862,7 +1862,7 @@ interface WhatsAppPersonalCardProps {
 type WhatsAppAuthStatus = "disconnected" | "connecting" | "qr_ready" | "pairing_code_ready" | "connected" | "error" | "reconnecting";
 type WhatsAppAuthMethod = "qr" | "phone";
 
-function MaxPersonalCard({ channelStatuses, canAccess, onSubscribeClick }: Pick<WhatsAppPersonalCardProps, "channelStatuses"> & { canAccess: boolean; onSubscribeClick: () => void }) {
+function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick }: Pick<WhatsAppPersonalCardProps, "channelStatuses"> & { canAccess: boolean; isTrial: boolean; onSubscribeClick: () => void }) {
   const { toast } = useToast();
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [qrAccountId, setQrAccountId] = useState<string | null>(null);
@@ -2032,12 +2032,14 @@ function MaxPersonalCard({ channelStatuses, canAccess, onSubscribeClick }: Pick<
           <CardDescription>Личный аккаунт MAX</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
-          {!canAccess && (
+          {(!canAccess || isTrial) && (
             <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
               <div className="flex items-start gap-3">
                 <Lock className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-medium text-amber-700 dark:text-amber-400">Требуется подписка</p>
+                  <p className="font-medium text-amber-700 dark:text-amber-400">
+                    {isTrial ? "Недоступно на триальном периоде" : "Требуется подписка"}
+                  </p>
                   <p className="text-sm text-muted-foreground mt-0.5">
                     Max Personal доступен только при активной платной подписке. Триальный период не включает этот канал.
                   </p>
@@ -2590,6 +2592,7 @@ function ChannelSettings() {
 
   const { data: billingStatus } = useBillingStatus();
   const canAccess = billingStatus?.canAccess ?? false;
+  const isTrial = billingStatus?.isTrial ?? false;
 
   const { data: channelStatuses, isLoading, refetch } = useQuery<ChannelStatus[]>({
     queryKey: ["/api/channels/status"],
@@ -2748,6 +2751,7 @@ function ChannelSettings() {
           <MaxPersonalCard
             channelStatuses={channelStatuses}
             canAccess={canAccess}
+            isTrial={isTrial}
             onSubscribeClick={() => setShowPaywall(true)}
           />
 
