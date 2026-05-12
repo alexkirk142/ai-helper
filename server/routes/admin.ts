@@ -205,6 +205,8 @@ router.put(
     }
     const { subscriptionPrice, aiAgentPrice, trialHours } = parsed.data;
 
+    const adminId = (req as any).user?.id;
+
     const priceEntries: Array<{ keyName: string; value: string }> = [];
     if (subscriptionPrice !== undefined) priceEntries.push({ keyName: "PRICE_SUBSCRIPTION_USDT", value: String(subscriptionPrice) });
     if (aiAgentPrice      !== undefined) priceEntries.push({ keyName: "PRICE_AI_AGENT_USDT",    value: String(aiAgentPrice) });
@@ -230,9 +232,10 @@ router.put(
           encryptedValue: ciphertext,
           encryptionMeta: meta,
           last4,
+          createdByAdminId: adminId,
         });
       }
-      clearSecretCache("global", entry.keyName);
+      clearSecretCache({ scope: "global", tenantId: undefined, keyName: entry.keyName });
     }
 
     console.log(`[Admin] Prices updated by ${req.userId}`);
