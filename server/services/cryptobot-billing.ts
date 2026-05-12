@@ -282,12 +282,15 @@ export async function createAiInvoice(
 export async function checkInvoiceStatus(invoiceId: string): Promise<"active" | "paid" | "expired"> {
   const cryptoPayInstance = await getCryptoPay();
   
-  const invoices = await cryptoPayInstance.getInvoices({
+  const result = await cryptoPayInstance.getInvoices({
     invoice_ids: [Number(invoiceId)],
   });
 
+  // CryptoPay API returns { items: [...] } not a direct array
+  const invoices: any[] = Array.isArray(result) ? result : ((result as any)?.items ?? []);
+
   if (invoices.length === 0) {
-    throw new Error("Invoice not found");
+    throw new Error(`Invoice ${invoiceId} not found in CryptoPay`);
   }
 
   return invoices[0].status as "active" | "paid" | "expired";
