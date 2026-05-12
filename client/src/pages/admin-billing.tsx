@@ -1,6 +1,7 @@
 import { useLocation } from "wouter";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -85,12 +86,7 @@ export default function AdminBilling() {
       if (!isNaN(sp) && sp > 0) body.subscriptionPrice = sp;
       if (!isNaN(ap) && ap > 0) body.aiAgentPrice = ap;
       if (!isNaN(th) && th > 0) body.trialHours = th;
-      const res = await fetch("/api/admin/billing/prices", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(body),
-      });
+      const res = await apiRequest("PUT", "/api/admin/billing/prices", body);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Failed to save prices");
@@ -199,57 +195,6 @@ export default function AdminBilling() {
           </Card>
         </div>
 
-        <Card data-testid="card-upcoming-renewals">
-          <CardHeader>
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Calendar className="h-5 w-5" />
-                  Ближайшие продления (30 дней)
-                </CardTitle>
-                <CardDescription>Подписки которые должны быть продлены</CardDescription>
-              </div>
-              <Badge variant="outline" className="text-lg px-4 py-2" data-testid="badge-upcoming-total">
-                <DollarSign className="h-4 w-4 mr-1" />
-                {metrics?.upcomingRenewals?.totalAmount || 0} USDT
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {metrics?.upcomingRenewals?.renewals?.length ? (
-              <div className="space-y-3">
-                {metrics.upcomingRenewals.renewals.map((renewal) => (
-                  <div 
-                    key={renewal.tenantId} 
-                    className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
-                  >
-                    <div>
-                      <p className="font-medium">{renewal.tenantName}</p>
-                      <p className="text-sm text-muted-foreground">
-                        Истекает: {formatDate(renewal.endsAt)}
-                      </p>
-                    </div>
-                    <Badge variant="secondary">{renewal.amount} USDT</Badge>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-center text-muted-foreground py-8">
-                Нет подписок к продлению в ближайшие 30 дней
-              </p>
-            )}
-            <div className="mt-4 pt-4 border-t">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">
-                  Всего к продлению: {metrics?.upcomingRenewals?.count || 0} подписок
-                </span>
-                <span className="font-semibold">
-                  {metrics?.upcomingRenewals?.totalAmount || 0} USDT
-                </span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
         {/* ── Price settings ── */}
         <Card data-testid="card-prices">
           <CardHeader>
@@ -351,6 +296,58 @@ export default function AdminBilling() {
                 </Button>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        <Card data-testid="card-upcoming-renewals">
+          <CardHeader>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Calendar className="h-5 w-5" />
+                  Ближайшие продления (30 дней)
+                </CardTitle>
+                <CardDescription>Подписки которые должны быть продлены</CardDescription>
+              </div>
+              <Badge variant="outline" className="text-lg px-4 py-2" data-testid="badge-upcoming-total">
+                <DollarSign className="h-4 w-4 mr-1" />
+                {metrics?.upcomingRenewals?.totalAmount || 0} USDT
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {metrics?.upcomingRenewals?.renewals?.length ? (
+              <div className="space-y-3">
+                {metrics.upcomingRenewals.renewals.map((renewal) => (
+                  <div
+                    key={renewal.tenantId}
+                    className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
+                  >
+                    <div>
+                      <p className="font-medium">{renewal.tenantName}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Истекает: {formatDate(renewal.endsAt)}
+                      </p>
+                    </div>
+                    <Badge variant="secondary">{renewal.amount} USDT</Badge>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-center text-muted-foreground py-8">
+                Нет подписок к продлению в ближайшие 30 дней
+              </p>
+            )}
+            <div className="mt-4 pt-4 border-t">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">
+                  Всего к продлению: {metrics?.upcomingRenewals?.count || 0} подписок
+                </span>
+                <span className="font-semibold">
+                  {metrics?.upcomingRenewals?.totalAmount || 0} USDT
+                </span>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </main>
