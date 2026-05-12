@@ -9,8 +9,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Key, Shield, Check, X, RotateCw, MessageCircle, Send, Coins, Bot, MessageSquare, Eye, EyeOff, Bell, Database } from "lucide-react";
+import { Loader2, Key, Shield, Check, X, RotateCw, MessageCircle, Send, Coins, Bot, MessageSquare, Eye, EyeOff, Bell, Database, FlaskConical } from "lucide-react";
 import { SiTelegram, SiWhatsapp, SiOpenai } from "react-icons/si";
 
 interface SecretMetadata {
@@ -30,19 +31,29 @@ interface SecretsResponse {
   pagination: { limit: number; offset: number; count: number };
 }
 
+interface SecretDef {
+  keyName: string;
+  label: string;
+  placeholder: string;
+  required: boolean;
+  hint?: string;
+}
+
+interface ToggleDef {
+  keyName: string;
+  label: string;
+  description: string;
+  warningWhenOn?: string;
+}
+
 interface IntegrationConfig {
   id: string;
   name: string;
   description: string;
   icon: React.ReactNode;
   color: string;
-  secrets: {
-    keyName: string;
-    label: string;
-    placeholder: string;
-    required: boolean;
-    hint?: string;
-  }[];
+  secrets: SecretDef[];
+  toggles?: ToggleDef[];
 }
 
 const INTEGRATIONS: IntegrationConfig[] = [
@@ -162,6 +173,14 @@ const INTEGRATIONS: IntegrationConfig[] = [
         hint: "Получите в @CryptoBot → Crypto Pay → API",
       },
     ],
+    toggles: [
+      {
+        keyName: "CRYPTO_PAY_TESTNET",
+        label: "Тестовый режим",
+        description: "Использовать @CryptoTestnetBot вместо боевого CryptoBot",
+        warningWhenOn: "Реальные платежи не принимаются в тестовом режиме",
+      },
+    ],
   },
   {
     id: "openai",
@@ -240,6 +259,33 @@ export default function AdminSecrets() {
       toast({ title: "Ошибка", description: err.message || "Не удалось сохранить секрет", variant: "destructive" });
     },
   });
+
+  const toggleMutation = useMutation({
+    mutationFn: async ({ keyName, value }: { keyName: string; value: boolean }) => {
+      return apiRequest("POST", "/api/admin/secrets", {
+        scope: "global",
+        keyName,
+        plaintextValue: value ? "true" : "false",
+        reason: value ? "Включён тестовый режим" : "Отключён тестовый режим",
+      });
+    },
+    onSuccess: (_data, vars) => {
+      const label = vars.value ? "включён" : "отключён";
+      toast({ title: `Тестовый режим ${label}` });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/secrets"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Ошибка", description: err.message || "Не удалось изменить настройку", variant: "destructive" });
+    },
+  });
+
+  const getToggleValue = (keyName: string): boolean => {
+    if (!data?.secrets) return false;
+    const secret = data.secrets.find((s) => s.keyName === keyName && s.scope === "global" && !s.revokedAt);
+    if (!secret) return false;
+    // last4 of "true" → "true"; last4 of "false" → "alse"
+    return secret.last4 === "true";
+  };
 
   const closeModal = () => {
     setEditModal({ open: false, integration: null, secretKey: "" });
@@ -383,6 +429,39 @@ export default function AdminSecrets() {
                                 </>
                               )}
                             </Button>
+                          </div>
+                        );
+                      })}
+                      {integration.toggles?.map((toggleDef) => {
+                        const isOn = getToggleValue(toggleDef.keyName);
+                        return (
+                          <div
+                            key={toggleDef.keyName}
+                            className="p-2 rounded-md bg-muted/50 space-y-1.5"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <FlaskConical className="h-4 w-4 text-muted-foreground" />
+                                <span className="font-medium text-sm">{toggleDef.label}</span>
+                                {isOn && (
+                                  <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-600 border-amber-300">
+                                    Включён
+                                  </Badge>
+                                )}
+                              </div>
+                              <Switch
+                                checked={isOn}
+                                disabled={toggleMutation.isPending}
+                                onCheckedChange={(checked) =>
+                                  toggleMutation.mutate({ keyName: toggleDef.keyName, value: checked })
+                                }
+                                data-testid={`toggle-${toggleDef.keyName}`}
+                              />
+                            </div>
+                            <p className="text-xs text-muted-foreground ml-6">{toggleDef.description}</p>
+                            {isOn && toggleDef.warningWhenOn && (
+                              <p className="text-xs text-amber-600 ml-6">⚠ {toggleDef.warningWhenOn}</p>
+                            )}
                           </div>
                         );
                       })}

@@ -7,11 +7,15 @@ import crypto from "crypto";
 import { SUBSCRIPTION_PRICE_USDT, AI_SUBSCRIPTION_PRICE_USDT, TRIAL_PERIOD_HOURS } from "../config/business-constants";
 import { getSecret } from "./secret-resolver";
 
-const IS_TESTNET = process.env.CRYPTO_PAY_TESTNET === "true";
-
 async function getCryptoPayToken(): Promise<string | null> {
   const fromDb = await getSecret({ scope: "global", keyName: "CRYPTO_PAY_API_TOKEN" });
   return fromDb ?? process.env.CRYPTO_PAY_API_TOKEN ?? null;
+}
+
+async function getIsTestnet(): Promise<boolean> {
+  const fromDb = await getSecret({ scope: "global", keyName: "CRYPTO_PAY_TESTNET" });
+  if (fromDb !== null) return fromDb === "true";
+  return process.env.CRYPTO_PAY_TESTNET === "true";
 }
 
 const PLAN_CONFIG = {
@@ -35,12 +39,12 @@ const AI_PLAN_CONFIG = {
 };
 
 export async function getCryptoPay(): Promise<CryptoPay> {
-  const token = await getCryptoPayToken();
+  const [token, isTestnet] = await Promise.all([getCryptoPayToken(), getIsTestnet()]);
   if (!token) {
     throw new Error("CryptoBot is not configured. Set CRYPTO_PAY_API_TOKEN environment variable or add it via admin panel.");
   }
   return new CryptoPay(token, {
-    hostname: IS_TESTNET ? "testnet-pay.crypt.bot" : "pay.crypt.bot",
+    hostname: isTestnet ? "testnet-pay.crypt.bot" : "pay.crypt.bot",
     protocol: "https",
   });
 }
