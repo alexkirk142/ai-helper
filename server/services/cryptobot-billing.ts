@@ -147,6 +147,17 @@ export async function createInvoice(
       paymentProvider: "cryptobot",
       status: "incomplete",
     });
+  } else if (existingSub.status === "trialing") {
+    // Keep trial access while payment is pending — only store the new invoice ID
+    await db
+      .update(subscriptions)
+      .set({
+        planId: plan.id,
+        cryptoInvoiceId: String(invoice.invoice_id),
+        paymentProvider: "cryptobot",
+        updatedAt: new Date(),
+      })
+      .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "channels")));
   } else {
     await db
       .update(subscriptions)
@@ -209,6 +220,16 @@ export async function createAiInvoice(
       paymentProvider: "cryptobot",
       status: "incomplete",
     });
+  } else if (existingSub.status === "trialing") {
+    await db
+      .update(subscriptions)
+      .set({
+        planId: plan.id,
+        cryptoInvoiceId: String(invoice.invoice_id),
+        paymentProvider: "cryptobot",
+        updatedAt: new Date(),
+      })
+      .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "ai_agent")));
   } else {
     await db
       .update(subscriptions)

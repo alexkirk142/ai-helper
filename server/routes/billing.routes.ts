@@ -196,6 +196,68 @@ router.post("/webhooks/cryptobot", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Fallback payment verification — called when the user returns from CryptoBot
+ * via ?billing=success. Checks the pending invoice directly with the CryptoBot API
+ * and activates the subscription if the payment is confirmed (webhook fallback).
+ */
+router.post("/api/billing/verify-payment", requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!req.userId || req.userId === "system") {
+      return res.status(403).json({ error: "User authentication required" });
+    }
+    const user = await getUserForBilling(req.userId);
+    if (!user?.tenantId) {
+      return res.status(403).json({ error: "User not associated with a tenant" });
+    }
+
+    const { getSubscriptionByTenant, checkInvoiceStatus, handleWebhookEvent, getBillingStatus } =
+      await import("../services/cryptobot-billing");
+
+    const subscription = await getSubscriptionByTenant(user.tenantId);
+    if (!subscription?.cryptoInvoiceId) {
+      const billingStatus = await getBillingStatus(user.tenantId);
+      return res.json({ activated: billingStatus.canAccess, billingStatus });
+    }
+
+    // If already active, nothing to do
+    if (subscription.status === "active") {
+      const billingStatus = await getBillingStatus(user.tenantId);
+      return res.json({ activated: true, billingStatus });
+    }
+
+    const invoiceStatus = await checkInvoiceStatus(subscription.cryptoInvoiceId);
+    if (invoiceStatus === "paid") {
+      // Replay the webhook activation logic
+      await handleWebhookEvent({
+        update_type: "invoice_paid",
+        request_date: new Date().toISOString(),
+        update_id: 0,
+        payload: {
+          invoice_id: Number(subscription.cryptoInvoiceId),
+          status: "paid",
+          hash: "",
+          asset: "",
+          amount: "",
+          pay_url: "",
+          description: "",
+          created_at: new Date().toISOString(),
+          paid_at: new Date().toISOString(),
+          paid_anonymously: false,
+          payload: JSON.stringify({ tenantId: user.tenantId, feature: "channels" }),
+        },
+      });
+      console.log(`[BillingVerify] Fallback-activated channels subscription for tenant ${user.tenantId}`);
+    }
+
+    const billingStatus = await getBillingStatus(user.tenantId);
+    return res.json({ activated: billingStatus.canAccess, invoiceStatus, billingStatus });
+  } catch (error: any) {
+    console.error("[BillingVerify] Error:", error);
+    res.status(500).json({ error: error.message || "Verification failed" });
+  }
+});
+
 router.get("/api/billing/public-config", async (_req: Request, res: Response) => {
   try {
     const { getSecret } = await import("../services/secret-resolver");

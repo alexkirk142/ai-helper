@@ -4296,12 +4296,16 @@ export default function Settings() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("billing") === "success") {
-      setShowPaymentSuccess(true);
-      const url = new URL(window.location.href);
-      url.searchParams.delete("billing");
-      window.history.replaceState({}, "", url.toString());
-    }
+    if (params.get("billing") !== "success") return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete("billing");
+    window.history.replaceState({}, "", url.toString());
+
+    // Fallback: verify payment server-side in case the webhook was not delivered
+    fetch("/api/billing/verify-payment", { method: "POST", credentials: "include" })
+      .catch(() => {/* silent — webhook may have already activated */})
+      .finally(() => setShowPaymentSuccess(true));
   }, []);
 
   const { data: tenant, isLoading } = useQuery<Tenant>({
