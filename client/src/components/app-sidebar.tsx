@@ -28,11 +28,6 @@ import {
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 
-interface Conversation {
-  id: string;
-  status: string;
-}
-
 interface Escalation {
   id: string;
   status: string;
@@ -72,11 +67,11 @@ export function AppSidebar() {
   const { user } = useAuth();
   const isPlatformStaff = user?.isPlatformAdmin || user?.isPlatformOwner;
   
-  const { data: conversations } = useQuery<Conversation[]>({
-    queryKey: ["/api/conversations"],
+  const { data: channelCounts } = useQuery<{ all: number }>({
+    queryKey: ["/api/conversations/channel-counts"],
     refetchInterval: 30000,
   });
-  
+
   const { data: escalations } = useQuery<Escalation[]>({
     queryKey: ["/api/escalations", "pending"],
     refetchInterval: 30000,
@@ -91,8 +86,8 @@ export function AppSidebar() {
     },
     refetchInterval: 60000,
   });
-  
-  const activeConversationsCount = conversations?.filter(c => c.status === "active").length || 0;
+
+  const unreadCount = channelCounts?.all || 0;
   const pendingEscalationsCount = escalations?.filter(e => e.status === "pending").length || 0;
   const failedLeadsCount = failedLeads?.length || 0;
 
@@ -133,9 +128,9 @@ export function AppSidebar() {
                   <Link href="/conversations">
                     <MessageSquare className="h-4 w-4" />
                     <span>Разговоры</span>
-                    {activeConversationsCount > 0 && (
+                    {unreadCount > 0 && (
                       <Badge variant="secondary" className="ml-auto text-xs">
-                        {activeConversationsCount}
+                        {unreadCount > 99 ? "99+" : unreadCount}
                       </Badge>
                     )}
                   </Link>
