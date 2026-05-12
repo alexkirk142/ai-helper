@@ -29,10 +29,18 @@ import { SiTelegram } from "react-icons/si";
 import { useCreateCheckout, useBillingStatus } from "@/hooks/use-billing";
 import { useToast } from "@/hooks/use-toast";
 
-function usePublicBillingConfig() {
-  return useQuery<{ notifyBotUsername: string | null }>({
+export interface PublicBillingConfig {
+  notifyBotUsername: string | null;
+  subscriptionPrice: number;
+  aiAgentPrice: number;
+  trialHours: number;
+}
+
+export function usePublicBillingConfig() {
+  return useQuery<PublicBillingConfig>({
     queryKey: ["/api/billing/public-config"],
     staleTime: 5 * 60 * 1000,
+    placeholderData: { notifyBotUsername: null, subscriptionPrice: 50, aiAgentPrice: 30, trialHours: 72 },
   });
 }
 
@@ -57,6 +65,10 @@ export function SubscriptionPaywall({
   const { toast } = useToast();
   const createCheckout = useCreateCheckout();
   const { data: billing, refetch } = useBillingStatus();
+  const { data: publicConfig } = usePublicBillingConfig();
+  const subPrice = publicConfig?.subscriptionPrice ?? 50;
+  const trialH   = publicConfig?.trialHours ?? 72;
+  const trialDays = Math.round(trialH / 24);
   
   const isTrialExpired = billing?.hadTrial && billing?.status === "expired";
 
@@ -114,7 +126,7 @@ export function SubscriptionPaywall({
           </DialogTitle>
           <DialogDescription>
             {isTrialExpired 
-              ? "Ваш 3-дневный пробный период истёк. Оформите подписку для продолжения работы"
+              ? `Ваш ${trialDays}-дневный пробный период истёк. Оформите подписку для продолжения работы`
               : trigger === "channel" 
                 ? "Для подключения каналов связи необходима активная подписка"
                 : "Эта функция доступна только с активной подпиской"
@@ -130,7 +142,7 @@ export function SubscriptionPaywall({
                 <p className="text-sm text-muted-foreground">Полный доступ ко всем функциям</p>
               </div>
               <div className="text-right">
-                <div className="text-2xl font-bold">50 USDT</div>
+                <div className="text-2xl font-bold">{subPrice} USDT</div>
                 <div className="text-xs text-muted-foreground">/месяц</div>
               </div>
             </div>
@@ -195,6 +207,9 @@ export function ChannelPaywallOverlay({
   onSubscribeClick, 
   children 
 }: ChannelPaywallOverlayProps) {
+  const { data: publicConfig } = usePublicBillingConfig();
+  const subPrice = publicConfig?.subscriptionPrice ?? 50;
+
   if (canAccess) {
     return <>{children}</>;
   }
@@ -222,7 +237,7 @@ export function ChannelPaywallOverlay({
             data-testid="button-activate-subscription"
           >
             <Zap className="mr-2 h-4 w-4" />
-            Активировать за $50/мес
+            Активировать за ${subPrice}/мес
           </Button>
         </div>
       </div>

@@ -56,7 +56,7 @@ import {
   FileSpreadsheet,
 } from "lucide-react";
 import { useBillingStatus } from "@/hooks/use-billing";
-import { SubscriptionPaywall } from "@/components/subscription-paywall";
+import { SubscriptionPaywall, usePublicBillingConfig } from "@/components/subscription-paywall";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
@@ -182,6 +182,8 @@ export default function Onboarding() {
   
   const { data: billingStatus } = useBillingStatus();
   const hasSubscription = billingStatus?.canAccess ?? false;
+  const { data: publicConfig } = usePublicBillingConfig();
+  const subPrice = publicConfig?.subscriptionPrice ?? 50;
   
   const { data: onboardingState, isLoading } = useQuery<OnboardingState>({
     queryKey: ["/api/onboarding/state"],
@@ -630,7 +632,7 @@ export default function Onboarding() {
                           data-testid="button-onboarding-subscribe"
                         >
                           <Zap className="mr-2 h-3 w-3" />
-                          Узнать о подписке $50/мес
+                          Узнать о подписке ${subPrice}/мес
                         </Button>
                       </div>
                     </div>

@@ -261,16 +261,28 @@ router.post("/api/billing/verify-payment", requireAuth, async (req: Request, res
 router.get("/api/billing/public-config", async (_req: Request, res: Response) => {
   try {
     const { getSecret } = await import("../services/secret-resolver");
-    const token = await getSecret({ scope: "global", keyName: "TELEGRAM_ESCALATION_BOT_TOKEN" });
-    if (!token) {
-      return res.json({ notifyBotUsername: null });
+    const { getSubscriptionPriceUsdt, getAiSubscriptionPriceUsdt, getTrialPeriodHours } =
+      await import("../services/cryptobot-billing");
+
+    const [token, subscriptionPrice, aiAgentPrice, trialHours] = await Promise.all([
+      getSecret({ scope: "global", keyName: "TELEGRAM_ESCALATION_BOT_TOKEN" }),
+      getSubscriptionPriceUsdt(),
+      getAiSubscriptionPriceUsdt(),
+      getTrialPeriodHours(),
+    ]);
+
+    let notifyBotUsername: string | null = null;
+    if (token) {
+      try {
+        const tgRes = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+        const tgJson = (await tgRes.json()) as { ok: boolean; result?: { username?: string } };
+        notifyBotUsername = tgJson.ok ? (tgJson.result?.username ?? null) : null;
+      } catch {/* ignore Telegram errors */}
     }
-    const tgRes = await fetch(`https://api.telegram.org/bot${token}/getMe`);
-    const tgJson = (await tgRes.json()) as { ok: boolean; result?: { username?: string } };
-    const notifyBotUsername = tgJson.ok ? (tgJson.result?.username ?? null) : null;
-    res.json({ notifyBotUsername });
+
+    res.json({ notifyBotUsername, subscriptionPrice, aiAgentPrice, trialHours });
   } catch {
-    res.json({ notifyBotUsername: null });
+    res.json({ notifyBotUsername: null, subscriptionPrice: 50, aiAgentPrice: 30, trialHours: 72 });
   }
 });
 

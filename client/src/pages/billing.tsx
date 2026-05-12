@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { SiTelegram } from "react-icons/si";
 import { useBillingStatus, useCreateCheckout, useCancelSubscription } from "@/hooks/use-billing";
+import { usePublicBillingConfig } from "@/components/subscription-paywall";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
@@ -42,6 +43,8 @@ export default function Billing() {
   const createCheckout = useCreateCheckout();
   const cancelSubscription = useCancelSubscription();
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const { data: publicConfig } = usePublicBillingConfig();
+  const subPrice = publicConfig?.subscriptionPrice ?? 50;
 
   const handleSubscribe = async () => {
     try {
@@ -188,7 +191,7 @@ export default function Billing() {
                   </p>
                 </div>
                 <div className="text-right">
-                  <div className="text-2xl font-bold">50 USDT</div>
+                  <div className="text-2xl font-bold">{subPrice} USDT</div>
                   <div className="text-xs text-muted-foreground">/месяц</div>
                 </div>
               </div>
@@ -284,7 +287,7 @@ export default function Billing() {
                       <p className="text-sm text-muted-foreground">Полный доступ ко всем функциям</p>
                     </div>
                     <div className="text-right">
-                      <div className="text-2xl font-bold">50 USDT</div>
+                      <div className="text-2xl font-bold">{subPrice} USDT</div>
                       <div className="text-xs text-muted-foreground">/месяц</div>
                     </div>
                   </div>

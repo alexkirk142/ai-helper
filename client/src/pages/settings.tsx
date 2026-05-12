@@ -80,7 +80,7 @@ import {
 } from "lucide-react";
 import { useBillingStatus, useAiBillingStatus, isSubscriptionRequired } from "@/hooks/use-billing";
 import { useAutoPartsEnabled } from "@/hooks/useAutoPartsEnabled";
-import { SubscriptionPaywall, ChannelPaywallOverlay, SubscriptionBadge, PaymentSuccessDialog } from "@/components/subscription-paywall";
+import { SubscriptionPaywall, ChannelPaywallOverlay, SubscriptionBadge, PaymentSuccessDialog, usePublicBillingConfig } from "@/components/subscription-paywall";
 import { markSubscriptionDialogShown } from "@/App";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -2594,6 +2594,8 @@ function ChannelSettings() {
   const { data: billingStatus } = useBillingStatus();
   const canAccess = billingStatus?.canAccess ?? false;
   const isTrial = billingStatus?.isTrial ?? false;
+  const { data: publicConfig } = usePublicBillingConfig();
+  const subPrice = publicConfig?.subscriptionPrice ?? 50;
 
   const { data: channelStatuses, isLoading, refetch } = useQuery<ChannelStatus[]>({
     queryKey: ["/api/channels/status"],
@@ -2727,7 +2729,7 @@ function ChannelSettings() {
               className="w-full sm:w-auto"
             >
               <Zap className="mr-2 h-4 w-4" />
-              Активировать за $50/мес
+              Активировать за ${subPrice}/мес
             </Button>
           </CardContent>
         </Card>

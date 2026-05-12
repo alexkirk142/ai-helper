@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { SiTelegram } from "react-icons/si";
 import { useAiBillingStatus, useCreateAiCheckout, useCancelAiSubscription } from "@/hooks/use-billing";
+import { usePublicBillingConfig } from "@/components/subscription-paywall";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -78,6 +79,8 @@ export default function Extensions() {
   const createCheckout = useCreateAiCheckout();
   const cancelSubscription = useCancelAiSubscription();
   const [purchaseLoading, setPurchaseLoading] = useState(false);
+  const { data: publicConfig } = usePublicBillingConfig();
+  const aiPrice = publicConfig?.aiAgentPrice ?? 30;
 
   const isActive = billing?.canAccess === true;
   const isExpired = !billing?.canAccess && billing?.hasSubscription && billing?.status === "canceled";
@@ -208,7 +211,7 @@ export default function Extensions() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="text-2xl font-bold">
-                  30 USDT
+                  {aiPrice} USDT
                   <span className="ml-1 text-sm font-normal text-muted-foreground">/месяц</span>
                 </div>
                 {isActive && billing?.currentPeriodEnd && (
@@ -261,7 +264,7 @@ export default function Extensions() {
                   ) : (
                     <>
                       <SiTelegram className="mr-2 h-4 w-4" />
-                      {isExpired || isPastDue ? "Продлить подписку" : "Активировать — 30 USDT/мес"}
+                      {isExpired || isPastDue ? "Продлить подписку" : `Активировать — ${aiPrice} USDT/мес`}
                       <ExternalLink className="ml-2 h-3 w-3" />
                     </>
                   )}
