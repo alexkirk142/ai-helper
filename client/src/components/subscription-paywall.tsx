@@ -311,7 +311,7 @@ export function PaymentSuccessDialog({ open, onOpenChange }: PaymentSuccessDialo
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl w-full" data-testid="payment-success-dialog">
+      <DialogContent className="sm:max-w-2xl w-full" data-testid="payment-success-dialog">
         <DialogHeader className="items-center text-center">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-500/10 mb-2">
             <PartyPopper className="h-7 w-7 text-green-600" />
