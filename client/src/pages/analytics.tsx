@@ -468,6 +468,7 @@ function LostDealsTab() {
             <CardDescription>Где мы теряем клиентов</CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -492,6 +493,7 @@ function LostDealsTab() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           </CardContent>
         </Card>
       ) : (
@@ -509,6 +511,7 @@ function LostDealsTab() {
             <CardDescription>Какие типы обращений приводят к потерям</CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -533,6 +536,7 @@ function LostDealsTab() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -670,8 +674,8 @@ export default function Analytics() {
   const [activeTab, setActiveTab] = useState("csat");
 
   return (
-    <div className="flex-1 overflow-auto p-6">
-      <div className="mb-6">
+    <div className="flex-1 overflow-auto p-3 sm:p-6">
+      <div className="mb-4 sm:mb-6">
         <h1 className="text-2xl font-bold">Аналитика</h1>
         <p className="text-muted-foreground">Метрики эффективности AI и бизнеса</p>
       </div>

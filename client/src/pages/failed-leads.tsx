@@ -51,7 +51,7 @@ export default function FailedLeads() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="border-b px-6 py-4 flex items-center gap-3">
+      <div className="border-b px-3 sm:px-6 py-3 sm:py-4 flex items-center gap-3">
         <AlertTriangle className="h-5 w-5 text-destructive" />
         <div>
           <h1 className="text-lg font-semibold">Неудачные заявки</h1>
@@ -66,7 +66,7 @@ export default function FailedLeads() {
         )}
       </div>
 
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto p-3 sm:p-6">
         {isLoading ? (
           <div className="space-y-3">
             {[...Array(5)].map((_, i) => (

@@ -14,7 +14,7 @@ import { useAiBillingStatus, useBillingStatus } from "@/hooks/use-billing";
 import { PaymentSuccessDialog } from "@/components/subscription-paywall";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, MessageSquare, Brain, Shield } from "lucide-react";
+import { Loader2, MessageSquare, Brain, Shield, LogOut } from "lucide-react";
 import { BrandLogoIcon, BRAND_NAME } from "@/components/brand-logo";
 import { wsClient } from "@/lib/websocket";
 
@@ -294,10 +294,10 @@ function AuthenticatedApp() {
       <div className="flex h-screen w-full">
         <AppSidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
-          <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b px-4">
+          <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-3 sm:px-4">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <span className="hidden sm:block text-sm text-muted-foreground truncate max-w-[200px]">
                 {user?.email || user?.firstName || "Пользователь"}
               </span>
               <ThemeToggle />
@@ -307,8 +307,16 @@ function AuthenticatedApp() {
                 onClick={() => logout()}
                 disabled={isLoggingOut}
                 data-testid="button-logout"
+                className="px-2 sm:px-3"
               >
-                {isLoggingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : "Выйти"}
+                {isLoggingOut ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <LogOut className="h-4 w-4 sm:hidden" />
+                    <span className="hidden sm:inline">Выйти</span>
+                  </>
+                )}
               </Button>
             </div>
           </header>

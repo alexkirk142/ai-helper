@@ -596,7 +596,7 @@ export default function Conversations() {
     <>
     <div className="flex h-full overflow-hidden">
       {/* Conversation List - hidden on mobile when chat is open */}
-      <div className={`w-80 shrink-0 border-r flex flex-col overflow-hidden ${mobileShowChat ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`w-full md:w-64 lg:w-80 shrink-0 border-r flex flex-col overflow-hidden ${mobileShowChat ? 'hidden md:flex' : 'flex'}`}>
         <ChannelTabs
           activeFilter={channelFilter}
           onFilterChange={(f) => { setChannelFilter(f); setTagFilter(null); }}

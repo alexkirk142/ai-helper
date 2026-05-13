@@ -186,10 +186,28 @@
   body {
     height: 100%;
     overflow: hidden;
+    /* Use dynamic viewport height on mobile to account for browser chrome */
+    height: 100dvh;
   }
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    /* Prevent tap highlight flash on mobile */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Smooth momentum scrolling on iOS for all overflow containers */
+  [class*="overflow-auto"],
+  [class*="overflow-y-auto"],
+  [class*="overflow-scroll"] {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Reduce tap delay on interactive elements */
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
   }
 }
 

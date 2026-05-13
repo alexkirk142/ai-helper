@@ -257,15 +257,15 @@ export default function CustomerProfile() {
     : customer.channel || "Неизвестно";
 
   return (
-    <div className="container mx-auto max-w-4xl p-6">
-      <div className="mb-6 flex items-center gap-4">
+    <div className="container mx-auto max-w-4xl p-3 sm:p-6">
+      <div className="mb-4 sm:mb-6 flex items-center gap-3 sm:gap-4">
         <Button variant="ghost" size="icon" onClick={() => navigate("/conversations")} data-testid="button-back">
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <h1 className="text-xl font-semibold">Профиль клиента</h1>
+        <h1 className="text-lg sm:text-xl font-semibold">Профиль клиента</h1>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         <div className="lg:col-span-1">
           <Card data-testid="customer-info-card">
             <CardHeader className="text-center">

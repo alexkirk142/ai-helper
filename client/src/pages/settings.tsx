@@ -4405,48 +4405,48 @@ export default function Settings() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 sm:space-y-6 p-3 sm:p-6">
       <PaymentSuccessDialog
         open={showPaymentSuccess}
         onOpenChange={setShowPaymentSuccess}
       />
 
       <div>
-        <h1 className="text-3xl font-semibold">Настройки</h1>
+        <h1 className="text-2xl sm:text-3xl font-semibold">Настройки</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Настройка поведения и параметров NexusChat
         </p>
       </div>
 
       <Tabs defaultValue="company" className="space-y-6">
-        <TabsList className="flex-wrap">
-          <TabsTrigger value="company" data-testid="tab-company">
-            <Building2 className="mr-2 h-4 w-4" />
-            Компания
+        <TabsList className="flex-wrap h-auto gap-1 p-1">
+          <TabsTrigger value="company" data-testid="tab-company" className="flex items-center gap-1.5 px-2 sm:px-3">
+            <Building2 className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Компания</span>
           </TabsTrigger>
-          <TabsTrigger value="ai-agent" data-testid="tab-ai-agent">
-            <Bot className="mr-2 h-4 w-4" />
-            Поведение AI
+          <TabsTrigger value="ai-agent" data-testid="tab-ai-agent" className="flex items-center gap-1.5 px-2 sm:px-3">
+            <Bot className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Поведение AI</span>
           </TabsTrigger>
-          <TabsTrigger value="automation" data-testid="tab-automation">
-            <Zap className="mr-2 h-4 w-4" />
-            Автоматизация
+          <TabsTrigger value="automation" data-testid="tab-automation" className="flex items-center gap-1.5 px-2 sm:px-3">
+            <Zap className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Автоматизация</span>
           </TabsTrigger>
-          <TabsTrigger value="ai-training" data-testid="tab-ai-training">
-            <MessageSquare className="mr-2 h-4 w-4" />
-            Обучение
+          <TabsTrigger value="ai-training" data-testid="tab-ai-training" className="flex items-center gap-1.5 px-2 sm:px-3">
+            <MessageSquare className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Обучение</span>
           </TabsTrigger>
-          <TabsTrigger value="templates-payment" data-testid="tab-templates-payment">
-            <FileText className="mr-2 h-4 w-4" />
-            Шаблоны
+          <TabsTrigger value="templates-payment" data-testid="tab-templates-payment" className="flex items-center gap-1.5 px-2 sm:px-3">
+            <FileText className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Шаблоны</span>
           </TabsTrigger>
-          <TabsTrigger value="channels" data-testid="tab-channels">
-            <Link2 className="mr-2 h-4 w-4" />
-            Каналы
+          <TabsTrigger value="channels" data-testid="tab-channels" className="flex items-center gap-1.5 px-2 sm:px-3">
+            <Link2 className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Каналы</span>
           </TabsTrigger>
-          <TabsTrigger value="lead-intake" data-testid="tab-lead-intake">
-            <Inbox className="mr-2 h-4 w-4" />
-            Приём заявок
+          <TabsTrigger value="lead-intake" data-testid="tab-lead-intake" className="flex items-center gap-1.5 px-2 sm:px-3">
+            <Inbox className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Приём заявок</span>
           </TabsTrigger>
         </TabsList>
 

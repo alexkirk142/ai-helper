@@ -563,19 +563,19 @@ export function ChatInterface({
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 border-b p-4">
-        <div className="flex items-center gap-3">
-          <Avatar>
-            <AvatarFallback>
+      <div className="flex items-center justify-between gap-2 border-b p-3 sm:p-4 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <Avatar className="h-8 w-8 sm:h-10 sm:w-10 shrink-0">
+            <AvatarFallback className="text-xs sm:text-sm">
               {conversation.customer?.name?.slice(0, 2).toUpperCase() || "КЛ"}
             </AvatarFallback>
           </Avatar>
-          <div>
-            <div className="font-medium">
+          <div className="min-w-0">
+            <div className="font-medium truncate text-sm sm:text-base">
               {conversation.customer?.name || "Неизвестный клиент"}
             </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
-              <span>{conversation.customer?.phone || "Нет телефона"}</span>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
+              <span className="hidden sm:inline truncate max-w-[120px]">{conversation.customer?.phone || "Нет телефона"}</span>
               <Badge variant="outline" className="text-xs">
                 {conversation.mode === "learning" ? "Обучение" : conversation.mode === "semi_auto" ? "Полуавто" : "Авто"}
               </Badge>
@@ -587,16 +587,17 @@ export function ChatInterface({
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 shrink-0">
           {conversation.status === "resolved" && (
             <Button
               variant="outline"
-              size="sm"
+              size="icon"
+              className="h-8 w-8"
               onClick={() => setShowCsatDialog(true)}
               data-testid="button-csat-open"
+              title="Оценить диалог"
             >
-              <Star className="mr-1 h-4 w-4" />
-              Оценить
+              <Star className="h-4 w-4" />
             </Button>
           )}
           <Tooltip>
@@ -640,6 +641,7 @@ export function ChatInterface({
           <Badge
             variant="secondary"
             className={cn(
+              "hidden sm:inline-flex",
               conversation.status === "escalated" && "bg-destructive/10 text-destructive"
             )}
           >
@@ -759,8 +761,8 @@ export function ChatInterface({
 
       {/* AI Suggestion Panel */}
       {suggestion && suggestion.status === "pending" && (
-        <Card className="mx-4 mb-4 overflow-hidden border-primary/20">
-          <div className="bg-primary/5 px-4 py-2">
+        <Card className="mx-3 mb-3 sm:mx-4 sm:mb-4 overflow-hidden border-primary/20 flex flex-col max-h-[45vh] sm:max-h-[55vh]">
+          <div className="bg-primary/5 px-4 py-2 shrink-0">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <Bot className="h-4 w-4 text-primary" />
@@ -823,7 +825,7 @@ export function ChatInterface({
           
           {/* Phase 1.1: Autosend blocked warning */}
           {suggestion.decision === "AUTO_SEND" && suggestion.autosendEligible === false && (
-            <div className="px-4 py-2 bg-amber-500/10 border-t border-amber-500/20">
+            <div className="px-4 py-2 bg-amber-500/10 border-t border-amber-500/20 shrink-0">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
                 <div className="text-xs text-amber-700 dark:text-amber-300">
@@ -838,7 +840,7 @@ export function ChatInterface({
           
           {/* Phase 1: Explanations */}
           {explanations.length > 0 && (
-            <div className="px-4 py-2 bg-muted/50 border-t border-border/50">
+            <div className="px-4 py-2 bg-muted/50 border-t border-border/50 shrink-0">
               <div className="flex items-start gap-2">
                 <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-muted-foreground" />
                 <div className="text-xs text-muted-foreground space-y-0.5">
@@ -850,12 +852,13 @@ export function ChatInterface({
             </div>
           )}
           
-          <div className="p-4">
+          {/* Scrollable content: text + sources */}
+          <div className="flex-1 overflow-y-auto min-h-0 p-4 pb-0">
             {isEditing ? (
               <Textarea
                 value={editedSuggestion}
                 onChange={(e) => setEditedSuggestion(e.target.value)}
-                className="min-h-[100px] resize-none"
+                className="min-h-[80px] max-h-[160px] resize-none"
                 data-testid="textarea-edit-suggestion"
               />
             ) : (
@@ -896,78 +899,78 @@ export function ChatInterface({
                 )}
               </div>
             )}
+          </div>
 
-            {/* Actions */}
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              {isEditing ? (
-                <>
-                  <Button
-                    size="sm"
-                    onClick={handleApproveEdit}
-                    data-testid="button-save-edit"
-                  >
-                    <Check className="h-4 w-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Сохранить</span>
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setIsEditing(false);
-                      setEditedSuggestion(suggestion.suggestedReply);
-                    }}
-                    data-testid="button-cancel-edit"
-                  >
-                    <X className="h-4 w-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Отмена</span>
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    size="sm"
-                    onClick={() => onApprove(suggestion.id)}
-                    data-testid="button-approve-suggestion"
-                  >
-                    <Check className="h-4 w-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Одобрить</span>
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setIsEditing(true)}
-                    data-testid="button-edit-suggestion"
-                  >
-                    <Edit2 className="h-4 w-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Редактировать</span>
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onReject(suggestion.id)}
-                    data-testid="button-reject-suggestion"
-                  >
-                    <X className="h-4 w-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Отклонить</span>
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => onEscalate(suggestion.id)}
-                    data-testid="button-escalate"
-                  >
-                    <AlertTriangle className="h-4 w-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Эскалировать</span>
-                  </Button>
-                </>
-              )}
-            </div>
+          {/* Actions — always visible, not scrolled away */}
+          <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-3 border-t">
+            {isEditing ? (
+              <>
+                <Button
+                  size="sm"
+                  onClick={handleApproveEdit}
+                  data-testid="button-save-edit"
+                >
+                  <Check className="h-4 w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Сохранить</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setIsEditing(false);
+                    setEditedSuggestion(suggestion.suggestedReply);
+                  }}
+                  data-testid="button-cancel-edit"
+                >
+                  <X className="h-4 w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Отмена</span>
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  onClick={() => onApprove(suggestion.id)}
+                  data-testid="button-approve-suggestion"
+                >
+                  <Check className="h-4 w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Одобрить</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIsEditing(true)}
+                  data-testid="button-edit-suggestion"
+                >
+                  <Edit2 className="h-4 w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Редактировать</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onReject(suggestion.id)}
+                  data-testid="button-reject-suggestion"
+                >
+                  <X className="h-4 w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Отклонить</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => onEscalate(suggestion.id)}
+                  data-testid="button-escalate"
+                >
+                  <AlertTriangle className="h-4 w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Эскалировать</span>
+                </Button>
+              </>
+            )}
           </div>
         </Card>
       )}
 
       {/* Manual Message Input */}
-      <div className="border-t p-4">
+      <div className="border-t p-3 sm:p-4 shrink-0">
         {/* Multi-file preview strip */}
         {selectedFiles.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2 rounded-lg border bg-muted/50 p-2">

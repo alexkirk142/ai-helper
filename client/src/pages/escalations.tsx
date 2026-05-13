@@ -63,9 +63,9 @@ export default function Escalations() {
   const handledEscalations = escalations?.filter((e) => e.status !== "pending") || [];
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 sm:space-y-6 p-3 sm:p-6">
       <div>
-        <h1 className="text-3xl font-semibold">Эскалации</h1>
+        <h1 className="text-2xl sm:text-3xl font-semibold">Эскалации</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Обработка разговоров, требующих внимания человека
         </p>

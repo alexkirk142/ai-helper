@@ -212,10 +212,10 @@ export default function Products() {
   );
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="space-y-4 sm:space-y-6 p-3 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-3xl font-semibold">Товары</h1>
+          <h1 className="text-2xl sm:text-3xl font-semibold">Товары</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Управление каталогом товаров для AI-ответов
           </p>
@@ -472,8 +472,9 @@ export default function Products() {
             Товары ({filteredProducts?.length || 0})
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0 sm:p-6">
           <ScrollArea className="h-[500px]">
+            <div className="overflow-x-auto">
             {isLoading ? (
               <div className="space-y-4">
                 {[1, 2, 3, 4, 5].map((i) => (
@@ -591,6 +592,7 @@ export default function Products() {
                 </TableBody>
               </Table>
             )}
+            </div>
           </ScrollArea>
         </CardContent>
       </Card>
