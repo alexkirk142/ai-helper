@@ -12,7 +12,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Shield, Loader2, ArrowLeft, Users, Clock, CreditCard, 
-  TrendingUp, Calendar, DollarSign, Settings2, Save, Ban, Bot, MessageSquare
+  TrendingUp, Calendar, DollarSign, Settings2, Save, Ban, Bot, MessageSquare, Gift
 } from "lucide-react";
 import {
   AlertDialog,
@@ -41,6 +41,16 @@ interface SubscriptionRow {
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
   updatedAt: string | null;
+}
+
+interface GrantRow {
+  id: string;
+  tenantId: string;
+  tenantName: string | null;
+  feature: string;
+  startsAt: string;
+  endsAt: string;
+  reason: string;
 }
 
 interface BillingMetrics {
@@ -107,6 +117,35 @@ export default function AdminBilling() {
       return res.json();
     },
     enabled: !!user?.isPlatformOwner || !!user?.isPlatformAdmin,
+  });
+
+  const { data: allGrants, isLoading: grantsLoading, refetch: refetchGrants } = useQuery<GrantRow[]>({
+    queryKey: ["/api/admin/billing/grants"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/billing/grants", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch grants");
+      return res.json();
+    },
+    enabled: !!user?.isPlatformOwner || !!user?.isPlatformAdmin,
+  });
+
+  const revokeGrantMutation = useMutation({
+    mutationFn: async (grantId: string) => {
+      const res = await apiRequest("POST", `/api/admin/billing/grants/${grantId}/revoke`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to revoke grant");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchGrants();
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/billing/metrics"] });
+      toast({ title: "Грант отозван" });
+    },
+    onError: (e: any) => {
+      toast({ title: "Ошибка", description: e.message, variant: "destructive" });
+    },
   });
 
   const cancelSubMutation = useMutation({
@@ -429,6 +468,89 @@ export default function AdminBilling() {
                               }
                             >
                               Аннулировать
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ── Active grants ── */}
+        <Card data-testid="card-grants">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Gift className="h-5 w-5" />
+              Активные гранты доступа
+            </CardTitle>
+            <CardDescription>
+              Ручной доступ выданный администратором. Отзыв действует немедленно.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {grantsLoading ? (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Загрузка…
+              </div>
+            ) : !allGrants?.length ? (
+              <p className="text-center text-muted-foreground py-8">Нет активных грантов</p>
+            ) : (
+              <div className="space-y-2">
+                {allGrants.map((grant) => (
+                  <div
+                    key={grant.id}
+                    className="flex items-center justify-between p-3 rounded-lg bg-muted/50 gap-3 flex-wrap"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      {grant.feature === "ai_agent" ? (
+                        <Bot className="h-4 w-4 text-purple-500 shrink-0" />
+                      ) : (
+                        <MessageSquare className="h-4 w-4 text-blue-500 shrink-0" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{grant.tenantName || grant.tenantId}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {grant.feature === "ai_agent" ? "AI Агент" : "Каналы"} · до {formatDate(grant.endsAt)}
+                        </p>
+                        {grant.reason && (
+                          <p className="text-xs text-muted-foreground italic truncate">{grant.reason}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge variant="secondary">Грант</Badge>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            disabled={revokeGrantMutation.isPending}
+                          >
+                            <Ban className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Отозвать грант?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Грант доступа <strong>{grant.feature === "ai_agent" ? "AI Агент" : "Каналы"}</strong> для{" "}
+                              <strong>{grant.tenantName || grant.tenantId}</strong> будет немедленно отозван.
+                              Пользователь потеряет доступ прямо сейчас.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Отмена</AlertDialogCancel>
+                            <AlertDialogAction
+                              className="bg-destructive hover:bg-destructive/90"
+                              onClick={() => revokeGrantMutation.mutate(grant.id)}
+                            >
+                              Отозвать
                             </AlertDialogAction>
                           </AlertDialogFooter>
                         </AlertDialogContent>

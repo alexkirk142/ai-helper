@@ -298,19 +298,95 @@ router.post(
       return res.status(404).json({ error: "Subscription not found" });
     }
 
+    const now = new Date();
+
     await db
       .update(subscriptions)
       .set({
         status: "canceled",
         cancelAtPeriodEnd: false,
-        // Set period end to now so access is revoked immediately
-        // (getBillingStatus grants access while currentPeriodEnd is in the future)
-        currentPeriodEnd: new Date(),
-        updatedAt: new Date(),
+        currentPeriodEnd: now,
+        updatedAt: now,
       })
       .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, feature)));
 
+    // Also revoke all active grants for this tenant+feature so access is truly gone
+    await db
+      .update(subscriptionGrants)
+      .set({
+        revokedAt: now,
+        revokedByUserId: req.userId ?? null,
+        revokedReason: "Admin revoked subscription",
+      })
+      .where(
+        and(
+          eq(subscriptionGrants.tenantId, tenantId),
+          eq(subscriptionGrants.feature, feature),
+          isNull(subscriptionGrants.revokedAt)
+        )
+      );
+
     console.log(`[Admin] Subscription ${feature} for tenant ${tenantId} immediately revoked by ${req.userId}`);
+    res.json({ success: true });
+  }
+);
+
+router.get(
+  "/billing/grants",
+  requireAuth,
+  requirePlatformAdmin(),
+  async (_req, res) => {
+    const rows = await db
+      .select({
+        id: subscriptionGrants.id,
+        tenantId: subscriptionGrants.tenantId,
+        tenantName: tenants.name,
+        feature: subscriptionGrants.feature,
+        startsAt: subscriptionGrants.startsAt,
+        endsAt: subscriptionGrants.endsAt,
+        reason: subscriptionGrants.reason,
+      })
+      .from(subscriptionGrants)
+      .leftJoin(tenants, eq(subscriptionGrants.tenantId, tenants.id))
+      .where(
+        and(
+          isNull(subscriptionGrants.revokedAt),
+          sql`${subscriptionGrants.endsAt} > NOW()`
+        )
+      )
+      .orderBy(desc(subscriptionGrants.endsAt));
+
+    res.json(rows);
+  }
+);
+
+router.post(
+  "/billing/grants/:grantId/revoke",
+  requireAuth,
+  requirePlatformOwner(),
+  async (req, res) => {
+    const { grantId } = req.params;
+
+    const [grant] = await db
+      .select()
+      .from(subscriptionGrants)
+      .where(and(eq(subscriptionGrants.id, grantId), isNull(subscriptionGrants.revokedAt)))
+      .limit(1);
+
+    if (!grant) {
+      return res.status(404).json({ error: "Grant not found or already revoked" });
+    }
+
+    await db
+      .update(subscriptionGrants)
+      .set({
+        revokedAt: new Date(),
+        revokedByUserId: req.userId ?? null,
+        revokedReason: "Admin revoked",
+      })
+      .where(eq(subscriptionGrants.id, grantId));
+
+    console.log(`[Admin] Grant ${grantId} revoked by ${req.userId}`);
     res.json({ success: true });
   }
 );
