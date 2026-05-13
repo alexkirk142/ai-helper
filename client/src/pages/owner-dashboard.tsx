@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Shield, Loader2, Users, Key, Building2, Activity, Package, Network } from "lucide-react";
+import { Shield, Loader2, Users, Key, Building2, Activity, Package, Network, Send } from "lucide-react";
 
 export default function OwnerDashboard() {
   const [, navigate] = useLocation();
@@ -113,6 +113,16 @@ export default function OwnerDashboard() {
             </CardContent>
           </Card>
           
+          <Card className="hover-elevate cursor-pointer" onClick={() => navigate("/admin/broadcast")} data-testid="card-admin-broadcast">
+            <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Рассылки</CardTitle>
+              <Send className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <CardDescription>Сообщения подписчикам бота</CardDescription>
+            </CardContent>
+          </Card>
+
           <Card className="hover-elevate cursor-pointer" onClick={() => navigate("/owner/updates")} data-testid="card-owner-updates">
             <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Обновления</CardTitle>

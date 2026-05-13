@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { pool } from "../db";
 
 interface TelegramUpdate {
   update_id: number;
@@ -15,6 +16,18 @@ async function sendReply(botToken: string, chatId: number, text: string): Promis
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
   });
+}
+
+async function upsertSubscriber(chatId: number, firstName?: string, username?: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO notify_bot_subscribers (chat_id, first_name, username)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (chat_id) DO UPDATE
+       SET first_name = EXCLUDED.first_name,
+           username   = EXCLUDED.username,
+           updated_at = NOW()`,
+    [chatId, firstName ?? null, username ?? null],
+  );
 }
 
 export async function notifyBotWebhookHandler(req: Request, res: Response): Promise<void> {
@@ -34,6 +47,9 @@ export async function notifyBotWebhookHandler(req: Request, res: Response): Prom
     const text = msg.text.trim();
 
     if (text === "/start" || text.startsWith("/start ")) {
+      // Save subscriber
+      await upsertSubscriber(chatId, msg.from?.first_name, msg.from?.username).catch(() => {});
+
       const firstName = msg.from?.first_name ? `, ${msg.from.first_name}` : "";
       await sendReply(
         botToken,

@@ -244,6 +244,17 @@ app.use((req, res, next) => {
           ALTER TABLE tenants
             ADD COLUMN IF NOT EXISTS lead_channel_priority TEXT[];
         `);
+        // Notify bot subscribers table
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS notify_bot_subscribers (
+            id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            chat_id     BIGINT NOT NULL UNIQUE,
+            first_name  TEXT,
+            username    TEXT,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        `);
         log("DB column check: auto_reply_enabled + tg_role + template flags + escalation_chat_id + lead_channel_priority OK", "startup");
       } catch (err: any) {
         log(`DB column migration warning: ${err.message}`, "startup");

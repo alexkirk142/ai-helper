@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import multer from "multer";
-import { db } from "../db";
+import { db, pool } from "../db";
 import { users, tenants, subscriptions, subscriptionGrants, adminActions, integrationSecrets, SECRET_SCOPES, proxies, PROXY_PROTOCOLS, PROXY_STATUSES, maxPersonalAccounts } from "@shared/schema";
 import { ilike, or, eq, desc, isNull, and, sql } from "drizzle-orm";
 import { requirePlatformAdmin, auditAdminAction } from "../middleware/platform-admin";
@@ -388,6 +388,65 @@ router.post(
 
     console.log(`[Admin] Grant ${grantId} revoked by ${req.userId}`);
     res.json({ success: true });
+  }
+);
+
+// ── Notify bot broadcast ─────────────────────────────────────────────────────
+
+router.get(
+  "/notify/subscribers",
+  requireAuth,
+  requirePlatformAdmin(),
+  async (_req, res) => {
+    const { rows } = await pool.query<{
+      id: string; chat_id: string; first_name: string | null;
+      username: string | null; created_at: string;
+    }>(
+      `SELECT id, chat_id, first_name, username, created_at
+       FROM notify_bot_subscribers
+       ORDER BY created_at DESC`
+    );
+    res.json(rows);
+  }
+);
+
+router.post(
+  "/notify/broadcast",
+  requireAuth,
+  requirePlatformOwner(),
+  async (req, res) => {
+    const { message } = req.body as { message?: string };
+    if (!message?.trim()) {
+      return res.status(400).json({ error: "message is required" });
+    }
+
+    const { getSecret } = await import("../services/secret-resolver");
+    const botToken = await getSecret({ scope: "global", keyName: "TELEGRAM_ESCALATION_BOT_TOKEN" });
+    if (!botToken) {
+      return res.status(503).json({ error: "Notification bot is not configured" });
+    }
+
+    const { rows } = await pool.query<{ chat_id: string }>(
+      `SELECT chat_id FROM notify_bot_subscribers`
+    );
+
+    let sent = 0;
+    let failed = 0;
+
+    await Promise.allSettled(
+      rows.map(async (sub) => {
+        const r = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: sub.chat_id, text: message, parse_mode: "Markdown" }),
+        });
+        const json = await r.json() as { ok: boolean };
+        if (json.ok) sent++; else failed++;
+      })
+    );
+
+    console.log(`[Admin] Broadcast sent by ${req.userId}: ${sent} ok, ${failed} failed`);
+    res.json({ success: true, sent, failed, total: rows.length });
   }
 );
 
