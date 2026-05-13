@@ -286,6 +286,16 @@ app.use((req, res, next) => {
       telegramClientManager.initialize()
         .then(() => log("Telegram Personal sessions initialized", "startup"))
         .catch((err: any) => log(`Telegram Personal initialization failed: ${err.message}`, "startup"));
+
+      // Register notification bot webhook (fire-and-forget, non-blocking)
+      import("./routes/notify-bot-webhook").then(({ registerNotifyBotWebhook }) => {
+        try {
+          const { getAppUrl } = require("./utils/app-url");
+          registerNotifyBotWebhook(getAppUrl()).catch(() => {});
+        } catch {
+          // APP_URL not configured — skip silently
+        }
+      });
     },
   );
 })();

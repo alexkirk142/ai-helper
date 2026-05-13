@@ -6,6 +6,7 @@ import marquizDebugRouter from "./marquiz-debug";
 import { telegramWebhookHandler } from "./telegram-webhook";
 import { whatsappWebhookHandler, whatsappWebhookVerifyHandler } from "./whatsapp-webhook";
 import { webhookRateLimiter } from "../middleware/rate-limiter";
+import { notifyBotWebhookHandler } from "./notify-bot-webhook";
 
 const router = Router();
 
@@ -31,5 +32,8 @@ router.use("/webhooks/max-personal", webhookRateLimiter, maxPersonalWebhookRoute
 // Marquiz webhook
 router.use("/webhooks/marquiz", webhookRateLimiter, marquizWebhookRouter);
 router.use("/api/debug/marquiz", marquizDebugRouter);
+
+// Notification bot (subscription reminders) webhook
+router.post("/webhooks/notify-bot", webhookRateLimiter, notifyBotWebhookHandler);
 
 export default router;
