@@ -430,29 +430,40 @@ function buildWeakCodeClarificationText(code: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// processIncomingMessageFull — Step 2 candidate pipeline
+// Phase 1: save message to DB + mute check
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function processIncomingMessageFull(
+async function saveIncomingMessage(
   tenantId: string,
   parsed: ParsedIncomingMessage
+): Promise<{ conversationId: string; messageId: string; isNew: boolean } | null> {
+  const result = await handleIncomingMessage(tenantId, parsed);
+  const conversation = await storage.getConversation(result.conversationId, tenantId);
+  if (conversation?.isMuted) {
+    console.log(`[InboundHandler] Conversation ${result.conversationId} is muted — skipping AI suggestion`);
+    return null;
+  }
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 2: AI pipeline (VIN/OCR detection + triggerAiSuggestion)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runAiPipeline(
+  tenantId: string,
+  parsed: ParsedIncomingMessage,
+  saved: { conversationId: string; messageId: string; isNew: boolean }
 ): Promise<void> {
-  try {
-    const result = await handleIncomingMessage(tenantId, parsed);
-    const text = (parsed.text || "").trim();
+  const result = saved;
+  const text = (parsed.text || "").trim();
 
-    const conversation = await storage.getConversation(result.conversationId, tenantId);
-    if (conversation?.isMuted) {
-      console.log(`[InboundHandler] Conversation ${result.conversationId} is muted — skipping AI suggestion`);
-      return;
-    }
+  const autoPartsEnabled = await featureFlagService.isEnabled("AUTO_PARTS_ENABLED", tenantId);
 
-    const autoPartsEnabled = await featureFlagService.isEnabled("AUTO_PARTS_ENABLED", tenantId);
-
-    if (!autoPartsEnabled) {
-      await triggerAiSuggestion(result.conversationId, tenantId);
-      return;
-    }
+  if (!autoPartsEnabled) {
+    await triggerAiSuggestion(result.conversationId, tenantId);
+    return;
+  }
 
     // ── 1. Extract candidates from text ─────────────────────────────────────
     let allCandidates = extractCandidatesFromText(text);
@@ -879,20 +890,76 @@ export async function processIncomingMessageFull(
 
     // ── 12. Fallback ─────────────────────────────────────────────────────────
     await triggerAiSuggestion(result.conversationId, tenantId);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// processIncomingMessageFull — thin wrapper (backward compat for webhook channels)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function processIncomingMessageFull(
+  tenantId: string,
+  parsed: ParsedIncomingMessage
+): Promise<void> {
+  try {
+    const saved = await saveIncomingMessage(tenantId, parsed);
+    if (!saved) return;
+    await runAiPipeline(tenantId, parsed, saved);
   } catch (error) {
     console.error(`[InboundHandler] Error processing message:`, error);
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Event Bus subscription — wires messageBus → processIncomingMessageFull
+// Debounce state — one pending timer per active conversation
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AI_DEBOUNCE_MS = Number(process.env.MESSAGE_DEBOUNCE_MS ?? 3000);
+
+// key: tenantId:externalConversationId
+const debounceTimers = new Map<string, NodeJS.Timeout>();
+const debouncePending = new Map<string, {
+  tenantId: string;
+  message: ParsedIncomingMessage;
+  saved: { conversationId: string; messageId: string; isNew: boolean };
+}>();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Event Bus subscription — save immediately, debounce AI pipeline
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function setupInboundMessageHandler(): void {
   messageBus.onIncomingMessage(({ tenantId, message }) => {
-    processIncomingMessageFull(tenantId, message).catch((err) => {
-      console.error("[InboundHandler] Error processing incoming message via bus:", err);
-    });
+    saveIncomingMessage(tenantId, message)
+      .then((saved) => {
+        if (!saved) return;
+
+        const key = `${tenantId}:${message.externalConversationId}`;
+
+        const prev = debounceTimers.get(key);
+        if (prev) {
+          clearTimeout(prev);
+          console.log(`[InboundHandler] Debounce: reset timer for conversation ${key}`);
+        }
+
+        // Always keep the latest message so AI sees the most recent context
+        debouncePending.set(key, { tenantId, message, saved });
+
+        const timer = setTimeout(() => {
+          debounceTimers.delete(key);
+          const pending = debouncePending.get(key);
+          debouncePending.delete(key);
+          if (!pending) return;
+
+          runAiPipeline(pending.tenantId, pending.message, pending.saved).catch((err) => {
+            console.error("[InboundHandler] Debounced AI pipeline error:", err);
+          });
+        }, AI_DEBOUNCE_MS);
+
+        debounceTimers.set(key, timer);
+      })
+      .catch((err) => {
+        console.error("[InboundHandler] Error saving incoming message:", err);
+      });
   });
-  console.log("[InboundHandler] Subscribed to messageBus incoming_message events");
+  console.log(`[InboundHandler] Subscribed to messageBus incoming_message events (debounce: ${AI_DEBOUNCE_MS}ms)`);
 }

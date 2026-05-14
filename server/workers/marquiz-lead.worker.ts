@@ -484,11 +484,34 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
       return { success: false, error: result.error };
     }
 
-    let customer = await storage.getCustomerByExternalId(tenantId, "whatsapp_personal", jid);
+    // Resolve LID: WhatsApp LID-contacts reply with a "@lid" JID, not "@s.whatsapp.net".
+    // Using the LID as primaryExternalId prevents a duplicate customer/conversation on reply.
+    let primaryExternalId = jid;
+    const waSession = WhatsAppPersonalAdapter.getSession(tenantId);
+    if (waSession?.socket) {
+      try {
+        const [onWaResult] = await waSession.socket.onWhatsApp(jid);
+        if ((onWaResult as any)?.lid) {
+          primaryExternalId = (onWaResult as any).lid as string;
+        }
+      } catch (e: any) {
+        console.warn(`[MarquizWorker] onWhatsApp check failed for ${jid}:`, e.message);
+      }
+    }
+
+    const customerMeta =
+      primaryExternalId !== jid
+        ? { ...commonMeta, phoneJid: jid }
+        : commonMeta;
+
+    let customer = await storage.getCustomerByExternalId(tenantId, "whatsapp_personal", primaryExternalId);
+    if (!customer && primaryExternalId !== jid) {
+      customer = await storage.getCustomerByExternalId(tenantId, "whatsapp_personal", jid);
+    }
     if (!customer) {
       customer = await storage.createCustomer(
-        { tenantId, channel: "whatsapp_personal", externalId: jid, phone,
-          name: data.clientName || null, metadata: commonMeta },
+        { tenantId, channel: "whatsapp_personal", externalId: primaryExternalId, phone,
+          name: data.clientName || null, metadata: customerMeta },
         tenantId,
       );
     }

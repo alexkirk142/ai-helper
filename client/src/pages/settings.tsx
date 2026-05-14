@@ -716,6 +716,20 @@ function TrainingPoliciesSettings({ autoPartsEnabled = false }: TrainingPolicies
     }
   }, [policy]);
 
+  const { data: autoLearningFlag } = useQuery<{ name: string; enabled: boolean }>({
+    queryKey: ["/api/feature-flags/AUTO_LEARNING_ENABLED/check"],
+  });
+  const autoLearningEnabled = autoLearningFlag?.enabled ?? false;
+
+  const toggleAutoLearningMutation = useMutation({
+    mutationFn: async (data: { enabled: boolean }) =>
+      apiRequest("POST", "/api/admin/feature-flags/AUTO_LEARNING_ENABLED/toggle", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/feature-flags/AUTO_LEARNING_ENABLED/check"] });
+      toast({ title: "Настройка сохранена" });
+    },
+  });
+
   const updateMutation = useMutation({
     mutationFn: async (data: Partial<TrainingPolicy>) => {
       return apiRequest("PUT", "/api/admin/training-policies", data);
@@ -789,6 +803,24 @@ function TrainingPoliciesSettings({ autoPartsEnabled = false }: TrainingPolicies
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <div className="flex items-center justify-between rounded-lg border p-4">
+          <div className="space-y-0.5">
+            <Label className="text-base">AI запоминает ответы операторов</Label>
+            <p className="text-sm text-muted-foreground">
+              Когда оператор сам пишет ответ клиенту вместо AI, этот ответ сохраняется
+              как пример «правильного ответа». Со временем AI начинает отвечать так же —
+              в вашем стиле и с учётом специфики бизнеса.
+            </p>
+          </div>
+          <Switch
+            checked={autoLearningEnabled}
+            onCheckedChange={(checked) =>
+              toggleAutoLearningMutation.mutate({ enabled: checked })
+            }
+            disabled={toggleAutoLearningMutation.isPending}
+          />
+        </div>
+        <Separator />
         <div className="space-y-4">
           <div>
             <Label className="mb-2 block">Типы запросов → только с проверкой оператора</Label>
