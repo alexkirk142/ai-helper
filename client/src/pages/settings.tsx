@@ -165,6 +165,10 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
     queryKey: ["/api/settings/decision"],
   });
 
+  const { data: trainingPolicy } = useQuery<TrainingPolicy>({
+    queryKey: ["/api/admin/training-policies"],
+  });
+
   const [tAuto, setTAuto] = useState(0.80);
   const [tEscalate, setTEscalate] = useState(0.40);
   const [autosendAllowed, setAutosendAllowed] = useState(false);
@@ -174,6 +178,8 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
   const [intentsForceHandoff, setIntentsForceHandoff] = useState<string[]>([
     "discount", "complaint"
   ]);
+  const [alwaysEscalateIntents, setAlwaysEscalateIntents] = useState<string[]>([]);
+  const [disabledLearningIntents, setDisabledLearningIntents] = useState<string[]>([]);
 
   const [isDirty, setIsDirty] = useState(false);
 
@@ -188,28 +194,42 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
     }
   }, [settings]);
 
+  useEffect(() => {
+    if (trainingPolicy) {
+      setAlwaysEscalateIntents(trainingPolicy.alwaysEscalateIntents ?? []);
+      setDisabledLearningIntents(trainingPolicy.disabledLearningIntents ?? []);
+    }
+  }, [trainingPolicy]);
+
   const updateMutation = useMutation({
     mutationFn: async (data: Partial<DecisionSettings>) => {
       return apiRequest("PATCH", "/api/settings/decision", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/settings/decision"] });
-      toast({ title: "Настройки автоматических решений сохранены" });
-      setIsDirty(false);
     },
     onError: () => {
       toast({ title: "Не удалось сохранить настройки", variant: "destructive" });
     },
   });
 
+  const updateTrainingMutation = useMutation({
+    mutationFn: async (data: { alwaysEscalateIntents: string[]; disabledLearningIntents: string[] }) => {
+      return apiRequest("PUT", "/api/admin/training-policies", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/training-policies"] });
+    },
+    onError: () => {
+      toast({ title: "Не удалось сохранить правила обучения", variant: "destructive" });
+    },
+  });
+
   const handleSave = () => {
-    updateMutation.mutate({
-      tAuto,
-      tEscalate,
-      autosendAllowed,
-      intentsAutosendAllowed,
-      intentsForceHandoff,
-    });
+    updateMutation.mutate({ tAuto, tEscalate, autosendAllowed, intentsAutosendAllowed, intentsForceHandoff });
+    updateTrainingMutation.mutate({ alwaysEscalateIntents, disabledLearningIntents });
+    toast({ title: "Настройки AI сохранены" });
+    setIsDirty(false);
   };
 
   const toggleAutosendIntent = (intent: string) => {
@@ -242,6 +262,17 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
     );
     setIntentsForceHandoff(prev =>
       mode === "operator" ? [...prev.filter(i => i !== intent), intent] : prev.filter(i => i !== intent)
+    );
+    // "Проверка" → принудительно cap AUTO_SEND; "Авто" или "Оператор" → снять cap
+    setAlwaysEscalateIntents(prev =>
+      mode === "check" ? [...prev.filter(i => i !== intent), intent] : prev.filter(i => i !== intent)
+    );
+    setIsDirty(true);
+  }
+
+  function toggleLearningIntent(intent: string) {
+    setDisabledLearningIntents(prev =>
+      prev.includes(intent) ? prev.filter(i => i !== intent) : [...prev, intent]
     );
     setIsDirty(true);
   }
@@ -373,16 +404,19 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
               <thead className="bg-muted/50">
                 <tr>
                   <th className="text-left px-3 py-2 font-medium">Тип запроса</th>
-                  <th className="text-center px-3 py-2 font-medium text-green-600 w-28">
+                  <th className="text-center px-3 py-2 font-medium text-green-600 w-24">
                     <span className="flex items-center justify-center gap-1">
                       <Zap className="h-3 w-3" /> Авто
                     </span>
                   </th>
-                  <th className="text-center px-3 py-2 font-medium text-yellow-600 w-28">
+                  <th className="text-center px-3 py-2 font-medium text-yellow-600 w-24">
                     Проверка
                   </th>
-                  <th className="text-center px-3 py-2 font-medium text-red-600 w-28">
+                  <th className="text-center px-3 py-2 font-medium text-red-600 w-24">
                     Оператор
+                  </th>
+                  <th className="text-center px-3 py-2 font-medium text-muted-foreground w-24">
+                    AI учится
                   </th>
                 </tr>
               </thead>
@@ -391,6 +425,7 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
                   .filter(i => autoPartsEnabled || !AUTO_PARTS_INTENTS.has(i.value))
                   .map((intent) => {
                     const mode = getIntentMode(intent.value);
+                    const learns = !disabledLearningIntents.includes(intent.value);
                     return (
                       <tr key={intent.value} className="hover:bg-muted/30">
                         <td className="px-3 py-2">{intent.label}</td>
@@ -413,24 +448,36 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
                             />
                           </td>
                         ))}
+                        <td className="text-center px-3 py-2">
+                          <Checkbox
+                            checked={learns}
+                            onCheckedChange={() => toggleLearningIntent(intent.value)}
+                            disabled={mode === "operator"}
+                            data-testid={`intent-learns-${intent.value}`}
+                          />
+                        </td>
                       </tr>
                     );
                   })}
               </tbody>
             </table>
           </div>
-          <div className="flex gap-4 text-xs text-muted-foreground pt-1">
+          <div className="flex flex-wrap gap-4 text-xs text-muted-foreground pt-1">
             <span className="flex items-center gap-1">
               <span className="h-2.5 w-2.5 rounded-full bg-green-500 inline-block" />
               Авто — отправить без проверки
             </span>
             <span className="flex items-center gap-1">
               <span className="h-2.5 w-2.5 rounded-full bg-yellow-500 inline-block" />
-              Проверка — оператор одобряет
+              Проверка — оператор одобряет перед отправкой
             </span>
             <span className="flex items-center gap-1">
               <span className="h-2.5 w-2.5 rounded-full bg-red-500 inline-block" />
               Оператор — всегда передавать живому
+            </span>
+            <span className="flex items-center gap-1">
+              <Checkbox checked className="h-3 w-3 pointer-events-none" />
+              AI учится — сохранять ответы как обучающие примеры
             </span>
           </div>
         </div>
@@ -696,23 +743,19 @@ interface TrainingPoliciesSettingsProps {
   autoPartsEnabled?: boolean;
 }
 
-function TrainingPoliciesSettings({ autoPartsEnabled = false }: TrainingPoliciesSettingsProps) {
+function TrainingPoliciesSettings({ autoPartsEnabled: _autoPartsEnabled = false }: TrainingPoliciesSettingsProps) {
   const { toast } = useToast();
 
   const { data: policy, isLoading } = useQuery<TrainingPolicy>({
     queryKey: ["/api/admin/training-policies"],
   });
 
-  const [alwaysEscalateIntents, setAlwaysEscalateIntents] = useState<string[]>([]);
   const [forbiddenTopics, setForbiddenTopics] = useState<string[]>([]);
-  const [disabledLearningIntents, setDisabledLearningIntents] = useState<string[]>([]);
   const [newForbiddenTopic, setNewForbiddenTopic] = useState("");
 
   useEffect(() => {
     if (policy) {
-      setAlwaysEscalateIntents(policy.alwaysEscalateIntents ?? []);
       setForbiddenTopics(policy.forbiddenTopics ?? []);
-      setDisabledLearningIntents(policy.disabledLearningIntents ?? []);
     }
   }, [policy]);
 
@@ -736,35 +779,22 @@ function TrainingPoliciesSettings({ autoPartsEnabled = false }: TrainingPolicies
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/training-policies"] });
-      toast({ title: "Правила обучения AI сохранены" });
+      toast({ title: "Темы исключений сохранены" });
     },
     onError: () => {
-      toast({ title: "Не удалось сохранить политики", variant: "destructive" });
+      toast({ title: "Не удалось сохранить", variant: "destructive" });
     },
   });
 
   const handleSave = () => {
+    // alwaysEscalateIntents and disabledLearningIntents are owned by DecisionEngineSettings.
+    // Read them from cache to avoid overwriting changes made there.
+    const cached = queryClient.getQueryData<TrainingPolicy>(["/api/admin/training-policies"]);
     updateMutation.mutate({
-      alwaysEscalateIntents,
+      alwaysEscalateIntents: cached?.alwaysEscalateIntents ?? [],
       forbiddenTopics,
-      disabledLearningIntents,
+      disabledLearningIntents: cached?.disabledLearningIntents ?? [],
     });
-  };
-
-  const toggleAlwaysEscalateIntent = (intent: string) => {
-    setAlwaysEscalateIntents(prev =>
-      prev.includes(intent)
-        ? prev.filter(i => i !== intent)
-        : [...prev, intent]
-    );
-  };
-
-  const toggleDisabledLearningIntent = (intent: string) => {
-    setDisabledLearningIntents(prev =>
-      prev.includes(intent)
-        ? prev.filter(i => i !== intent)
-        : [...prev, intent]
-    );
   };
 
   const addForbiddenTopic = () => {
@@ -799,7 +829,7 @@ function TrainingPoliciesSettings({ autoPartsEnabled = false }: TrainingPolicies
           <Badge variant="outline" className="font-normal">Обучение</Badge>
         </CardTitle>
         <CardDescription>
-          Контролируйте, на каких примерах учится ваш AI
+          Поведение AI по типам запросов и правила обучения теперь настраиваются в разделе «Настройки AI» → таблица интентов
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -822,56 +852,6 @@ function TrainingPoliciesSettings({ autoPartsEnabled = false }: TrainingPolicies
         </div>
         <Separator />
         <div className="space-y-4">
-          <div>
-            <Label className="mb-2 block">Типы запросов → только с проверкой оператора</Label>
-            <p className="text-xs text-muted-foreground mb-2">
-              Для этих типов запросов AI всегда будет ждать одобрения оператора перед отправкой
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {INTENT_OPTIONS.filter(i => autoPartsEnabled || !AUTO_PARTS_INTENTS.has(i.value)).map((intent) => (
-                <Badge
-                  key={intent.value}
-                  variant={alwaysEscalateIntents.includes(intent.value) ? "default" : "outline"}
-                  className={cn(
-                    "cursor-pointer",
-                    alwaysEscalateIntents.includes(intent.value) && "bg-orange-500/20 text-orange-700 dark:text-orange-300"
-                  )}
-                  onClick={() => toggleAlwaysEscalateIntent(intent.value)}
-                  data-testid={`badge-always-escalate-${intent.value}`}
-                >
-                  {intent.label}
-                </Badge>
-              ))}
-            </div>
-          </div>
-
-          <Separator />
-
-          <div>
-            <Label className="mb-2 block">Типы запросов, которые AI не запоминает</Label>
-            <p className="text-xs text-muted-foreground mb-2">
-              Ответы на эти запросы AI не будет использовать как образцы для обучения
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {INTENT_OPTIONS.filter(i => autoPartsEnabled || !AUTO_PARTS_INTENTS.has(i.value)).map((intent) => (
-                <Badge
-                  key={intent.value}
-                  variant={disabledLearningIntents.includes(intent.value) ? "default" : "outline"}
-                  className={cn(
-                    "cursor-pointer",
-                    disabledLearningIntents.includes(intent.value) && "bg-purple-500/20 text-purple-700 dark:text-purple-300"
-                  )}
-                  onClick={() => toggleDisabledLearningIntent(intent.value)}
-                  data-testid={`badge-disabled-learning-${intent.value}`}
-                >
-                  {intent.label}
-                </Badge>
-              ))}
-            </div>
-          </div>
-
-          <Separator />
-
           <div>
             <Label className="mb-2 block">Темы, которые не сохраняются в базу примеров</Label>
             <p className="text-xs text-muted-foreground mb-2">
