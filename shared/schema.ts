@@ -103,6 +103,8 @@ export const tenants = pgTable("tenants", {
   // e.g. ["whatsapp_personal", "telegram", "max"] — tried in order, first success wins.
   // Defaults to null (legacy hardcoded behaviour: MAX → Telegram).
   leadChannelPriority: text("lead_channel_priority").array(),
+  // When true: skip auto-response if the phone already exists as a customer for this tenant
+  skipAutoResponseForExisting: boolean("skip_auto_response_for_existing").notNull().default(false),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 

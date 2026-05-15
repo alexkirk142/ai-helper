@@ -2,7 +2,7 @@ import { Worker, type Job } from "bullmq";
 import IORedis from "ioredis";
 import { asc, and, eq } from "drizzle-orm";
 import { db } from "../db";
-import { maxPersonalAccounts } from "../../shared/schema";
+import { maxPersonalAccounts, customers } from "../../shared/schema";
 import { getRedisConnectionConfig } from "../services/message-queue";
 import type { MarquizLeadJobData } from "../services/marquiz-lead-queue";
 import { MaxPersonalAdapter } from "../services/max-personal-adapter";
@@ -285,6 +285,23 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
 
   const hasPhone = data.phone && normalizePhone(data.phone).length >= 10;
   const preferred = data.preferredChannel; // "telegram" | "max" | undefined
+
+  // ── Skip if existing customer (repeat lead protection) ────────────────────
+  if ((tenant as any).skipAutoResponseForExisting && hasPhone) {
+    const normalizedRaw = normalizePhone(data.phone);
+    const [existingCustomer] = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(and(eq(customers.tenantId, tenantId), eq(customers.phone, normalizedRaw)))
+      .limit(1)
+      .catch(() => []);
+    if (existingCustomer) {
+      console.log(
+        `[MarquizWorker] Skipping auto-response — phone ${phone} already exists as customer ${existingCustomer.id} (skipAutoResponseForExisting=true)`,
+      );
+      return;
+    }
+  }
 
   console.log(`[MarquizWorker] Channel routing: preferredChannel="${preferred ?? "auto"}", hasPhone=${!!hasPhone}, tgUsername="${data.telegramUsername}"`);
 

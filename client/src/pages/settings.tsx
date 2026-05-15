@@ -4246,11 +4246,19 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
   const [channelOrder, setChannelOrder] = useState<string[]>(DEFAULT_CHANNEL_ORDER);
   const [channelOrderDirty, setChannelOrderDirty] = useState(false);
 
+  const [skipExisting, setSkipExisting] = useState(false);
+
   useEffect(() => {
     if (tenant?.leadChannelPriority?.length) {
       setChannelOrder(tenant.leadChannelPriority);
     }
   }, [tenant?.leadChannelPriority]);
+
+  useEffect(() => {
+    if (tenant?.skipAutoResponseForExisting !== undefined) {
+      setSkipExisting(!!tenant.skipAutoResponseForExisting);
+    }
+  }, [tenant?.skipAutoResponseForExisting]);
 
   useEffect(() => {
     if (tenant?.templates?.leadAutoResponseText !== undefined) {
@@ -4282,6 +4290,18 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
       queryClient.invalidateQueries({ queryKey: ["/api/tenant"] });
       setChannelOrderDirty(false);
       toast({ title: "Приоритет каналов сохранён" });
+    },
+    onError: () => {
+      toast({ title: "Ошибка сохранения", variant: "destructive" });
+    },
+  });
+
+  const saveSkipExistingMutation = useMutation({
+    mutationFn: async (value: boolean) =>
+      apiRequest("PATCH", "/api/tenant", { skipAutoResponseForExisting: value }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tenant"] });
+      toast({ title: skipExisting ? "Повторные лиды: авторассылка отключена" : "Повторные лиды: авторассылка включена" });
     },
     onError: () => {
       toast({ title: "Ошибка сохранения", variant: "destructive" });
@@ -4385,6 +4405,37 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
               <Save className="mr-2 h-3.5 w-3.5" />
               Сохранить
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Повторные заявки ─────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Повторные заявки</CardTitle>
+          <CardDescription>
+            Если номер телефона уже есть в базе клиентов, авторассылку можно не отправлять —
+            менеджер свяжется вручную.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium">
+                Не отправлять авторассылку существующим клиентам
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Если номер уже зарегистрирован в базе тенанта, заявка будет принята, но авторассылка не уйдёт.
+              </p>
+            </div>
+            <Switch
+              checked={skipExisting}
+              onCheckedChange={(val) => {
+                setSkipExisting(val);
+                saveSkipExistingMutation.mutate(val);
+              }}
+              disabled={saveSkipExistingMutation.isPending}
+            />
           </div>
         </CardContent>
       </Card>
