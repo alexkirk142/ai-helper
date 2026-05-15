@@ -4242,6 +4242,16 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
   const [autoResponseText, setAutoResponseText] = useState<string>("");
   const [autoResponseDirty, setAutoResponseDirty] = useState(false);
 
+  const DEFAULT_CHANNEL_ORDER = ["max", "telegram", "whatsapp_personal"];
+  const [channelOrder, setChannelOrder] = useState<string[]>(DEFAULT_CHANNEL_ORDER);
+  const [channelOrderDirty, setChannelOrderDirty] = useState(false);
+
+  useEffect(() => {
+    if (tenant?.leadChannelPriority?.length) {
+      setChannelOrder(tenant.leadChannelPriority);
+    }
+  }, [tenant?.leadChannelPriority]);
+
   useEffect(() => {
     if (tenant?.templates?.leadAutoResponseText !== undefined) {
       setAutoResponseText(tenant.templates.leadAutoResponseText ?? "");
@@ -4264,6 +4274,28 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
       toast({ title: "Ошибка сохранения", variant: "destructive" });
     },
   });
+
+  const saveChannelPriorityMutation = useMutation({
+    mutationFn: async (order: string[]) =>
+      apiRequest("PATCH", "/api/tenant", { leadChannelPriority: order }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tenant"] });
+      setChannelOrderDirty(false);
+      toast({ title: "Приоритет каналов сохранён" });
+    },
+    onError: () => {
+      toast({ title: "Ошибка сохранения", variant: "destructive" });
+    },
+  });
+
+  const moveChannel = (idx: number, dir: -1 | 1) => {
+    const next = [...channelOrder];
+    const swap = idx + dir;
+    if (swap < 0 || swap >= next.length) return;
+    [next[idx], next[swap]] = [next[swap], next[idx]];
+    setChannelOrder(next);
+    setChannelOrderDirty(true);
+  };
 
   return (
     <div className="space-y-6">
@@ -4291,35 +4323,58 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
           />
 
           {/* Placeholders reference */}
-          <div className="rounded-md border bg-muted/40 p-3 space-y-2">
-            <p className="text-xs font-medium text-foreground">Доступные переменные</p>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
-              {[
-                ["{{name}}", "Имя клиента из формы"],
-                ["{{phone}}", "Номер телефона"],
-                ["{{city}}", "Город"],
-                ["{{quiz}}", "Название квиза / формы"],
-                ["{{car}}", "Марка/модель автомобиля"],
-                ["{{vin}}", "VIN-код"],
-                ["{{gearbox}}", "Тип КПП"],
-                ["{{engine}}", "Тип/объём/модель двигателя"],
-                ["{{tires}}", "Параметры шин"],
-                ["{{fields}}", "Все ответы на вопросы списком"],
-              ].map(([ph, desc]) => (
-                <div key={ph} className="flex gap-1.5 items-baseline">
-                  <code className="shrink-0 text-[11px] bg-muted px-1 rounded text-foreground">{ph}</code>
-                  <span>{desc}</span>
-                </div>
-              ))}
+          <div className="rounded-md border bg-muted/40 p-3 space-y-3">
+            <div>
+              <p className="text-xs font-medium text-foreground">Встроенные переменные</p>
+              <div className="mt-1.5 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
+                {[
+                  ["{{name}}", "Имя клиента"],
+                  ["{{phone}}", "Номер телефона"],
+                  ["{{city}}", "Город"],
+                  ["{{quiz}}", "Название квиза / формы"],
+                  ["{{car}}", "Марка/модель авто"],
+                  ["{{vin}}", "VIN-код"],
+                  ["{{gearbox}}", "Тип КПП"],
+                  ["{{engine}}", "Двигатель"],
+                  ["{{tires}}", "Параметры шин"],
+                  ["{{fields}}", "Все поля списком"],
+                ].map(([ph, desc]) => (
+                  <div key={ph} className="flex gap-1.5 items-baseline">
+                    <code className="shrink-0 text-[11px] bg-muted px-1 rounded text-foreground">{ph}</code>
+                    <span>{desc}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground pt-1">
-              Пример: <code className="bg-muted px-1 rounded text-[11px]">Здравствуйте, {"{{name}}"}! Получили заявку «{"{{quiz}}"}».</code>
-              &nbsp;→&nbsp; <span className="italic">Здравствуйте, Иван! Получили заявку «Подбор КПП».</span>
-            </p>
+
+            <div className="border-t pt-2.5">
+              <p className="text-xs font-medium text-foreground">Любое поле из формы</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Напишите название поля из вашего квиза или формы в двойных фигурных скобках —
+                оно будет подставлено автоматически.
+              </p>
+              <div className="mt-1.5 text-xs text-muted-foreground space-y-0.5">
+                <div className="flex gap-1.5 items-baseline">
+                  <code className="shrink-0 bg-muted px-1 rounded text-[11px] text-foreground">{"{{Что интересует}}"}</code>
+                  <span>→ ответ клиента на вопрос «Что интересует»</span>
+                </div>
+                <div className="flex gap-1.5 items-baseline">
+                  <code className="shrink-0 bg-muted px-1 rounded text-[11px] text-foreground">{"{{Комментарий}}"}</code>
+                  <span>→ ответ на вопрос «Комментарий»</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t pt-2.5">
+              <p className="text-xs font-medium text-foreground">Пример</p>
+              <code className="block mt-1 text-[11px] bg-muted rounded p-2 leading-relaxed whitespace-pre-wrap text-foreground">
+                {`Здравствуйте, {{name}}!\nПолучили заявку «{{quiz}}».\n{{Что интересует}}\n\nСвяжемся в ближайшее время 👍`}
+              </code>
+            </div>
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Если переменная отсутствует в заявке — она просто убирается. Если поле пустое — система сформирует сообщение автоматически.
+            Незаполненные переменные убираются автоматически. Если шаблон пустой — сообщение формируется из полей заявки.
           </p>
           <div className="flex justify-end">
             <Button
@@ -4327,6 +4382,50 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
               disabled={!autoResponseDirty || saveTemplateMutation.isPending}
               onClick={() => saveTemplateMutation.mutate(autoResponseText)}
             >
+              <Save className="mr-2 h-3.5 w-3.5" />
+              Сохранить
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Приоритет каналов ────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Приоритет каналов для авторассылки</CardTitle>
+          <CardDescription>
+            При получении заявки система отправит сообщение через каналы в указанном порядке.
+            Первый успешный канал используется — остальные не задействуются.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-2">
+            {channelOrder.map((ch, idx) => {
+              const opt = LEAD_CHANNEL_OPTIONS.find(o => o.value === ch);
+              return (
+                <div key={ch} className="flex items-center gap-3 rounded-md border bg-card px-4 py-3">
+                  <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="flex-1 text-sm font-medium">{opt?.label ?? ch}</span>
+                  <span className="text-xs text-muted-foreground mr-2">#{idx + 1}</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7"
+                    disabled={idx === 0} onClick={() => moveChannel(idx, -1)}>
+                    <ChevronUp className="h-4 w-4" />
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7"
+                    disabled={idx === channelOrder.length - 1} onClick={() => moveChannel(idx, 1)}>
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Перемещайте каналы стрелками. WhatsApp Personal требует активного подключённого аккаунта.
+          </p>
+          <div className="flex justify-end">
+            <Button size="sm"
+              disabled={!channelOrderDirty || saveChannelPriorityMutation.isPending}
+              onClick={() => saveChannelPriorityMutation.mutate(channelOrder)}>
               <Save className="mr-2 h-3.5 w-3.5" />
               Сохранить
             </Button>
@@ -4958,82 +5057,6 @@ export default function Settings() {
             {/* Tab 3: Автоматизация */}
             <TabsContent value="automation">
               <div className="space-y-6">
-                {/* Channel priority for Marquiz lead auto-send */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Приоритет каналов для авторассылки</CardTitle>
-                    <CardDescription>
-                      При получении заявки из Marquiz система отправит сообщение через каналы в указанном порядке.
-                      Первый успешный канал используется — остальные не задействуются.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <FormField
-                      control={form.control}
-                      name="leadChannelPriority"
-                      render={({ field }) => {
-                        const order: string[] = field.value ?? ["max", "telegram", "whatsapp_personal"];
-                        const move = (idx: number, dir: -1 | 1) => {
-                          const next = [...order];
-                          const swap = idx + dir;
-                          if (swap < 0 || swap >= next.length) return;
-                          [next[idx], next[swap]] = [next[swap], next[idx]];
-                          field.onChange(next);
-                        };
-                        return (
-                          <FormItem>
-                            <div className="space-y-2">
-                              {order.map((ch, idx) => {
-                                const opt = LEAD_CHANNEL_OPTIONS.find(o => o.value === ch);
-                                return (
-                                  <div key={ch} className="flex items-center gap-3 rounded-md border bg-card px-4 py-3">
-                                    <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
-                                    <span className="flex-1 text-sm font-medium">{opt?.label ?? ch}</span>
-                                    <span className="text-xs text-muted-foreground mr-2">#{idx + 1}</span>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-7 w-7"
-                                      disabled={idx === 0}
-                                      onClick={() => move(idx, -1)}
-                                    >
-                                      <ChevronUp className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-7 w-7"
-                                      disabled={idx === order.length - 1}
-                                      onClick={() => move(idx, 1)}
-                                    >
-                                      <ChevronDown className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                            <FormDescription className="pt-1">
-                              Перемещайте каналы стрелками для изменения порядка. WhatsApp Personal требует активного подключённого аккаунта.
-                            </FormDescription>
-                            <FormMessage />
-                          </FormItem>
-                        );
-                      }}
-                    />
-                    <div className="flex justify-end pt-2">
-                      <Button
-                        type="submit"
-                        disabled={updateMutation.isPending}
-                        data-testid="button-save-automation"
-                      >
-                        <Save className="mr-2 h-4 w-4" />
-                        Сохранить
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
 
                 {/* Escalation bot chat ID */}
                 <Card>

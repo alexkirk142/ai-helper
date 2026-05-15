@@ -116,7 +116,7 @@ function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
         : data.tireMethod,
     ].filter(Boolean).join(", ");
 
-    const rendered = customTemplate
+    let rendered = customTemplate
       .replace(/\{\{name\}\}/gi, data.clientName || "")
       .replace(/\{\{phone\}\}/gi, data.phone || "")
       .replace(/\{\{city\}\}/gi, data.city || "")
@@ -127,6 +127,15 @@ function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
       .replace(/\{\{engine\}\}/gi, engineSummary)
       .replace(/\{\{tires\}\}/gi, tiresSummary)
       .replace(/\{\{fields\}\}/gi, fieldsSummary);
+
+    // Dynamic substitution: any {{ключ}} matching a rawFields entry
+    for (const [key, value] of Object.entries(data.rawFields ?? {})) {
+      const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      rendered = rendered.replace(new RegExp(`\\{\\{${escaped}\\}\\}`, "gi"), value || "");
+    }
+
+    // Remove any leftover unresolved placeholders
+    rendered = rendered.replace(/\{\{[^}]+\}\}/g, "").replace(/  +/g, " ").trim();
 
     return `${rendered}${oohSuffix}`;
   }
