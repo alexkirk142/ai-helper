@@ -1,4 +1,4 @@
-import type { WASocket } from "@whiskeysockets/baileys";
+import type { WASocket, Contact } from "@whiskeysockets/baileys";
 
 let _baileys: typeof import("@whiskeysockets/baileys") | null = null;
 async function getBaileys() {
@@ -8,6 +8,7 @@ async function getBaileys() {
   return _baileys;
 }
 import type { ChannelAdapter, ParsedIncomingMessage, ChannelSendResult } from "./channel-adapter.types";
+import { getRateLimiterRedisInstance } from "../redis-client";
 import type { ChannelType } from "@shared/schema";
 import { featureFlagService } from "./feature-flags";
 import { messageBus } from "./message-bus";
@@ -614,6 +615,29 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
         }
       }
     });
+
+    // Cache phone JID → LID mapping so inbound-message-handler can resolve
+    // @lid senders to existing customers via Redis fallback.
+    const handleContactsUpdate = async (contacts: Contact[]) => {
+      const redis = getRateLimiterRedisInstance();
+      if (!redis) return;
+      const TTL = 60 * 60 * 24 * 30; // 30 days
+      for (const contact of contacts) {
+        const phoneJid = contact.id;
+        const lid = contact.lid;
+        if (lid && phoneJid?.endsWith("@s.whatsapp.net")) {
+          try {
+            await redis.set(`wa:lidmap:${tenantId}:${phoneJid}`, lid, "EX", TTL);
+            await redis.set(`wa:lidmap:${tenantId}:${lid}`, phoneJid, "EX", TTL);
+            console.log(`[WhatsAppPersonal] Cached LID mapping: ${phoneJid} ↔ ${lid}`);
+          } catch (err: any) {
+            console.error(`[WhatsAppPersonal] Redis LID cache write error:`, err.message);
+          }
+        }
+      }
+    };
+    socket.ev.on("contacts.upsert", handleContactsUpdate);
+    socket.ev.on("contacts.update", (updates) => handleContactsUpdate(updates as Contact[]));
 
     socket.ev.on("messaging-history.set", async ({ chats, messages, isLatest }) => {
       console.log(`[WhatsAppPersonal] History sync: ${chats?.length || 0} chats, ${messages?.length || 0} messages, isLatest: ${isLatest}`);

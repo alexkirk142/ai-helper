@@ -1,5 +1,6 @@
 import { storage } from "../storage";
 import bigInt from "big-integer";
+import { getRateLimiterRedisInstance } from "../redis-client";
 import type { ParsedIncomingMessage } from "./channel-adapter.types";
 import { messageBus } from "./message-bus";
 import { getMergedGearboxTemplates, fillGearboxTemplate } from "./gearbox-templates";
@@ -135,6 +136,33 @@ export async function handleIncomingMessage(
     customer = await storage.getCustomerByPhoneJidMetadata(tenant.id, parsed.channel, parsed.externalUserId) ?? undefined;
     if (customer) {
       console.log(`[InboundHandler] Found customer by phoneJid metadata for LID ${parsed.externalUserId}: customer=${customer.id}`);
+    }
+  }
+
+  // LID fallback via Redis: contacts.upsert events cache phone↔LID mapping before
+  // the first inbound message arrives, so we can resolve @lid → existing customer.
+  if (!customer && parsed.channel === "whatsapp_personal" && parsed.externalUserId.endsWith("@lid")) {
+    try {
+      const redis = getRateLimiterRedisInstance();
+      if (redis) {
+        const phoneJid = await redis.get(`wa:lidmap:${tenant.id}:${parsed.externalUserId}`);
+        if (phoneJid) {
+          customer = await storage.getCustomerByExternalId(tenant.id, "whatsapp_personal", phoneJid) ?? undefined;
+          if (customer) {
+            await storage.updateCustomer(customer.id, tenant.id, {
+              externalId: parsed.externalUserId,
+              metadata: {
+                ...((customer.metadata as Record<string, unknown>) ?? {}),
+                phoneJid,
+              },
+            });
+            customer = { ...customer, externalId: parsed.externalUserId };
+            console.log(`[InboundHandler] Resolved LID ${parsed.externalUserId} → customer ${customer.id} via Redis mapping`);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error(`[InboundHandler] Redis LID lookup error:`, err.message);
     }
   }
 
