@@ -490,12 +490,19 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     const waSession = WhatsAppPersonalAdapter.getSession(tenantId);
     if (waSession?.socket) {
       try {
-        const [onWaResult] = await waSession.socket.onWhatsApp(jid);
+        console.log(`[MarquizWorker] Checking LID for ${jid} via onWhatsApp`);
+        const onWaResults = await waSession.socket.onWhatsApp(jid);
+        const onWaResult = onWaResults?.[0];
+        console.log(`[MarquizWorker] onWhatsApp result for ${jid}:`, JSON.stringify(onWaResult));
         if ((onWaResult as any)?.lid) {
           primaryExternalId = (onWaResult as any).lid as string;
+          console.log(`[MarquizWorker] Resolved LID: ${primaryExternalId}`);
+        } else {
+          console.log(`[MarquizWorker] No LID returned, using phone JID: ${jid}`);
         }
       } catch (e: any) {
         console.warn(`[MarquizWorker] onWhatsApp check failed for ${jid}:`, e.message);
+        console.log(`[MarquizWorker] No LID returned (error), using phone JID: ${jid}`);
       }
     }
 
@@ -515,6 +522,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
         tenantId,
       );
     }
+    console.log(`[MarquizWorker] Customer created/found: id=${customer.id} externalId=${customer.externalId}`);
 
     const conversation = await storage.createConversation(
       { tenantId, customerId: customer.id, status: "active", mode: "learning" }, tenantId,

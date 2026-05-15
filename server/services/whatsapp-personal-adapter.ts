@@ -12,6 +12,7 @@ import type { ChannelType } from "@shared/schema";
 import { featureFlagService } from "./feature-flags";
 import { messageBus } from "./message-bus";
 import { sanitizeForLog } from "../utils/sanitizer";
+import { storage } from "../storage";
 import * as fs from "fs";
 import * as path from "path";
 import pino from "pino";
@@ -519,6 +520,42 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
   private static _attachMessageHandlers(socket: WASocket, tenantId: string): void {
     socket.ev.on("messages.upsert", async ({ messages, type }) => {
       console.log(`[WhatsAppPersonal] messages.upsert event: type=${type}, count=${messages.length}`);
+
+      // Handle echo events: Baileys fires type="append" with fromMe=true after a successful send.
+      // If the recipient is a LID-contact, remoteJid will be in "@lid" format here — use it to
+      // update the customer's externalId so that subsequent inbound messages are matched correctly.
+      if (type === "append") {
+        for (const msg of messages) {
+          if (!msg.key.fromMe) continue;
+          const lidJid = msg.key.remoteJid;
+          if (!lidJid?.endsWith("@lid")) continue;
+          const externalMsgId = msg.key.id;
+          if (!externalMsgId) continue;
+
+          try {
+            const message = await storage.getMessageByExternalId(tenantId, externalMsgId);
+            if (!message) continue;
+
+            const conversation = await storage.getConversation(message.conversationId, tenantId);
+            if (!conversation) continue;
+
+            const customer = await storage.getCustomer(conversation.customerId, tenantId);
+            if (!customer) continue;
+
+            if (!customer.externalId.endsWith("@lid")) {
+              const oldPhoneJid = customer.externalId;
+              await storage.updateCustomer(customer.id, tenantId, {
+                externalId: lidJid,
+                metadata: { ...(customer.metadata as Record<string, unknown> ?? {}), phoneJid: oldPhoneJid },
+              });
+              console.log(`[WhatsAppPersonal] Updated customer ${customer.id} externalId to LID: ${lidJid} (was: ${oldPhoneJid})`);
+            }
+          } catch (err: any) {
+            console.error(`[WhatsAppPersonal] Echo LID update failed for msgId=${externalMsgId}:`, err.message);
+          }
+        }
+        return;
+      }
 
       if (type !== "notify") {
         console.log(`[WhatsAppPersonal] Skipping non-notify event type: ${type}`);

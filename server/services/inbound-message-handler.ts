@@ -129,6 +129,15 @@ export async function handleIncomingMessage(
     }
   }
 
+  // LID fallback: if the sender uses a "@lid" JID, check if we have a customer whose
+  // phoneJid metadata matches — this covers cases where Part 1 already ran the echo update.
+  if (!customer && parsed.channel === "whatsapp_personal" && parsed.externalUserId.endsWith("@lid")) {
+    customer = await storage.getCustomerByPhoneJidMetadata(tenant.id, parsed.channel, parsed.externalUserId) ?? undefined;
+    if (customer) {
+      console.log(`[InboundHandler] Found customer by phoneJid metadata for LID ${parsed.externalUserId}: customer=${customer.id}`);
+    }
+  }
+
   if (!customer) {
     const customerName = (parsed.metadata?.pushName as string) ||
                          (parsed.metadata?.firstName as string) ||

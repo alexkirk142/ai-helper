@@ -124,7 +124,11 @@ router.patch("/api/conversations/:id", requireAuth, requireOperator, requireTena
     const { status, mode } = req.body;
     const previousStatus = conversation.status;
 
-    const updated = await storage.updateConversation(req.params.id, tenantId, { status, mode });
+    const updateData: Parameters<typeof storage.updateConversation>[2] = { status, mode };
+    if (status === "resolved" && previousStatus !== "resolved") {
+      updateData.unreadCount = 0;
+    }
+    const updated = await storage.updateConversation(req.params.id, tenantId, updateData);
     
     if (status === "resolved" && previousStatus !== "resolved") {
       const { triggerSummaryOnConversationResolved } = await import("../services/customer-summary-service");

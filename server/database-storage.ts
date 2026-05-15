@@ -323,6 +323,17 @@ export class DatabaseStorage implements IStorage {
     return rows[0]?.customer;
   }
 
+  async getCustomerByPhoneJidMetadata(tenantId: string, channel: string, phoneJid: string): Promise<Customer | null> {
+    const [customer] = await db.select().from(customers)
+      .where(and(
+        eq(customers.tenantId, tenantId),
+        eq(customers.channel, channel),
+        sql`${customers.metadata}->>'phoneJid' = ${phoneJid}`
+      ))
+      .limit(1);
+    return customer ?? null;
+  }
+
   async updateCustomer(id: string, tenantId: string, data: UpdateCustomer): Promise<Customer | undefined> {
     const [customer] = await db.update(customers)
       .set({ ...data, updatedAt: new Date() })
@@ -464,7 +475,10 @@ export class DatabaseStorage implements IStorage {
         ne(conversations.status, "failed_delivery"),
         ne(customers.isBlocked, true),
       ))
-      .orderBy(desc(conversations.lastMessageAt))
+      .orderBy(
+        sql`CASE WHEN ${conversations.unreadCount} > 0 THEN 0 ELSE 1 END`,
+        desc(conversations.lastMessageAt)
+      )
       .limit(options?.limit ?? 200)
       .offset(options?.offset ?? 0);
 
@@ -615,7 +629,10 @@ export class DatabaseStorage implements IStorage {
         eq(conversations.status, "active"),
         ne(customers.isBlocked, true),
       ))
-      .orderBy(desc(conversations.lastMessageAt));
+      .orderBy(
+        sql`CASE WHEN ${conversations.unreadCount} > 0 THEN 0 ELSE 1 END`,
+        desc(conversations.lastMessageAt)
+      );
 
     if (rows.length === 0) return [];
 
@@ -644,12 +661,16 @@ export class DatabaseStorage implements IStorage {
   async getConversationChannelCounts(tenantId: string): Promise<{ all: number; telegram?: number; max?: number; whatsapp?: number }> {
     // Join with customers so we can resolve the channel family for conversations
     // that have no channelId (e.g. max_personal conversations created via start-conversation).
+    // Only count active/pending conversations — resolved ones don't contribute to the unread badge.
     const rows = await db
       .select({ channelType: channels.type, customerChannel: customers.channel, unread: conversations.unreadCount })
       .from(conversations)
       .innerJoin(customers, eq(conversations.customerId, customers.id))
       .leftJoin(channels, eq(conversations.channelId, channels.id))
-      .where(eq(conversations.tenantId, tenantId));
+      .where(and(
+        eq(conversations.tenantId, tenantId),
+        inArray(conversations.status, ["active", "pending"])
+      ));
 
     let all = 0;
     let telegram = 0;
@@ -735,6 +756,19 @@ export class DatabaseStorage implements IStorage {
       )
     );
     return msg;
+  }
+
+  async getMessageByExternalId(tenantId: string, externalMessageId: string): Promise<Message | null> {
+    const rows = await db
+      .select({ message: messages })
+      .from(messages)
+      .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+      .where(and(
+        eq(conversations.tenantId, tenantId),
+        sql`${messages.metadata}->>'externalMessageId' = ${externalMessageId}`
+      ))
+      .limit(1);
+    return rows[0]?.message ?? null;
   }
 
   async deleteMessage(id: string, tenantId: string): Promise<boolean> {

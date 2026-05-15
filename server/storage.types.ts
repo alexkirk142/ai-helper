@@ -109,6 +109,7 @@ export interface IStorage {
   searchCustomers(tenantId: string, query: string): Promise<Customer[]>;
   getCustomerByExternalId(tenantId: string, channel: string, externalId: string): Promise<Customer | undefined>;
   getCustomerByOutboundMessageId(tenantId: string, channel: string, idMessage: string): Promise<Customer | undefined>;
+  getCustomerByPhoneJidMetadata(tenantId: string, channel: string, phoneJid: string): Promise<Customer | null>;
   createCustomer(customer: InsertCustomer, tenantId: string): Promise<Customer>;
   updateCustomer(id: string, tenantId: string, data: UpdateCustomer): Promise<Customer | undefined>;
 
@@ -140,6 +141,7 @@ export interface IStorage {
 
   // Messages
   getMessage(id: string, tenantId: string): Promise<Message | undefined>;
+  getMessageByExternalId(tenantId: string, externalMessageId: string): Promise<Message | null>;
   getMessagesByConversation(conversationId: string, tenantId: string): Promise<Message[]>;
   getMessagesByConversationPaginated(conversationId: string, tenantId: string, cursor?: string, limit?: number): Promise<{ messages: Message[]; nextCursor: string | null }>;
   createMessage(message: InsertMessage & { createdAt?: Date }, tenantId: string): Promise<Message>;
