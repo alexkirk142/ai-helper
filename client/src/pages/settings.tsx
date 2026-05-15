@@ -4233,7 +4233,37 @@ function WebhookUrlCard({
 }
 
 function LeadIntakeTab({ tenantId }: { tenantId: string }) {
+  const { toast } = useToast();
   const marquizWebhookUrl = `${APP_URL}/webhooks/marquiz/${tenantId}`;
+  const universalWebhookUrl = `${APP_URL}/webhooks/lead/${tenantId}`;
+
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/tenant"] });
+
+  const [autoResponseText, setAutoResponseText] = useState<string>("");
+  const [autoResponseDirty, setAutoResponseDirty] = useState(false);
+
+  useEffect(() => {
+    if (tenant?.templates?.leadAutoResponseText !== undefined) {
+      setAutoResponseText(tenant.templates.leadAutoResponseText ?? "");
+    }
+  }, [tenant?.templates?.leadAutoResponseText]);
+
+  const saveTemplateMutation = useMutation({
+    mutationFn: async (text: string) => {
+      const currentTemplates: Record<string, string> = tenant?.templates ?? {};
+      return apiRequest("PATCH", "/api/tenant", {
+        templates: { ...currentTemplates, leadAutoResponseText: text },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tenant"] });
+      setAutoResponseDirty(false);
+      toast({ title: "Шаблон сохранён" });
+    },
+    onError: () => {
+      toast({ title: "Ошибка сохранения", variant: "destructive" });
+    },
+  });
 
   return (
     <div className="space-y-6">
@@ -4242,7 +4272,77 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
         Используйте эти URL в сторонних сервисах для автоматической передачи лидов в систему.
       </p>
 
-      {/* Marquiz */}
+      {/* ── Шаблон авторассылки ───────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Шаблон авторассылки</CardTitle>
+          <CardDescription>
+            Текст, который будет отправлен клиенту сразу после получения заявки.
+            Оставьте пустым — система сформирует сообщение автоматически из полей заявки.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Textarea
+            placeholder={"Здравствуйте! Получили вашу заявку. Свяжемся с вами в ближайшее время 👍"}
+            value={autoResponseText}
+            onChange={(e) => { setAutoResponseText(e.target.value); setAutoResponseDirty(true); }}
+            rows={4}
+            className="resize-none font-mono text-sm"
+          />
+          <p className="text-xs text-muted-foreground">
+            Если заполнено — этот текст отправляется всем клиентам независимо от типа заявки.
+          </p>
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              disabled={!autoResponseDirty || saveTemplateMutation.isPending}
+              onClick={() => saveTemplateMutation.mutate(autoResponseText)}
+            >
+              <Save className="mr-2 h-3.5 w-3.5" />
+              Сохранить
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Separator />
+
+      {/* ── Универсальный вебхук ──────────────────────────────────────── */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <h3 className="font-medium">Универсальный вебхук</h3>
+          <Badge variant="default" className="text-xs">Любой сайт</Badge>
+        </div>
+        <WebhookUrlCard
+          title="Webhook URL для любой формы"
+          description="Подходит для Tilda, GetCourse, WordPress, кастомных форм и любого сайта — отправьте POST-запрос с JSON."
+          url={universalWebhookUrl}
+          hint='Обязательные поля: phone (телефон) или telegram (юзернейм). Поле name — имя клиента. Все остальные поля автоматически попадут в карточку заявки.'
+        />
+        <Card className="bg-muted/40">
+          <CardContent className="pt-4 space-y-3">
+            <p className="text-sm font-medium">Как подключить к любому сайту</p>
+            <ol className="text-sm text-muted-foreground space-y-1.5 list-decimal list-inside">
+              <li>Скопируйте URL выше.</li>
+              <li>В форме на сайте укажите метод <code className="bg-muted px-1 rounded text-xs">POST</code> и этот URL в качестве action / webhook.</li>
+              <li>Убедитесь, что форма отправляет JSON <span className="font-mono text-xs">(Content-Type: application/json)</span>.</li>
+              <li>Обязательно включите поле <code className="bg-muted px-1 rounded text-xs">phone</code> или <code className="bg-muted px-1 rounded text-xs">telegram</code>.</li>
+            </ol>
+            <div className="rounded-md bg-muted border p-3 text-xs font-mono leading-relaxed select-all">
+              {`POST ${universalWebhookUrl}\nContent-Type: application/json\n\n{\n  "phone": "79991234567",\n  "name": "Иван",\n  "Что интересует": "Консультация"\n}`}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              <strong>Tilda:</strong> Форма → Действие после отправки → Webhook → вставьте URL.<br />
+              <strong>GetCourse:</strong> Процессы → Шаг «HTTP-запрос» → POST → вставьте URL.<br />
+              <strong>WordPress (CF7 / Elementor):</strong> используйте плагин <em>CF7 Webhooks</em> или встроенный webhook в Elementor Forms.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Separator />
+
+      {/* ── Marquiz ───────────────────────────────────────────────────── */}
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <h3 className="font-medium">Marquiz</h3>
@@ -4254,15 +4354,30 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
           url={marquizWebhookUrl}
           hint="Marquiz отправит данные заявки на этот URL сразу после прохождения квиза. Система автоматически определит канал (Telegram / MAX) и отправит клиенту сообщение."
         />
+        <Card className="bg-muted/40">
+          <CardContent className="pt-4 space-y-3">
+            <p className="text-sm font-medium">Как подключить Marquiz</p>
+            <ol className="text-sm text-muted-foreground space-y-1.5 list-decimal list-inside">
+              <li>Откройте ваш квиз в Marquiz и перейдите в <strong>Настройки квиза</strong>.</li>
+              <li>Раздел <strong>Интеграции → Webhook</strong> → вставьте URL выше.</li>
+              <li>Убедитесь, что в квизе есть вопрос с телефоном или Telegram-ником клиента.</li>
+              <li>Сохраните и протестируйте: пройдите квиз — заявка должна появиться в системе.</li>
+            </ol>
+            <p className="text-xs text-muted-foreground">
+              Система автоматически определит тип заявки (шины / двигатель / КПП / другое) и сформирует
+              персонализированное первое сообщение клиенту.
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       <Separator />
 
-      {/* Placeholder for future integrations */}
+      {/* ── Скоро ─────────────────────────────────────────────────────── */}
       <div className="space-y-3">
         <h3 className="font-medium text-muted-foreground">Скоро</h3>
         <div className="grid gap-3 sm:grid-cols-2">
-          {["Tilda", "GetCourse", "amoCRM", "Bitrix24"].map((name) => (
+          {["GetCourse", "amoCRM", "Bitrix24", "Albato"].map((name) => (
             <div
               key={name}
               className="rounded-md border border-dashed p-4 flex items-center gap-3 opacity-40"

@@ -11,24 +11,24 @@ export interface MarquizLeadJobData {
   // Channel selected by the client in Marquiz ("telegram" | "max" | "whatsapp" | undefined)
   // When set, routing is STRICT — only the chosen channel is used, no cross-channel fallback.
   preferredChannel?: string;
-  // КПП fields
-  gearboxType: string;
-  // Engine fields
-  engineType: string;
-  engineVolume: string;
-  engineModel: string;
-  // Tires fields
-  tireSeason: string;   // Летние / Зимние / Всесезонные
-  tireMethod: string;   // По авто / По размеру
-  tireWidth: string;    // 215
-  tireHeight: string;   // 65
-  tireDiameter: string; // R16
-  // Common
-  carInfo: string;
-  vin: string;
-  city: string;
+  // Automotive-specific fields (optional — populated from Marquiz automotive quizzes only).
+  // Generic/non-automotive quizzes leave these empty and use rawFields instead.
+  gearboxType?: string;
+  engineType?: string;
+  engineVolume?: string;
+  engineModel?: string;
+  tireSeason?: string;
+  tireMethod?: string;
+  tireWidth?: string;
+  tireHeight?: string;
+  tireDiameter?: string;
+  carInfo?: string;
+  vin?: string;
+  city?: string;
   clientName: string;
   rawFields: Record<string, string>;
+  /** Source identifier: "marquiz" | "generic" | custom string. Used in metadata. */
+  source?: string;
 }
 
 const QUEUE_NAME = "marquiz_leads";

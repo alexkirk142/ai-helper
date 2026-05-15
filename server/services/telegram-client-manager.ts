@@ -1693,7 +1693,7 @@ class TelegramClientManager {
       const contact = new Api.InputPhoneContact({
         clientId: BigInt(Date.now()),
         phone: cleanPhone,
-        firstName: "Lead",
+        firstName: "Клиент",
         lastName: cleanPhone.slice(-4),
       });
 
@@ -1817,6 +1817,7 @@ class TelegramClientManager {
     tenantId: string,
     phone: string,
     text: string,
+    displayName?: string,
   ): Promise<{
     success: boolean;
     userId?: string;
@@ -1863,7 +1864,7 @@ class TelegramClientManager {
       const contact = new Api.InputPhoneContact({
         clientId: BigInt(Date.now()),
         phone: cleanPhone,
-        firstName: "Lead",
+        firstName: displayName || "Клиент",
         lastName: cleanPhone.slice(-4),
       });
 
@@ -1954,7 +1955,7 @@ class TelegramClientManager {
           }),
           media: new Api.InputMediaContact({
             phoneNumber: cleanPhone,
-            firstName: firstName || "Lead",
+            firstName: firstName || displayName || "Клиент",
             lastName: cleanPhone.slice(-4),
             vcard: "",
           }),
@@ -1986,7 +1987,7 @@ class TelegramClientManager {
               contacts: [new Api.InputPhoneContact({
                 clientId: BigInt(Date.now() + 3),
                 phone: cleanPhone,
-                firstName: firstName || "Lead",
+                firstName: firstName || displayName || "Клиент",
                 lastName: cleanPhone.slice(-4),
               })],
             }),

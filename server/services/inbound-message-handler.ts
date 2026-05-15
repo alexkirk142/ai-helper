@@ -158,9 +158,15 @@ export async function handleIncomingMessage(
     }, tenant.id);
     console.log(`[InboundHandler] Created new customer: ${customer.id} for ${parsed.channel}:${parsed.externalUserId}${isLid ? " (LID contact)" : ""}`);
   } else {
-    // Update the name when: (a) no name set, or (b) name is a generated placeholder like
-    // "WhatsApp +79001234567" (set when we initiate a dialog before the contact replies).
-    const isGeneratedName = !customer.name || /^WhatsApp \+\d+$/.test(customer.name);
+    // Update the name when: (a) no name set, (b) name is a generated placeholder like
+    // "WhatsApp +79001234567", or (c) name is one of our internal contact placeholders
+    // used during Telegram importContacts ("Клиент", "Lead", "Unknown").
+    const isGeneratedName =
+      !customer.name ||
+      /^WhatsApp \+\d+$/.test(customer.name) ||
+      customer.name === "Клиент" ||
+      customer.name === "Lead" ||
+      customer.name === "Unknown";
     const inboundName = (parsed.metadata?.pushName as string) ||
                         (parsed.metadata?.firstName as string) ||
                         (parsed.metadata?.senderName as string) ||

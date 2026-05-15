@@ -13,9 +13,10 @@ export const CHANNEL_LABELS: Record<string, string> = {
   marquiz_failed: "—",
 };
 
-/** Data from the Marquiz lead form, used to enrich escalation notifications. */
+/** Data from the lead form, used to enrich escalation notifications. */
 export interface LeadInfo {
   quizName?: string | null;
+  // Automotive-specific (optional — present only for automotive quizzes)
   carInfo?: string | null;
   vin?: string | null;
   city?: string | null;
@@ -28,20 +29,24 @@ export interface LeadInfo {
   tireWidth?: string | null;
   tireHeight?: string | null;
   tireDiameter?: string | null;
+  // Generic: all raw fields from non-automotive quizzes / external forms
+  rawFields?: Record<string, string> | null;
 }
 
 /**
  * Formats lead application data as a block of lines for inclusion in a notification.
+ * Handles both automotive (KPP/engine/tires) and generic (rawFields) leads.
  * Only non-empty fields are shown.
  */
 function formatLeadInfo(lead: LeadInfo): string {
   const lines: string[] = [];
 
   if (lead.quizName) lines.push(`📋 Заявка: ${lead.quizName}`);
-  if (lead.carInfo) lines.push(`🚗 Автомобиль: ${lead.carInfo}`);
-  if (lead.vin) lines.push(`🔑 VIN: ${lead.vin}`);
-  if (lead.city) lines.push(`🏙 Город: ${lead.city}`);
 
+  // Automotive fields
+  if (lead.carInfo)     lines.push(`🚗 Автомобиль: ${lead.carInfo}`);
+  if (lead.vin)         lines.push(`🔑 VIN: ${lead.vin}`);
+  if (lead.city)        lines.push(`🏙 Город: ${lead.city}`);
   if (lead.gearboxType) lines.push(`⚙️ Тип КПП: ${lead.gearboxType}`);
 
   const engineParts = [lead.engineType, lead.engineVolume, lead.engineModel].filter(Boolean);
@@ -55,6 +60,14 @@ function formatLeadInfo(lead: LeadInfo): string {
     tireParts.push(lead.tireMethod);
   }
   if (tireParts.length) lines.push(`🛞 Шины: ${tireParts.join(", ")}`);
+
+  // Generic fields (non-automotive): only shown when no automotive-specific data was emitted
+  const hasAutomotiveData = lead.carInfo || lead.vin || lead.gearboxType || lead.engineType || tireParts.length;
+  if (!hasAutomotiveData && lead.rawFields) {
+    for (const [key, value] of Object.entries(lead.rawFields)) {
+      if (value) lines.push(`• ${key}: ${value}`);
+    }
+  }
 
   return lines.join("\n");
 }

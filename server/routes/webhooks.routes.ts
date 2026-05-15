@@ -3,6 +3,7 @@ import maxWebhookRouter from "./max-webhook";
 import maxPersonalWebhookRouter from "./max-personal-webhook";
 import marquizWebhookRouter from "./marquiz-webhook";
 import marquizDebugRouter from "./marquiz-debug";
+import leadWebhookRouter from "./lead-webhook";
 import { telegramWebhookHandler } from "./telegram-webhook";
 import { whatsappWebhookHandler, whatsappWebhookVerifyHandler } from "./whatsapp-webhook";
 import { webhookRateLimiter } from "../middleware/rate-limiter";
@@ -32,6 +33,9 @@ router.use("/webhooks/max-personal", webhookRateLimiter, maxPersonalWebhookRoute
 // Marquiz webhook
 router.use("/webhooks/marquiz", webhookRateLimiter, marquizWebhookRouter);
 router.use("/api/debug/marquiz", marquizDebugRouter);
+
+// Universal lead webhook — accepts any form/site submission
+router.use("/webhooks/lead", webhookRateLimiter, leadWebhookRouter);
 
 // Notification bot (subscription reminders) webhook
 router.post("/webhooks/notify-bot", webhookRateLimiter, notifyBotWebhookHandler);

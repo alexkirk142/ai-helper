@@ -70,14 +70,26 @@ function isWorkingHours(tenant: Tenant): boolean {
 }
 
 /** Detect lead type by quiz name or filled fields */
-function detectLeadType(data: MarquizLeadJobData): "engine" | "gearbox" | "tires" {
+function detectLeadType(data: MarquizLeadJobData): "engine" | "gearbox" | "tires" | "generic" {
   const qn = data.quizName.toLowerCase();
   if (qn.includes("шин") || qn.includes("резин") || qn.includes("колес")) return "tires";
   if (data.tireSeason || data.tireWidth || data.tireDiameter) return "tires";
   if (qn.includes("двигател") || qn.includes("мотор")) return "engine";
   if (data.engineType || data.engineVolume || data.engineModel) return "engine";
-  return "gearbox";
+  if (qn.includes("кпп") || qn.includes("коробк") || qn.includes("трансмисс")) return "gearbox";
+  if (data.gearboxType) return "gearbox";
+  // No automotive indicators — use generic template built from rawFields
+  return "generic";
 }
+
+// Keys to skip when building the generic lead summary (contact/service fields)
+const GENERIC_SKIP_KEYS = new Set([
+  "phone", "телефон", "моб", "мобильный", "номер телефона",
+  "name", "имя", "фио", "ф.и.о", "ваше имя",
+  "telegram", "телеграм", "юзернейм", "username",
+  "email", "е-мейл", "емейл", "почта",
+  "max", "номер max",
+]);
 
 function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
   const afterHours = !isWorkingHours(tenant);
@@ -86,6 +98,12 @@ function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
   const oohSuffix = afterHours
     ? "\n\nУтром приеду на работу, скину Вам подходящий вариант 👍"
     : "";
+
+  // Tenant-configured custom template overrides all built-in templates
+  const customTemplate = (tenant.templates as any)?.leadAutoResponseText?.trim();
+  if (customTemplate) {
+    return `${customTemplate}${oohSuffix}`;
+  }
 
   if (leadType === "tires" && (tenant as any).templateTiresEnabled === false) {
     return `Здравствуйте! Получили вашу заявку. Свяжемся с вами в ближайшее время 👍${oohSuffix}`;
@@ -132,6 +150,20 @@ function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
     } else {
       return `Здравствуйте! Получили вашу заявку на подбор двигателя.${details}\n\nНапишите ВИН-код или маркировку двигателя — подберём точный вариант 🙏${oohSuffix}`;
     }
+  }
+
+  // Generic: build summary from rawFields (non-automotive quizzes and external forms)
+  if (leadType === "generic") {
+    const lines: string[] = [];
+    for (const [key, value] of Object.entries(data.rawFields)) {
+      if (value && !GENERIC_SKIP_KEYS.has(key.toLowerCase().trim())) {
+        lines.push(`• ${key}: ${value}`);
+      }
+    }
+    if (data.city) lines.push(`📍 Город: ${data.city}`);
+    const details = lines.length > 0 ? `\n\n${lines.join("\n")}` : "";
+    const quizLabel = data.quizName && data.quizName !== "Заявка" ? ` «${data.quizName}»` : "";
+    return `Здравствуйте! Получили вашу заявку${quizLabel}.${details}\n\nСвяжемся с вами в ближайшее время 👍${oohSuffix}`;
   }
 
   // Default: КПП
@@ -235,7 +267,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     if (!hasTg) return { success: false, error: "No active Telegram account" };
 
     console.log(`[MarquizWorker] Telegram two-account strategy for phone ${phone}`);
-    const tgResult = await telegramClientManager.importContactAndSend(tenantId, phone, text);
+    const tgResult = await telegramClientManager.importContactAndSend(tenantId, phone, text, data.clientName || undefined);
 
     if (tgResult.success && tgResult.userId) {
       const senderAccountId = (tgResult as any).accountId ?? null;
@@ -292,6 +324,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
           tireWidth: data.tireWidth || null,
           tireHeight: data.tireHeight || null,
           tireDiameter: data.tireDiameter || null,
+          rawFields: data.rawFields && Object.keys(data.rawFields).length > 0 ? data.rawFields : null,
         },
       });
     }
@@ -359,6 +392,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
           tireWidth: data.tireWidth || null,
           tireHeight: data.tireHeight || null,
           tireDiameter: data.tireDiameter || null,
+          rawFields: data.rawFields && Object.keys(data.rawFields).length > 0 ? data.rawFields : null,
         },
       });
     }
@@ -461,6 +495,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
         tireWidth: data.tireWidth || null,
         tireHeight: data.tireHeight || null,
         tireDiameter: data.tireDiameter || null,
+        rawFields: data.rawFields && Object.keys(data.rawFields).length > 0 ? data.rawFields : null,
       },
     });
     return { success: true };
@@ -555,6 +590,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
         tireWidth: data.tireWidth || null,
         tireHeight: data.tireHeight || null,
         tireDiameter: data.tireDiameter || null,
+        rawFields: data.rawFields && Object.keys(data.rawFields).length > 0 ? data.rawFields : null,
       },
     });
 
@@ -777,6 +813,7 @@ async function saveFailedLead(
             tireWidth: data.tireWidth || null,
             tireHeight: data.tireHeight || null,
             tireDiameter: data.tireDiameter || null,
+            rawFields: data.rawFields && Object.keys(data.rawFields).length > 0 ? data.rawFields : null,
           },
           botToken,
           chatId,
