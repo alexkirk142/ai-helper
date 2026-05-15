@@ -4283,14 +4283,43 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
         </CardHeader>
         <CardContent className="space-y-3">
           <Textarea
-            placeholder={"Здравствуйте! Получили вашу заявку. Свяжемся с вами в ближайшее время 👍"}
+            placeholder={"Здравствуйте, {{name}}! Получили вашу заявку «{{quiz}}». Свяжемся с вами в ближайшее время 👍"}
             value={autoResponseText}
             onChange={(e) => { setAutoResponseText(e.target.value); setAutoResponseDirty(true); }}
-            rows={4}
+            rows={5}
             className="resize-none font-mono text-sm"
           />
+
+          {/* Placeholders reference */}
+          <div className="rounded-md border bg-muted/40 p-3 space-y-2">
+            <p className="text-xs font-medium text-foreground">Доступные переменные</p>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
+              {[
+                ["{{name}}", "Имя клиента из формы"],
+                ["{{phone}}", "Номер телефона"],
+                ["{{city}}", "Город"],
+                ["{{quiz}}", "Название квиза / формы"],
+                ["{{car}}", "Марка/модель автомобиля"],
+                ["{{vin}}", "VIN-код"],
+                ["{{gearbox}}", "Тип КПП"],
+                ["{{engine}}", "Тип/объём/модель двигателя"],
+                ["{{tires}}", "Параметры шин"],
+                ["{{fields}}", "Все ответы на вопросы списком"],
+              ].map(([ph, desc]) => (
+                <div key={ph} className="flex gap-1.5 items-baseline">
+                  <code className="shrink-0 text-[11px] bg-muted px-1 rounded text-foreground">{ph}</code>
+                  <span>{desc}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground pt-1">
+              Пример: <code className="bg-muted px-1 rounded text-[11px]">Здравствуйте, {"{{name}}"}! Получили заявку «{"{{quiz}}"}».</code>
+              &nbsp;→&nbsp; <span className="italic">Здравствуйте, Иван! Получили заявку «Подбор КПП».</span>
+            </p>
+          </div>
+
           <p className="text-xs text-muted-foreground">
-            Если заполнено — этот текст отправляется всем клиентам независимо от типа заявки.
+            Если переменная отсутствует в заявке — она просто убирается. Если поле пустое — система сформирует сообщение автоматически.
           </p>
           <div className="flex justify-end">
             <Button

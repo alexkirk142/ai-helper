@@ -99,10 +99,36 @@ function buildResponseText(data: MarquizLeadJobData, tenant: Tenant): string {
     ? "\n\nУтром приеду на работу, скину Вам подходящий вариант 👍"
     : "";
 
-  // Tenant-configured custom template overrides all built-in templates
+  // Tenant-configured custom template overrides all built-in templates.
+  // Supports placeholders: {{name}}, {{phone}}, {{city}}, {{quiz}}, {{car}}, {{vin}},
+  // {{gearbox}}, {{engine}}, {{tires}}, {{fields}} (all rawFields as bullet list).
   const customTemplate = (tenant.templates as any)?.leadAutoResponseText?.trim();
   if (customTemplate) {
-    return `${customTemplate}${oohSuffix}`;
+    const fieldsSummary = Object.entries(data.rawFields ?? {})
+      .filter(([, v]) => v)
+      .map(([k, v]) => `• ${k}: ${v}`)
+      .join("\n");
+    const engineSummary = [data.engineType, data.engineVolume, data.engineModel].filter(Boolean).join(", ");
+    const tiresSummary = [
+      data.tireSeason,
+      data.tireWidth && data.tireHeight && data.tireDiameter
+        ? `${data.tireWidth}/${data.tireHeight} ${data.tireDiameter}`
+        : data.tireMethod,
+    ].filter(Boolean).join(", ");
+
+    const rendered = customTemplate
+      .replace(/\{\{name\}\}/gi, data.clientName || "")
+      .replace(/\{\{phone\}\}/gi, data.phone || "")
+      .replace(/\{\{city\}\}/gi, data.city || "")
+      .replace(/\{\{quiz\}\}/gi, data.quizName || "")
+      .replace(/\{\{car\}\}/gi, data.carInfo || "")
+      .replace(/\{\{vin\}\}/gi, data.vin || "")
+      .replace(/\{\{gearbox\}\}/gi, data.gearboxType || "")
+      .replace(/\{\{engine\}\}/gi, engineSummary)
+      .replace(/\{\{tires\}\}/gi, tiresSummary)
+      .replace(/\{\{fields\}\}/gi, fieldsSummary);
+
+    return `${rendered}${oohSuffix}`;
   }
 
   if (leadType === "tires" && (tenant as any).templateTiresEnabled === false) {
