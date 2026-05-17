@@ -607,6 +607,33 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
               }
             }
 
+            // If sender is a LID contact — try to resolve phone JID via onWhatsApp.
+            // This runs BEFORE emitIncomingMessage so the Redis cache is populated
+            // by the time handleIncomingMessage looks up the existing customer.
+            if (parsed.externalUserId?.endsWith("@lid")) {
+              const lidSession = authSessions.get(tenantId);
+              const redis = getRateLimiterRedisInstance();
+              if (lidSession?.socket && redis) {
+                try {
+                  const [waResult] = await (lidSession.socket.onWhatsApp(parsed.externalUserId) as any);
+                  console.log(`[WhatsAppPersonal] onWhatsApp(LID) result for ${parsed.externalUserId}:`, JSON.stringify(waResult));
+
+                  const phoneJid: string | undefined =
+                    waResult?.phoneNumber ??
+                    (waResult?.jid?.endsWith("@s.whatsapp.net") ? waResult.jid : undefined);
+
+                  if (phoneJid?.endsWith("@s.whatsapp.net")) {
+                    const TTL = 60 * 60 * 24 * 30;
+                    await redis.set(`wa:lidmap:${tenantId}:${parsed.externalUserId}`, phoneJid, "EX", TTL);
+                    await redis.set(`wa:lidmap:${tenantId}:${phoneJid}`, parsed.externalUserId, "EX", TTL);
+                    console.log(`[WhatsAppPersonal] Cached LID↔phone via onWhatsApp: ${parsed.externalUserId} ↔ ${phoneJid}`);
+                  }
+                } catch (err: any) {
+                  console.warn(`[WhatsAppPersonal] onWhatsApp(LID) lookup failed for ${parsed.externalUserId}:`, err.message);
+                }
+              }
+            }
+
             messageBus.emitIncomingMessage(tenantId, null, parsed);
             console.log(`[WhatsAppPersonal] Message emitted for tenant ${tenantId}`);
           } catch (error) {
