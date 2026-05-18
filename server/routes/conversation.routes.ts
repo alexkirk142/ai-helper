@@ -457,16 +457,21 @@ router.post("/api/conversations/:id/send-summary", requireAuth, requirePermissio
     const messages = await storage.getMessagesByConversation(conversationId, tenantId);
     const customer = conversation.customer;
 
-    const customerName = customer?.name || "Неизвестный клиент";
-    const customerPhone = customer?.phone || "—";
-    const customerChannel = customer?.channel || "—";
+    const escapeMd = (s: string | null | undefined): string => {
+      if (!s) return "";
+      return s.replace(/[*_`[\]]/g, "\\$&");
+    };
+
+    const customerName = escapeMd(customer?.name || "Неизвестный клиент");
+    const customerPhone = escapeMd(customer?.phone || "—");
+    const customerChannel = escapeMd(customer?.channel || "—");
     const createdAt = new Date(conversation.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" });
 
     const recentMessages = messages.slice(-15);
     const msgLines = recentMessages.map((m) => {
       const time = new Date(m.createdAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
       const role = m.role === "assistant" ? "🤖 Оператор/AI" : "👤 Клиент";
-      const text = (m.content || "").slice(0, 200);
+      const text = escapeMd((m.content || "").slice(0, 200));
       return `${role} [${time}]: ${text}`;
     }).join("\n");
 
