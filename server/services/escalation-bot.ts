@@ -33,6 +33,12 @@ export interface LeadInfo {
   rawFields?: Record<string, string> | null;
 }
 
+/** Escapes Markdown special characters in user-supplied strings. */
+function escapeMd(s: string | null | undefined): string {
+  if (!s) return "";
+  return s.replace(/[*_`[\]]/g, "\\$&");
+}
+
 /**
  * Formats lead application data as a block of lines for inclusion in a notification.
  * Handles both automotive (KPP/engine/tires) and generic (rawFields) leads.
@@ -41,23 +47,23 @@ export interface LeadInfo {
 function formatLeadInfo(lead: LeadInfo): string {
   const lines: string[] = [];
 
-  if (lead.quizName) lines.push(`📋 Заявка: ${lead.quizName}`);
+  if (lead.quizName) lines.push(`📋 Заявка: ${escapeMd(lead.quizName)}`);
 
   // Automotive fields
-  if (lead.carInfo)     lines.push(`🚗 Автомобиль: ${lead.carInfo}`);
-  if (lead.vin)         lines.push(`🔑 VIN: ${lead.vin}`);
-  if (lead.city)        lines.push(`🏙 Город: ${lead.city}`);
-  if (lead.gearboxType) lines.push(`⚙️ Тип КПП: ${lead.gearboxType}`);
+  if (lead.carInfo)     lines.push(`🚗 Автомобиль: ${escapeMd(lead.carInfo)}`);
+  if (lead.vin)         lines.push(`🔑 VIN: ${escapeMd(lead.vin)}`);
+  if (lead.city)        lines.push(`🏙 Город: ${escapeMd(lead.city)}`);
+  if (lead.gearboxType) lines.push(`⚙️ Тип КПП: ${escapeMd(lead.gearboxType)}`);
 
   const engineParts = [lead.engineType, lead.engineVolume, lead.engineModel].filter(Boolean);
-  if (engineParts.length) lines.push(`🔧 Двигатель: ${engineParts.join(", ")}`);
+  if (engineParts.length) lines.push(`🔧 Двигатель: ${engineParts.map(escapeMd).join(", ")}`);
 
   const tireParts: string[] = [];
-  if (lead.tireSeason) tireParts.push(lead.tireSeason);
+  if (lead.tireSeason) tireParts.push(escapeMd(lead.tireSeason));
   if (lead.tireWidth && lead.tireHeight && lead.tireDiameter) {
-    tireParts.push(`${lead.tireWidth}/${lead.tireHeight} ${lead.tireDiameter}`);
+    tireParts.push(`${escapeMd(lead.tireWidth)}/${escapeMd(lead.tireHeight)} ${escapeMd(lead.tireDiameter)}`);
   } else if (lead.tireMethod) {
-    tireParts.push(lead.tireMethod);
+    tireParts.push(escapeMd(lead.tireMethod));
   }
   if (tireParts.length) lines.push(`🛞 Шины: ${tireParts.join(", ")}`);
 
@@ -65,7 +71,7 @@ function formatLeadInfo(lead: LeadInfo): string {
   const hasAutomotiveData = lead.carInfo || lead.vin || lead.gearboxType || lead.engineType || tireParts.length;
   if (!hasAutomotiveData && lead.rawFields) {
     for (const [key, value] of Object.entries(lead.rawFields)) {
-      if (value) lines.push(`• ${key}: ${value}`);
+      if (value) lines.push(`• ${escapeMd(key)}: ${escapeMd(value)}`);
     }
   }
 
@@ -106,9 +112,9 @@ export async function notifyFailedLead(opts: {
   botToken: string;
   chatId: string;
 }): Promise<void> {
-  const name = opts.clientName || "Неизвестный клиент";
-  const phone = opts.phone || "—";
-  const tgUser = opts.telegramUsername ? `@${opts.telegramUsername.replace(/^@/, "")}` : "—";
+  const name = escapeMd(opts.clientName || "Неизвестный клиент");
+  const phone = escapeMd(opts.phone || "—");
+  const tgUser = opts.telegramUsername ? `@${escapeMd(opts.telegramUsername.replace(/^@/, ""))}` : "—";
   const channel = opts.preferredChannel
     ? (CHANNEL_LABELS[opts.preferredChannel] ?? opts.preferredChannel)
     : "авто";
@@ -142,8 +148,8 @@ export async function notifyNoReply(opts: {
   botToken: string;
   chatId: string;
 }): Promise<void> {
-  const name = opts.clientName || "Неизвестный клиент";
-  const phone = opts.phone || "—";
+  const name = escapeMd(opts.clientName || "Неизвестный клиент");
+  const phone = escapeMd(opts.phone || "—");
   const channelLabel = CHANNEL_LABELS[opts.channel] ?? opts.channel;
 
   const leadBlock = opts.leadInfo ? formatLeadInfo(opts.leadInfo) : "";
