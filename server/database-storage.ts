@@ -368,6 +368,25 @@ export class DatabaseStorage implements IStorage {
     return result[0].customer;
   }
 
+  async findPhoneCustomerForLIDMerge(tenantId: string, channel: string, maxAgeHours: number): Promise<Customer | null> {
+    const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+
+    const result = await db
+      .select({ customer: customers })
+      .from(customers)
+      .where(and(
+        eq(customers.tenantId, tenantId),
+        eq(customers.channel, channel),
+        like(customers.externalId, "%@s.whatsapp.net"),
+        gte(customers.createdAt, cutoff),
+        sql`${customers.metadata}->>'phoneJid' IS NULL`,
+      ))
+      .limit(2); // limit 2: if >1 candidate, too ambiguous — don't merge
+
+    if (result.length !== 1) return null;
+    return result[0].customer;
+  }
+
   // Customer Notes
   async getCustomerNote(id: string): Promise<CustomerNote | undefined> {
     const [note] = await db.select().from(customerNotes).where(eq(customerNotes.id, id));

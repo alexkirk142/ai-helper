@@ -166,6 +166,44 @@ export async function handleIncomingMessage(
     }
   }
 
+  // Baileys internal store fallback: if Redis had no cached mapping, ask
+  // the WASocket signalRepository directly for the phone number behind the LID.
+  if (!customer && parsed.channel === "whatsapp_personal" && parsed.externalUserId.endsWith("@lid")) {
+    try {
+      const { WhatsAppPersonalAdapter } = await import("./whatsapp-personal-adapter");
+      const waSession = WhatsAppPersonalAdapter.getSession(tenant.id);
+      if ((waSession?.socket as any)?.signalRepository?.lidMapping) {
+        const rawPhoneJid: string | undefined = await (waSession!.socket as any).signalRepository.lidMapping.getPNForLID(parsed.externalUserId);
+        if (rawPhoneJid) {
+          // Baileys may return device-suffixed form like "79614907861:0@s.whatsapp.net"
+          const basePhoneJid = rawPhoneJid.replace(/:\d+@/, "@");
+          customer = await storage.getCustomerByExternalId(tenant.id, "whatsapp_personal", basePhoneJid) ?? undefined;
+          if (customer) {
+            try {
+              const redis = getRateLimiterRedisInstance();
+              if (redis) {
+                const TTL = 60 * 60 * 24 * 30;
+                await redis.set(`wa:lidmap:${tenant.id}:${parsed.externalUserId}`, basePhoneJid, "EX", TTL);
+                await redis.set(`wa:lidmap:${tenant.id}:${basePhoneJid}`, parsed.externalUserId, "EX", TTL);
+              }
+            } catch {}
+            await storage.updateCustomer(customer.id, tenant.id, {
+              externalId: parsed.externalUserId,
+              metadata: {
+                ...((customer.metadata as Record<string, unknown>) ?? {}),
+                phoneJid: basePhoneJid,
+              },
+            });
+            customer = { ...customer, externalId: parsed.externalUserId };
+            console.log(`[InboundHandler] Resolved LID via Baileys internal store: ${parsed.externalUserId} → ${basePhoneJid}, customer=${customer.id}`);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error(`[InboundHandler] Baileys internal LID lookup error:`, err.message);
+    }
+  }
+
   if (!customer) {
     // Auto-merge: if this is a LID contact with no match found,
     // look for a recent "orphaned" phone-based customer — one that has only
@@ -203,6 +241,40 @@ export async function handleIncomingMessage(
         }
       } catch (err: any) {
         console.error(`[InboundHandler] Auto-merge lookup error:`, err.message);
+      }
+
+      // Secondary fallback: customer already had inbound replies (not orphaned), but
+      // still hasn't been linked to a LID. Search the last 72 h without replyCount filter.
+      if (!customer) {
+        try {
+          const phoneCandidate = await storage.findPhoneCustomerForLIDMerge(
+            tenant.id,
+            "whatsapp_personal",
+            72 // hours
+          );
+          if (phoneCandidate) {
+            const phoneJid = phoneCandidate.externalId;
+            await storage.updateCustomer(phoneCandidate.id, tenant.id, {
+              externalId: parsed.externalUserId,
+              metadata: {
+                ...((phoneCandidate.metadata as Record<string, unknown>) ?? {}),
+                phoneJid,
+              },
+            });
+            try {
+              const redis = getRateLimiterRedisInstance();
+              if (redis) {
+                const TTL = 60 * 60 * 24 * 30;
+                await redis.set(`wa:lidmap:${tenant.id}:${parsed.externalUserId}`, phoneJid as string, "EX", TTL);
+                await redis.set(`wa:lidmap:${tenant.id}:${phoneJid}`, parsed.externalUserId, "EX", TTL);
+              }
+            } catch {}
+            customer = { ...phoneCandidate, externalId: parsed.externalUserId };
+            console.log(`[InboundHandler] Auto-merged phone customer with inbound history ${phoneCandidate.id} (${phoneJid}) → LID ${parsed.externalUserId}`);
+          }
+        } catch (err: any) {
+          console.error(`[InboundHandler] findPhoneCustomerForLIDMerge error:`, err.message);
+        }
       }
     }
   }

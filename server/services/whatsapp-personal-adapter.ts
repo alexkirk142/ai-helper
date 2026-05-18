@@ -221,6 +221,29 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
       });
 
       console.log(`[WhatsAppPersonal] Message sent to ${externalConversationId}`);
+
+      // Pre-cache phone ↔ LID mapping so that when the recipient replies
+      // from a @lid JID the inbound handler can resolve the existing customer.
+      try {
+        const phoneJid = jid.endsWith("@s.whatsapp.net") ? jid : null;
+        if (phoneJid && (session.socket as any).signalRepository?.lidMapping) {
+          const lidResults = await (session.socket as any).signalRepository.lidMapping.getLIDsForPNs([phoneJid]);
+          if (Array.isArray(lidResults) && lidResults.length > 0) {
+            const redis = getRateLimiterRedisInstance();
+            if (redis) {
+              const TTL = 60 * 60 * 24 * 30;
+              for (const { lid, pn } of lidResults) {
+                await redis.set(`wa:lidmap:${this.tenantId}:${pn}`, lid, "EX", TTL);
+                await redis.set(`wa:lidmap:${this.tenantId}:${lid}`, pn, "EX", TTL);
+                console.log(`[WhatsAppPersonal] Pre-cached LID on send: ${pn} ↔ ${lid}`);
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[WhatsAppPersonal] LID pre-cache on send failed:`, err.message);
+      }
+
       return {
         success: true,
         externalMessageId: result?.key?.id || `wap_${Date.now()}`,

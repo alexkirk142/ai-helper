@@ -113,6 +113,7 @@ export interface IStorage {
   createCustomer(customer: InsertCustomer, tenantId: string): Promise<Customer>;
   updateCustomer(id: string, tenantId: string, data: UpdateCustomer): Promise<Customer | undefined>;
   findOrphanedPhoneCustomer(tenantId: string, channel: string, maxAgeHours: number): Promise<Customer | null>;
+  findPhoneCustomerForLIDMerge(tenantId: string, channel: string, maxAgeHours: number): Promise<Customer | null>;
 
   // Customer Notes
   getCustomerNote(id: string): Promise<CustomerNote | undefined>;
