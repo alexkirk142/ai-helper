@@ -6,6 +6,7 @@ import * as path from "path";
 import * as fs from "fs/promises";
 // Native BigInt is used throughout — no big-integer library needed.
 import { storage } from "../storage";
+import { getRateLimiterRedisInstance } from "../redis-client";
 import { getSecret } from "./secret-resolver";
 import { messageBus } from "./message-bus";
 import { featureFlagService } from "./feature-flags";
@@ -1421,6 +1422,21 @@ class TelegramClientManager {
     const dialogLimit = options?.limit ?? 5;
     const messageLimit = options?.messageLimit ?? 20;
 
+    // Redis lock: prevent duplicate sync when multiple accounts for the same
+    // tenant reconnect in quick succession (e.g. on server restart).
+    const lockKey = channelId
+      ? `tg:sync_lock:${tenantId}:${channelId}`
+      : `tg:sync_lock:${tenantId}:${connection.accountId}`;
+    const redis = getRateLimiterRedisInstance();
+    if (redis) {
+      const alreadySyncing = await redis.get(lockKey);
+      if (alreadySyncing) {
+        console.log(`[TelegramClientManager] Sync for channel ${channelId ?? connection.accountId} already in progress, skipping duplicate run`);
+        return { success: true, dialogsImported: 0, messagesImported: 0 };
+      }
+      await redis.set(lockKey, "1", "EX", 120);
+    }
+
     console.log(`[TelegramClientManager] Starting dialog sync for ${tenantId}:${channelId}, limit=${dialogLimit}, msgLimit=${messageLimit}`);
 
     try {
@@ -1538,6 +1554,10 @@ class TelegramClientManager {
     } catch (error: any) {
       console.error(`[TelegramClientManager] Sync error:`, error.message);
       return { success: false, dialogsImported: 0, messagesImported: 0, error: error.message };
+    } finally {
+      if (redis) {
+        await redis.del(lockKey).catch(() => {});
+      }
     }
   }
 
