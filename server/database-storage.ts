@@ -1,4 +1,4 @@
-import { eq, desc, asc, and, or, ilike, inArray, sql, gte, gt, isNull, isNotNull, ne, count } from "drizzle-orm";
+import { eq, desc, asc, and, or, ilike, like, inArray, sql, gte, gt, isNull, isNotNull, ne, count } from "drizzle-orm";
 import { db } from "./db";
 import {
   tenants, channels, users, userInvites, emailTokens, customers, customerNotes, customerMemory, conversations, messages,
@@ -340,6 +340,32 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
       .returning();
     return customer;
+  }
+
+  async findOrphanedPhoneCustomer(tenantId: string, channel: string, maxAgeHours: number): Promise<Customer | null> {
+    const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+
+    const result = await db
+      .select({
+        customer: customers,
+        replyCount: sql<number>`COUNT(CASE WHEN ${messages.role} = 'customer' THEN 1 END)`,
+      })
+      .from(customers)
+      .leftJoin(conversations, eq(conversations.customerId, customers.id))
+      .leftJoin(messages, eq(messages.conversationId, conversations.id))
+      .where(and(
+        eq(customers.tenantId, tenantId),
+        eq(customers.channel, channel),
+        like(customers.externalId, "%@s.whatsapp.net"),
+        gte(customers.createdAt, cutoff),
+        sql`${customers.metadata}->>'phoneJid' IS NULL`,
+      ))
+      .groupBy(customers.id)
+      .having(sql`COUNT(CASE WHEN ${messages.role} = 'customer' THEN 1 END) = 0`)
+      .limit(2); // limit 2: if >1 candidate, too ambiguous — don't merge
+
+    if (result.length !== 1) return null; // 0 = no candidate, 2+ = ambiguous
+    return result[0].customer;
   }
 
   // Customer Notes

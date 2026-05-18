@@ -167,6 +167,47 @@ export async function handleIncomingMessage(
   }
 
   if (!customer) {
+    // Auto-merge: if this is a LID contact with no match found,
+    // look for a recent "orphaned" phone-based customer — one that has only
+    // outbound messages (no replies yet) and was created within the last 24h.
+    // This covers the case where MarquizWorker/start-conversation sent a message
+    // to phone@s.whatsapp.net and the recipient replies as @lid.
+    if (parsed.channel === "whatsapp_personal" && parsed.externalUserId.endsWith("@lid")) {
+      try {
+        const orphanCandidate = await storage.findOrphanedPhoneCustomer(
+          tenant.id,
+          "whatsapp_personal",
+          24 // hours
+        );
+        if (orphanCandidate) {
+          const phoneJid = orphanCandidate.externalId;
+          await storage.updateCustomer(orphanCandidate.id, tenant.id, {
+            externalId: parsed.externalUserId,
+            phone: orphanCandidate.phone || (parsed.metadata?.phone as string) || undefined,
+            name: orphanCandidate.name || (parsed.metadata?.pushName as string) || undefined,
+            metadata: {
+              ...((orphanCandidate.metadata as Record<string, unknown>) ?? {}),
+              phoneJid,
+            },
+          });
+          try {
+            const redis = getRateLimiterRedisInstance();
+            if (redis) {
+              const TTL = 60 * 60 * 24 * 30;
+              await redis.set(`wa:lidmap:${tenant.id}:${parsed.externalUserId}`, phoneJid as string, "EX", TTL);
+              await redis.set(`wa:lidmap:${tenant.id}:${phoneJid}`, parsed.externalUserId, "EX", TTL);
+            }
+          } catch {}
+          customer = { ...orphanCandidate, externalId: parsed.externalUserId };
+          console.log(`[InboundHandler] Auto-merged orphan phone customer ${orphanCandidate.id} (${phoneJid}) → LID ${parsed.externalUserId}`);
+        }
+      } catch (err: any) {
+        console.error(`[InboundHandler] Auto-merge lookup error:`, err.message);
+      }
+    }
+  }
+
+  if (!customer) {
     const customerName = (parsed.metadata?.pushName as string) ||
                          (parsed.metadata?.firstName as string) ||
                          (parsed.metadata?.contactName as string) ||

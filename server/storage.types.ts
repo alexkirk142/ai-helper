@@ -112,6 +112,7 @@ export interface IStorage {
   getCustomerByPhoneJidMetadata(tenantId: string, channel: string, phoneJid: string): Promise<Customer | null>;
   createCustomer(customer: InsertCustomer, tenantId: string): Promise<Customer>;
   updateCustomer(id: string, tenantId: string, data: UpdateCustomer): Promise<Customer | undefined>;
+  findOrphanedPhoneCustomer(tenantId: string, channel: string, maxAgeHours: number): Promise<Customer | null>;
 
   // Customer Notes
   getCustomerNote(id: string): Promise<CustomerNote | undefined>;
