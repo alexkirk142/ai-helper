@@ -96,6 +96,7 @@ export const patchTenantSchema = z.object({
   templates: z.record(z.string()).optional(),
   leadChannelPriority: z.array(z.enum(["whatsapp_personal", "telegram", "max"])).max(3).nullable().optional(),
   skipAutoResponseForExisting: z.boolean().optional(),
+  telegramLastSeenWhatsappFallback: z.boolean().optional(),
 });
 
 // Knowledge doc validation

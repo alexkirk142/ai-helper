@@ -312,11 +312,51 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   // If not set — use best-effort auto logic (Telegram first, then MAX).
   // ══════════════════════════════════════════════════════════════════════════
 
+  // Helper: check if Telegram last-seen fallback to WhatsApp is needed.
+  // Returns true when the flag is ON and the user was last seen > 24h ago.
+  const shouldFallbackToWhatsappDueToLastSeen = async (
+    phone?: string,
+    username?: string,
+    accountId?: string,
+  ): Promise<boolean> => {
+    if (!(tenant as any).telegramLastSeenWhatsappFallback) return false;
+
+    try {
+      let hoursAgo: number | null = null;
+
+      if (phone) {
+        hoursAgo = await telegramClientManager.getUserLastSeenHours(tenantId, phone);
+      } else if (username && accountId) {
+        hoursAgo = await telegramClientManager.getUserLastSeenHoursByUsername(tenantId, accountId, username);
+      }
+
+      if (hoursAgo === null) {
+        // Status hidden or user not on Telegram — let normal flow decide
+        return false;
+      }
+
+      if (hoursAgo > 24) {
+        console.log(`[MarquizWorker] Last-seen check: user was online ${hoursAgo}h ago (>24h) — triggering WhatsApp fallback`);
+        return true;
+      }
+
+      console.log(`[MarquizWorker] Last-seen check: user was online ${hoursAgo}h ago — proceeding with Telegram`);
+      return false;
+    } catch (e: any) {
+      console.warn(`[MarquizWorker] Last-seen check error: ${e.message} — proceeding with Telegram`);
+      return false;
+    }
+  };
+
   // Helper: send via Telegram by phone (two-account importContacts strategy)
   const sendViaTelegramByPhone = async () => {
     const tgAccounts = await storage.getTelegramAccountsByTenant(tenantId);
     const hasTg = tgAccounts.some(a => a.status === "active" && a.isEnabled);
     if (!hasTg) return { success: false, error: "No active Telegram account" };
+
+    if (await shouldFallbackToWhatsappDueToLastSeen(phone)) {
+      return { success: false, error: "TELEGRAM_LAST_SEEN_INACTIVE" };
+    }
 
     console.log(`[MarquizWorker] Telegram two-account strategy for phone ${phone}`);
     const tgResult = await telegramClientManager.importContactAndSend(tenantId, phone, text, data.clientName || undefined);
@@ -393,6 +433,10 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
       tgAccounts.find(a => a.status === "active" && a.isEnabled && (a as any).tgRole !== "resolver") ??
       tgAccounts.find(a => a.status === "active" && a.isEnabled);
     if (!tgAccount) return { success: false, error: "No active Telegram account" };
+
+    if (await shouldFallbackToWhatsappDueToLastSeen(undefined, data.telegramUsername, tgAccount.id)) {
+      return { success: false, error: "TELEGRAM_LAST_SEEN_INACTIVE" };
+    }
 
     console.log(`[MarquizWorker] Telegram username @${data.telegramUsername} via account ${tgAccount.id}`);
     const tgResult = await telegramClientManager.sendMessageByUsername(tenantId, tgAccount.id, data.telegramUsername, text);
@@ -655,15 +699,26 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
 
   // ── STRICT: client chose Telegram ─────────────────────────────────────────
   if (preferred === "telegram") {
+    let telegramInactiveFallback = false;
+
     if (data.telegramUsername) {
       const r = await sendViaTelegramByUsername();
       if (r.success) return;
+      if (r.error === "TELEGRAM_LAST_SEEN_INACTIVE") telegramInactiveFallback = true;
       console.warn(`[MarquizWorker] Telegram username send failed (${r.error})`);
     }
     if (hasPhone) {
       const r = await sendViaTelegramByPhone();
       if (r.success) return;
+      if (r.error === "TELEGRAM_LAST_SEEN_INACTIVE") telegramInactiveFallback = true;
       console.warn(`[MarquizWorker] Telegram phone send failed (${r.error})`);
+    }
+    // If inactive last-seen triggered the fallback — try WhatsApp Personal first.
+    if (telegramInactiveFallback && hasPhone) {
+      console.warn(`[MarquizWorker] Telegram last-seen inactive — trying WhatsApp Personal first`);
+      const r = await sendViaWhatsAppPersonal();
+      if (r.success) return;
+      console.warn(`[MarquizWorker] WhatsApp Personal (last-seen fallback) also failed (${r.error})`);
     }
     // Telegram unavailable — fall back to MAX Personal so the lead is not lost.
     if (hasPhone) {
@@ -672,8 +727,8 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
       if (r.success) return;
       console.warn(`[MarquizWorker] MAX Personal fallback also failed (${r.error})`);
     }
-    // MAX also failed — last attempt via WhatsApp Personal.
-    if (hasPhone) {
+    // MAX also failed — last attempt via WhatsApp Personal (if not already tried).
+    if (hasPhone && !telegramInactiveFallback) {
       console.warn(`[MarquizWorker] MAX failed — falling back to WhatsApp Personal`);
       const r = await sendViaWhatsAppPersonal();
       if (r.success) return;
@@ -748,21 +803,37 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
 
   console.log(`[MarquizWorker] Auto routing, channel order: ${channelOrder.join(" → ")}`);
 
+  let whatsappAlreadyTried = false;
+
   for (const ch of channelOrder) {
     if (ch === "whatsapp_personal") {
+      whatsappAlreadyTried = true;
       const r = await sendViaWhatsAppPersonal();
       if (r.success) return;
       console.warn(`[MarquizWorker] WhatsApp Personal failed (${r.error}), trying next channel`);
     } else if (ch === "telegram") {
+      let telegramInactive = false;
+
       if (data.telegramUsername) {
         const r = await sendViaTelegramByUsername();
         if (r.success) return;
+        if (r.error === "TELEGRAM_LAST_SEEN_INACTIVE") telegramInactive = true;
         console.warn(`[MarquizWorker] Telegram username failed (${r.error}), trying phone`);
       }
       if (hasPhone) {
         const r = await sendViaTelegramByPhone();
         if (r.success) return;
+        if (r.error === "TELEGRAM_LAST_SEEN_INACTIVE") telegramInactive = true;
         console.warn(`[MarquizWorker] Telegram phone failed (${r.error}), trying next channel`);
+      }
+
+      // Last-seen fallback: immediately try WhatsApp Personal if not yet attempted.
+      if (telegramInactive && hasPhone && !whatsappAlreadyTried) {
+        console.warn(`[MarquizWorker] Telegram last-seen inactive — injecting WhatsApp Personal attempt`);
+        whatsappAlreadyTried = true;
+        const r = await sendViaWhatsAppPersonal();
+        if (r.success) return;
+        console.warn(`[MarquizWorker] WhatsApp Personal (last-seen fallback) failed (${r.error}), trying next channel`);
       }
     } else if (ch === "max") {
       if (hasPhone) {

@@ -1770,6 +1770,93 @@ class TelegramClientManager {
   }
 
   /**
+   * Resolve a phone number via importContacts and return how many hours ago
+   * the user was last seen online. Returns null if:
+   * - phone is not registered in Telegram
+   * - user is currently online
+   * - user has hidden their last-seen (UserStatusRecently / LastWeek / LastMonth / Empty)
+   *
+   * This is a lightweight read-only operation — no message is sent.
+   */
+  async getUserLastSeenHours(tenantId: string, phone: string): Promise<number | null> {
+    const allConns = Array.from(this.connections.values()).filter(
+      c => c.tenantId === tenantId && c.connected,
+    );
+    if (allConns.length === 0) return null;
+
+    const resolverConn = allConns[0];
+    const cleanPhone = phone.replace(/[^\d+]/g, "");
+
+    try {
+      const contact = new Api.InputPhoneContact({
+        clientId: BigInt(Date.now()),
+        phone: cleanPhone,
+        firstName: "LastSeenCheck",
+        lastName: "",
+      });
+
+      const result = await resolverConn.client.invoke(
+        new Api.contacts.ImportContacts({ contacts: [contact] }),
+      );
+
+      const user = result.users?.[0] as Api.User | undefined;
+      if (!user) return null;
+
+      const status = user.status;
+      if (!status) return null;
+
+      if (status instanceof Api.UserStatusOnline) {
+        return 0; // currently online
+      }
+
+      if (status instanceof Api.UserStatusOffline) {
+        const wasOnlineMs = status.wasOnline * 1000;
+        const hoursAgo = (Date.now() - wasOnlineMs) / (1000 * 60 * 60);
+        return Math.floor(hoursAgo);
+      }
+
+      // Fuzzy statuses — exact time unavailable
+      return null;
+    } catch (err: any) {
+      console.warn(`[TelegramClientManager] getUserLastSeenHours failed for ${cleanPhone}: ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Resolve a Telegram @username and return how many hours ago the user
+   * was last seen online. Returns null if the status is hidden or unknown.
+   */
+  async getUserLastSeenHoursByUsername(tenantId: string, accountId: string, username: string): Promise<number | null> {
+    const connection = accountId
+      ? this.connections.get(`${tenantId}:${accountId}`) ?? this.findAnyConnection(tenantId)
+      : this.findAnyConnection(tenantId);
+
+    if (!connection?.connected) return null;
+
+    const cleanUsername = username.startsWith("@") ? username : `@${username}`;
+
+    try {
+      const entity = await connection.client.getEntity(cleanUsername);
+      const user = entity as Api.User;
+      const status = user.status;
+      if (!status) return null;
+
+      if (status instanceof Api.UserStatusOnline) return 0;
+
+      if (status instanceof Api.UserStatusOffline) {
+        const hoursAgo = (Date.now() - status.wasOnline * 1000) / (1000 * 60 * 60);
+        return Math.floor(hoursAgo);
+      }
+
+      return null;
+    } catch (err: any) {
+      console.warn(`[TelegramClientManager] getUserLastSeenHoursByUsername failed for ${cleanUsername}: ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Send a message to a Telegram user by their @username.
    * Works even if there's no existing conversation (gramjs resolves the entity).
    * Returns userId (numeric string) for creating the customer record.

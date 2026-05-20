@@ -4247,6 +4247,7 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
   const [channelOrderDirty, setChannelOrderDirty] = useState(false);
 
   const [skipExisting, setSkipExisting] = useState(false);
+  const [lastSeenFallback, setLastSeenFallback] = useState(false);
 
   useEffect(() => {
     if (tenant?.leadChannelPriority?.length) {
@@ -4259,6 +4260,12 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
       setSkipExisting(!!tenant.skipAutoResponseForExisting);
     }
   }, [tenant?.skipAutoResponseForExisting]);
+
+  useEffect(() => {
+    if ((tenant as any)?.telegramLastSeenWhatsappFallback !== undefined) {
+      setLastSeenFallback(!!(tenant as any).telegramLastSeenWhatsappFallback);
+    }
+  }, [(tenant as any)?.telegramLastSeenWhatsappFallback]);
 
   useEffect(() => {
     if (tenant?.templates?.leadAutoResponseText !== undefined) {
@@ -4302,6 +4309,18 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tenant"] });
       toast({ title: skipExisting ? "Повторные лиды: авторассылка отключена" : "Повторные лиды: авторассылка включена" });
+    },
+    onError: () => {
+      toast({ title: "Ошибка сохранения", variant: "destructive" });
+    },
+  });
+
+  const saveLastSeenFallbackMutation = useMutation({
+    mutationFn: async (value: boolean) =>
+      apiRequest("PATCH", "/api/tenant", { telegramLastSeenWhatsappFallback: value }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tenant"] });
+      toast({ title: "Настройка сохранена" });
     },
     onError: () => {
       toast({ title: "Ошибка сохранения", variant: "destructive" });
@@ -4480,6 +4499,38 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
               <Save className="mr-2 h-3.5 w-3.5" />
               Сохранить
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Фоллбэк на WhatsApp при неактивности в Telegram ─────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Фоллбэк на WhatsApp при неактивности в Telegram</CardTitle>
+          <CardDescription>
+            Перед отправкой в Telegram система проверит, когда клиент последний раз был онлайн.
+            Если прошло более 24 часов — сообщение будет отправлено через WhatsApp Personal вместо Telegram.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium">
+                Проверять last seen в Telegram перед авторассылкой
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Если клиент не заходил в Telegram более 24 часов, авторассылка уйдёт через WhatsApp Personal.
+                Требует подключённого WhatsApp Personal аккаунта.
+              </p>
+            </div>
+            <Switch
+              checked={lastSeenFallback}
+              onCheckedChange={(val) => {
+                setLastSeenFallback(val);
+                saveLastSeenFallbackMutation.mutate(val);
+              }}
+              disabled={saveLastSeenFallbackMutation.isPending}
+            />
           </div>
         </CardContent>
       </Card>

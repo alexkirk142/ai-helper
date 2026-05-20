@@ -105,6 +105,9 @@ export const tenants = pgTable("tenants", {
   leadChannelPriority: text("lead_channel_priority").array(),
   // When true: skip auto-response if the phone already exists as a customer for this tenant
   skipAutoResponseForExisting: boolean("skip_auto_response_for_existing").notNull().default(false),
+  // When true: before sending via Telegram, check the user's last-seen status.
+  // If the user was last online more than 24 hours ago, try WhatsApp Personal instead.
+  telegramLastSeenWhatsappFallback: boolean("telegram_last_seen_whatsapp_fallback").notNull().default(false),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
