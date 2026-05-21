@@ -104,18 +104,28 @@ export class MaxPersonalAdapter implements ChannelAdapter {
     attachments?: Array<{ url: string; mimeType?: string; fileName?: string; caption?: string }>,
     accountId?: string,
   ): Promise<ChannelSendResult> {
-    const account = await db.query.maxPersonalAccounts.findFirst({
-      where: accountId
-        ? and(
+    // Try the specific accountId first; if not found (deleted/deauthorized) fall back to
+    // any authorized account for the tenant so existing conversations still work after
+    // the account was replaced.
+    let account = accountId
+      ? await db.query.maxPersonalAccounts.findFirst({
+          where: and(
             eq(maxPersonalAccounts.tenantId, tenantId),
             eq(maxPersonalAccounts.accountId, accountId),
             eq(maxPersonalAccounts.status, "authorized"),
-          )
-        : and(
-            eq(maxPersonalAccounts.tenantId, tenantId),
-            eq(maxPersonalAccounts.status, "authorized"),
           ),
-    });
+        })
+      : undefined;
+
+    if (!account) {
+      account = await db.query.maxPersonalAccounts.findFirst({
+        where: and(
+          eq(maxPersonalAccounts.tenantId, tenantId),
+          eq(maxPersonalAccounts.status, "authorized"),
+        ),
+      });
+    }
+
     if (!account) {
       return { success: false, error: "No MAX Personal account connected" };
     }
@@ -190,18 +200,25 @@ export class MaxPersonalAdapter implements ChannelAdapter {
     caption?: string,
     accountId?: string,
   ): Promise<ChannelSendResult> {
-    const account = await db.query.maxPersonalAccounts.findFirst({
-      where: accountId
-        ? and(
+    let account = accountId
+      ? await db.query.maxPersonalAccounts.findFirst({
+          where: and(
             eq(maxPersonalAccounts.tenantId, tenantId),
             eq(maxPersonalAccounts.accountId, accountId),
             eq(maxPersonalAccounts.status, "authorized"),
-          )
-        : and(
-            eq(maxPersonalAccounts.tenantId, tenantId),
-            eq(maxPersonalAccounts.status, "authorized"),
           ),
-    });
+        })
+      : undefined;
+
+    if (!account) {
+      account = await db.query.maxPersonalAccounts.findFirst({
+        where: and(
+          eq(maxPersonalAccounts.tenantId, tenantId),
+          eq(maxPersonalAccounts.status, "authorized"),
+        ),
+      });
+    }
+
     if (!account) {
       return { success: false, error: "No MAX Personal account connected" };
     }
