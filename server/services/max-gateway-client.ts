@@ -209,23 +209,19 @@ export class MaxGatewayClient {
     fileBase64: string,
     fileName: string,
     mimeType: string,
-    caption?: string
   ): Promise<{ messageId?: string }> {
-    const isPhoto = mimeType.startsWith("image/");
-    const endpoint = isPhoto ? `/instances/${instanceId}/send-photo` : `/instances/${instanceId}/send-file`;
+    // Always use send-file endpoint — more reliable across all MIME types
     const body: Record<string, unknown> = {
       chatId: typeof chatId === "string" ? Number(chatId) || chatId : chatId,
+      fileBase64,
+      fileName,
       mimeType,
     };
-    if (isPhoto) {
-      body.photoBase64 = fileBase64;
-    } else {
-      body.fileBase64 = fileBase64;
-      body.fileName = fileName;
-    }
-    if (caption) body.caption = caption;
-
-    const data = await this.request<{ ok: boolean; message?: { id?: string } }>("POST", endpoint, body);
+    const data = await this.request<{ ok: boolean; message?: { id?: string } }>(
+      "POST",
+      `/instances/${instanceId}/send-file`,
+      body
+    );
     return { messageId: data.message?.id };
   }
 

@@ -137,8 +137,10 @@ export class MaxPersonalAdapter implements ChannelAdapter {
             base64,
             att.fileName ?? "file",
             att.mimeType ?? "application/octet-stream",
-            att.caption,
           );
+          if (att.caption) {
+            await maxGatewayClient.sendMessage(account.idInstance, chatId, att.caption);
+          }
           return { success: true, externalMessageId: result.messageId, timestamp: new Date() };
         }
 
@@ -207,7 +209,11 @@ export class MaxPersonalAdapter implements ChannelAdapter {
     try {
       if ((account as any).provider === "max_gateway") {
         const base64 = buffer.toString("base64");
-        const result = await maxGatewayClient.sendFile(account.idInstance, chatId, base64, fileName, mimeType, caption);
+        const result = await maxGatewayClient.sendFile(account.idInstance, chatId, base64, fileName, mimeType);
+        // Gateway API has no caption field — send text as a separate message after the file
+        if (caption) {
+          await maxGatewayClient.sendMessage(account.idInstance, chatId, caption);
+        }
         return { success: true, externalMessageId: result.messageId, timestamp: new Date() };
       }
 
