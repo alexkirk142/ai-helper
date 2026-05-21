@@ -3108,6 +3108,35 @@ router.get("/max-gateway/tenants/:tenantId/instances", requireAuth, requirePlatf
   }
 });
 
+// DELETE /max-gateway/instances/:instanceId — force-delete an instance from gateway + DB
+router.delete("/max-gateway/instances/:instanceId", requireAuth, requirePlatformAdmin(), async (req, res) => {
+  try {
+    const { instanceId } = req.params;
+
+    // Remove from gateway (best-effort)
+    try {
+      const { maxGatewayClient } = await import("../services/max-gateway-client");
+      await maxGatewayClient.deleteInstance(instanceId);
+    } catch (err: any) {
+      console.warn(`[Admin] gateway deleteInstance failed (continuing): ${err.message}`);
+    }
+
+    // Remove from DB (may not exist if it was a gateway-only orphan)
+    try {
+      const { maxPersonalAccounts } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      await db.delete(maxPersonalAccounts).where(eq(maxPersonalAccounts.idInstance, instanceId));
+    } catch (err: any) {
+      console.warn(`[Admin] DB delete for ${instanceId} failed: ${err.message}`);
+    }
+
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("[Admin] deleteGatewayInstance error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /max-gateway/proxies
 router.get("/max-gateway/proxies", requireAuth, requirePlatformAdmin(), async (req, res) => {
   try {

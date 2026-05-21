@@ -229,6 +229,29 @@ router.post("/:tenantId/:accountId", async (req, res) => {
       return res.json({ ok: true });
     }
 
+    // ── stateInstanceChanged: sync account status to DB ──────────────────────
+    if (payload.typeWebhook === "stateInstanceChanged") {
+      const body = req.body as any;
+      const newState: string | undefined = body.stateInstance;
+      console.log(`[MaxPersonalWebhook] stateInstanceChanged: instanceId=${body.instanceId} state=${newState} account=${accountId}`);
+
+      if (newState === "notAuthorized" || newState === "authorized") {
+        try {
+          const dbStatus = newState === "authorized" ? "authorized" : "notAuthorized";
+          await db.update(maxPersonalAccounts)
+            .set({ status: dbStatus, updatedAt: new Date() })
+            .where(and(
+              eq(maxPersonalAccounts.tenantId, tenantId),
+              eq(maxPersonalAccounts.accountId, accountId),
+            ));
+          console.log(`[MaxPersonalWebhook] Updated account ${accountId} status → ${dbStatus}`);
+        } catch (err: any) {
+          console.error(`[MaxPersonalWebhook] Failed to update status for ${accountId}:`, err.message);
+        }
+      }
+      return res.json({ ok: true });
+    }
+
     if (payload.typeWebhook !== "incomingMessageReceived") {
       return res.json({ ok: true });
     }

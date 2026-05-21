@@ -2207,15 +2207,19 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
               </div>
             </div>
           ))}
-          {pendingAccounts.map((acc, idx) => (
-            <div key={acc.accountId} className="rounded-md border p-3 bg-amber-500/5 flex items-center justify-between gap-3">
+          {pendingAccounts.map((acc, idx) => {
+            const wasAuthorized = acc.status === "notAuthorized";
+            return (
+            <div key={acc.accountId} className={`rounded-md border p-3 flex items-center justify-between gap-3 ${wasAuthorized ? "bg-red-500/5 border-red-500/30" : "bg-amber-500/5"}`}>
               <div className="flex items-center gap-3 min-w-0">
-                <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                <AlertCircle className={`h-4 w-4 shrink-0 ${wasAuthorized ? "text-red-500" : "text-amber-500"}`} />
                 <div className="min-w-0">
                   <p className="font-medium text-sm">
-                    {acc.label ?? `Аккаунт ${authorizedAccounts.length + idx + 1}`}
+                    {acc.displayName ?? acc.label ?? `Аккаунт ${authorizedAccounts.length + idx + 1}`}
                   </p>
-                  <p className="text-xs text-muted-foreground">Требуется авторизация через MAX</p>
+                  <p className={`text-xs ${wasAuthorized ? "text-red-500" : "text-muted-foreground"}`}>
+                    {wasAuthorized ? "Сессия завершена — требуется повторная авторизация" : "Требуется авторизация через MAX"}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -2242,7 +2246,8 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
                 </Button>
               </div>
             </div>
-          ))}
+            );
+          })}
           {allAccounts.length > 0 && gatewayAvailable && canAccess && !isTrial && allAccounts.length < 50 && (
             <Button
               size="sm"

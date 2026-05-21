@@ -184,6 +184,23 @@ export default function AdminMaxGateway() {
     },
   });
 
+  const deleteInstanceMutation = useMutation({
+    mutationFn: async (instanceId: string) => {
+      const res = await apiRequest("DELETE", `/api/admin/max-gateway/instances/${instanceId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Ошибка удаления");
+      return data;
+    },
+    onSuccess: () => {
+      toast({ title: "Инстанс удалён" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/max-gateway/instances"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/max-gateway/stats"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Ошибка удаления", description: err.message, variant: "destructive" });
+    },
+  });
+
   const clearProxiesMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("DELETE", "/api/admin/max-gateway/proxies");
@@ -346,6 +363,7 @@ export default function AdminMaxGateway() {
                           <th className="text-left px-4 py-3 font-medium text-muted-foreground">Статус</th>
                           <th className="text-right px-4 py-3 font-medium text-muted-foreground">Чаты</th>
                           <th className="text-right px-4 py-3 font-medium text-muted-foreground">Последний вход</th>
+                          <th className="px-4 py-3" />
                         </tr>
                       </thead>
                       <tbody>
@@ -388,6 +406,22 @@ export default function AdminMaxGateway() {
                             </td>
                             <td className="px-4 py-3 text-right text-xs text-muted-foreground">
                               {inst.lastLogin ? formatDate(inst.lastLogin) : "—"}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                title="Удалить инстанс"
+                                onClick={() => {
+                                  if (confirm(`Удалить инстанс ${inst.instanceId}?`)) {
+                                    deleteInstanceMutation.mutate(inst.instanceId);
+                                  }
+                                }}
+                                disabled={deleteInstanceMutation.isPending}
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                              </Button>
                             </td>
                           </tr>
                         ))}
