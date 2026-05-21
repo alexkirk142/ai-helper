@@ -52,8 +52,18 @@ router.get("/api/channels/max-personal/:accountId/qr", requireAuth, async (req: 
     });
     if (!account) return res.status(404).json({ error: "Account not found" });
 
+    // Gateway instances use native admin API for QR
+    if ((account as any).provider === "max_gateway") {
+      const { maxGatewayClient } = await import("../../services/max-gateway-client");
+      // Ensure QR session is started
+      try { await maxGatewayClient.startQrSession(account.idInstance); } catch { /* already started */ }
+      const base64 = await maxGatewayClient.getQrImageBase64(account.idInstance);
+      if (!base64) return res.json({ type: "alreadyLogged", message: "" });
+      return res.json({ type: "qrCode", message: base64 });
+    }
+
     const { maxGreenApiAdapter } = await import("../../services/max-green-api-adapter");
-    const qrResult = await maxGreenApiAdapter.getQR(account.idInstance, account.apiTokenInstance);
+    const qrResult = await maxGreenApiAdapter.getQR(account.idInstance, account.apiTokenInstance, account.apiUrl);
     return res.json(qrResult);
   } catch (error: any) {
     console.error("Error fetching GREEN-API QR:", error);
@@ -78,33 +88,56 @@ router.get("/api/channels/max-personal/:accountId/status", requireAuth, async (r
     });
     if (!account) return res.status(404).json({ error: "Account not found" });
 
-    const { maxGreenApiAdapter } = await import("../../services/max-green-api-adapter");
-    const state = await maxGreenApiAdapter.getState(account.idInstance, account.apiTokenInstance, account.apiUrl);
+    let state: string;
 
-    if (state === "authorized" && account.status !== "authorized") {
-      let displayName: string | undefined;
-      try {
-        const info = await maxGreenApiAdapter.getAccountInfo(account.idInstance, account.apiTokenInstance, account.apiUrl);
-        displayName = info.nameAccount || info.wid;
-      } catch { /* non-fatal */ }
+    // Gateway instances use native admin API for status
+    if ((account as any).provider === "max_gateway") {
+      const { maxGatewayClient } = await import("../../services/max-gateway-client");
+      const instanceStatus = await maxGatewayClient.getInstanceStatus(account.idInstance);
+      state = instanceStatus.authenticated ? "authorized" : "notAuthorized";
 
-      let webhookRegistered = false;
-      try {
-        console.log('[DEBUG] Current APP_URL:', process.env.APP_URL);
-        console.log('[DEBUG] RAILWAY_PUBLIC_DOMAIN:', process.env.RAILWAY_PUBLIC_DOMAIN);
-        const appUrl = getAppUrl();
-        const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${account.accountId}`;
-        console.log(`[DEBUG] Registering webhook for tenant=${tenantId} account=${account.accountId} url=${webhookUrl}`);
-        await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl, account.apiUrl);
-        webhookRegistered = true;
-        console.log(`[DEBUG] setWebhook SUCCESS for idInstance=${account.idInstance}`);
-      } catch (err: any) {
-        console.error("[Routes] GREEN-API setWebhook failed:", err.message);
+      if (instanceStatus.authenticated && account.status !== "authorized") {
+        const displayName = instanceStatus.displayName ?? instanceStatus.phone ?? undefined;
+
+        let webhookRegistered = false;
+        try {
+          const appUrl = getAppUrl();
+          const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${account.accountId}`;
+          await maxGatewayClient.setWebhook(account.idInstance, webhookUrl);
+          webhookRegistered = true;
+        } catch (err: any) {
+          console.error("[Routes] Gateway setWebhook failed:", err.message);
+        }
+
+        await db.update(maxPersonalAccounts)
+          .set({ status: "authorized", webhookRegistered, displayName: displayName ?? account.displayName, updatedAt: new Date() })
+          .where(and(eq(maxPersonalAccounts.tenantId, tenantId), eq(maxPersonalAccounts.accountId, account.accountId)));
       }
+    } else {
+      const { maxGreenApiAdapter } = await import("../../services/max-green-api-adapter");
+      state = await maxGreenApiAdapter.getState(account.idInstance, account.apiTokenInstance, account.apiUrl);
 
-      await db.update(maxPersonalAccounts)
-        .set({ status: "authorized", webhookRegistered, displayName: displayName ?? account.displayName, updatedAt: new Date() })
-        .where(and(eq(maxPersonalAccounts.tenantId, tenantId), eq(maxPersonalAccounts.accountId, account.accountId)));
+      if (state === "authorized" && account.status !== "authorized") {
+        let displayName: string | undefined;
+        try {
+          const info = await maxGreenApiAdapter.getAccountInfo(account.idInstance, account.apiTokenInstance, account.apiUrl);
+          displayName = info.nameAccount || info.wid;
+        } catch { /* non-fatal */ }
+
+        let webhookRegistered = false;
+        try {
+          const appUrl = getAppUrl();
+          const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${account.accountId}`;
+          await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl, account.apiUrl);
+          webhookRegistered = true;
+        } catch (err: any) {
+          console.error("[Routes] GREEN-API setWebhook failed:", err.message);
+        }
+
+        await db.update(maxPersonalAccounts)
+          .set({ status: "authorized", webhookRegistered, displayName: displayName ?? account.displayName, updatedAt: new Date() })
+          .where(and(eq(maxPersonalAccounts.tenantId, tenantId), eq(maxPersonalAccounts.accountId, account.accountId)));
+      }
     }
 
     return res.json({ status: state });

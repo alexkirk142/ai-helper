@@ -163,6 +163,35 @@ export class MaxGatewayClient {
     await this.request<{ ok: boolean }>("POST", `/instances/${instanceId}/webhook`, { url });
   }
 
+  /** Start a QR auth session for the instance. */
+  async startQrSession(instanceId: string): Promise<{ qrLink?: string; expiresAt?: number }> {
+    return this.request<{ ok: boolean; qrLink?: string; expiresAt?: number }>(
+      "POST",
+      `/instances/${instanceId}/qr`
+    );
+  }
+
+  /**
+   * Fetch the current QR PNG image for an instance and return it as a base64 string.
+   * The endpoint is public (no auth), so we just proxy it.
+   * Returns null if no active QR session.
+   */
+  async getQrImageBase64(instanceId: string): Promise<string | null> {
+    const baseUrl = await this.resolveBaseUrl();
+    const url = `${baseUrl}/instances/${instanceId}/qr.png`;
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(url, {}, 10000);
+    } catch (err: any) {
+      if (err.name === "AbortError") return null;
+      throw err;
+    }
+    if (res.status === 404) return null;
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    return buf.toString("base64");
+  }
+
   // ── Stats & Monitoring ────────────────────────────────────────────────────
 
   async getStats(): Promise<GatewayStats> {
