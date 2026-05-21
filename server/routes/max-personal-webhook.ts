@@ -36,6 +36,9 @@ interface GreenApiFileData {
   fileName?: string;
   mimeType?: string;
   caption?: string;
+  jpegThumbnail?: string; // data:image/...;base64,... preview (gateway extension)
+  width?: number;
+  height?: number;
 }
 
 interface GreenApiMessageData {
@@ -82,9 +85,14 @@ function buildAttachment(
   const type: ParsedAttachment["type"] = typeMap[msgData.typeMessage] ?? "document";
 
   let url = fileData.downloadUrl;
-  // For gateway instances, proxy MAX CDN photo URLs through our server so the browser can load them
-  if (provider === "max_gateway" && accountId && type === "image" && url) {
-    url = `/api/channels/max-personal/${accountId}/media/photo?url=${encodeURIComponent(url)}`;
+  if (provider === "max_gateway" && type === "image") {
+    if (fileData.jpegThumbnail) {
+      // Use base64 thumbnail directly — no auth required, instant display
+      url = fileData.jpegThumbnail;
+    } else if (accountId && url) {
+      // Fallback: proxy through our server
+      url = `/api/channels/max-personal/${accountId}/media/photo?url=${encodeURIComponent(url)}`;
+    }
   }
 
   return {
