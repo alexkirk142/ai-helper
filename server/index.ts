@@ -318,19 +318,37 @@ app.use((req, res, next) => {
 
 // Backfill displayName (phone number) for MAX gateway accounts that were authorized
 // before the phone-capture logic was in place (displayName IS NULL, status = "authorized").
+// Also fixes provider = "green_api" for legacy mpa-* instances created before the
+// provider column existed (they got the default "green_api" value).
 async function backfillMaxGatewayDisplayNames(): Promise<number> {
   const { db } = await import("./db");
   const { maxPersonalAccounts } = await import("@shared/schema");
-  const { and, eq, isNull } = await import("drizzle-orm");
+  const { and, eq, isNull, like, ne, or } = await import("drizzle-orm");
   const { maxGatewayClient } = await import("./services/max-gateway-client");
 
+  // Step 1: fix provider for legacy mpa-* accounts that still have provider = "green_api"
+  try {
+    await db.update(maxPersonalAccounts)
+      .set({ provider: "max_gateway", updatedAt: new Date() })
+      .where(and(
+        like(maxPersonalAccounts.idInstance, "mpa-%"),
+        ne(maxPersonalAccounts.provider, "max_gateway"),
+      ));
+  } catch (err: any) {
+    log(`MAX gateway provider fix failed: ${err.message}`, "startup");
+  }
+
+  // Step 2: fetch displayName for all gateway accounts that still have it null
   const rows = await db.select({
     accountId: maxPersonalAccounts.accountId,
     tenantId: maxPersonalAccounts.tenantId,
     idInstance: maxPersonalAccounts.idInstance,
   }).from(maxPersonalAccounts)
     .where(and(
-      eq(maxPersonalAccounts.provider, "max_gateway"),
+      or(
+        eq(maxPersonalAccounts.provider, "max_gateway"),
+        like(maxPersonalAccounts.idInstance, "mpa-%"),
+      ),
       eq(maxPersonalAccounts.status, "authorized"),
       isNull(maxPersonalAccounts.displayName),
     ));

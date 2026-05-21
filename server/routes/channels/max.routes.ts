@@ -5,6 +5,12 @@ import { getAppUrl } from "../../utils/app-url";
 
 const router = Router();
 
+// Accounts created before the `provider` column existed got default "green_api".
+// Treat any mpa-* instance as a gateway account regardless of the stored provider value.
+function isGatewayAccount(account: { provider?: string | null; idInstance: string }): boolean {
+  return account.provider === "max_gateway" || account.idInstance.startsWith("mpa-");
+}
+
 // ── /api/channels/max-personal ────────────────────────────────────────────────
 
 router.get("/api/channels/max-personal/accounts", requireAuth, async (req: Request, res: Response) => {
@@ -53,7 +59,7 @@ router.get("/api/channels/max-personal/:accountId/qr", requireAuth, async (req: 
     if (!account) return res.status(404).json({ error: "Account not found" });
 
     // Gateway instances use native admin API for QR
-    if ((account as any).provider === "max_gateway") {
+    if (isGatewayAccount(account as any)) {
       const { maxGatewayClient } = await import("../../services/max-gateway-client");
       // Try to get existing QR first; only start a new session if none is active
       let base64 = await maxGatewayClient.getQrImageBase64(account.idInstance);
@@ -98,7 +104,7 @@ router.get("/api/channels/max-personal/:accountId/status", requireAuth, async (r
     let state: string;
 
     // Gateway instances use native admin API for status
-    if ((account as any).provider === "max_gateway") {
+    if (isGatewayAccount(account as any)) {
       const { maxGatewayClient } = await import("../../services/max-gateway-client");
       const instanceStatus = await maxGatewayClient.getInstanceStatus(account.idInstance);
       state = instanceStatus.authenticated ? "authorized" : "notAuthorized";
