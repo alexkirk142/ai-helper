@@ -9,6 +9,7 @@
 import type { ChannelAdapter, ParsedIncomingMessage, ChannelSendResult } from "./channel-adapter.types";
 import type { ChannelType } from "@shared/schema";
 import { maxGreenApiAdapter } from "./max-green-api-adapter";
+import { maxGatewayClient } from "./max-gateway-client";
 import { db } from "../db";
 import { maxPersonalAccounts } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
@@ -120,11 +121,27 @@ export class MaxPersonalAdapter implements ChannelAdapter {
     }
 
     try {
+      const isGateway = (account as any).provider === "max_gateway";
+
       if (attachments && attachments.length > 0) {
         const att = attachments[0];
         const buf = await fetch(att.url)
           .then((r) => r.arrayBuffer())
           .then((ab) => Buffer.from(ab));
+
+        if (isGateway) {
+          const base64 = buf.toString("base64");
+          const result = await maxGatewayClient.sendFile(
+            account.idInstance,
+            chatId,
+            base64,
+            att.fileName ?? "file",
+            att.mimeType ?? "application/octet-stream",
+            att.caption,
+          );
+          return { success: true, externalMessageId: result.messageId, timestamp: new Date() };
+        }
+
         const result = await maxGreenApiAdapter.sendFile(
           account.idInstance,
           account.apiTokenInstance,
@@ -137,6 +154,11 @@ export class MaxPersonalAdapter implements ChannelAdapter {
           account.apiUrl,
         );
         return { success: true, externalMessageId: result.idMessage, timestamp: new Date() };
+      }
+
+      if (isGateway) {
+        const result = await maxGatewayClient.sendMessage(account.idInstance, chatId, text);
+        return { success: true, externalMessageId: result.messageId, timestamp: new Date() };
       }
 
       const result = await maxGreenApiAdapter.sendMessage(
@@ -183,6 +205,12 @@ export class MaxPersonalAdapter implements ChannelAdapter {
     }
 
     try {
+      if ((account as any).provider === "max_gateway") {
+        const base64 = buffer.toString("base64");
+        const result = await maxGatewayClient.sendFile(account.idInstance, chatId, base64, fileName, mimeType, caption);
+        return { success: true, externalMessageId: result.messageId, timestamp: new Date() };
+      }
+
       const result = await maxGreenApiAdapter.sendFile(
         account.idInstance,
         account.apiTokenInstance,

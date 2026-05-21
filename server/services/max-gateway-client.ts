@@ -192,6 +192,43 @@ export class MaxGatewayClient {
     return buf.toString("base64");
   }
 
+  // ── Messaging ─────────────────────────────────────────────────────────────
+
+  async sendMessage(instanceId: string, chatId: string | number, text: string): Promise<{ messageId?: string }> {
+    const data = await this.request<{ ok: boolean; message?: { id?: string } }>(
+      "POST",
+      `/instances/${instanceId}/send`,
+      { chatId: typeof chatId === "string" ? Number(chatId) || chatId : chatId, text }
+    );
+    return { messageId: data.message?.id };
+  }
+
+  async sendFile(
+    instanceId: string,
+    chatId: string | number,
+    fileBase64: string,
+    fileName: string,
+    mimeType: string,
+    caption?: string
+  ): Promise<{ messageId?: string }> {
+    const isPhoto = mimeType.startsWith("image/");
+    const endpoint = isPhoto ? `/instances/${instanceId}/send-photo` : `/instances/${instanceId}/send-file`;
+    const body: Record<string, unknown> = {
+      chatId: typeof chatId === "string" ? Number(chatId) || chatId : chatId,
+      mimeType,
+    };
+    if (isPhoto) {
+      body.photoBase64 = fileBase64;
+    } else {
+      body.fileBase64 = fileBase64;
+      body.fileName = fileName;
+    }
+    if (caption) body.caption = caption;
+
+    const data = await this.request<{ ok: boolean; message?: { id?: string } }>("POST", endpoint, body);
+    return { messageId: data.message?.id };
+  }
+
   // ── Stats & Monitoring ────────────────────────────────────────────────────
 
   async getStats(): Promise<GatewayStats> {
