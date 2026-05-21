@@ -298,6 +298,11 @@ app.use((req, res, next) => {
         .then(() => log("Telegram Personal sessions initialized", "startup"))
         .catch((err: any) => log(`Telegram Personal initialization failed: ${err.message}`, "startup"));
 
+      // Backfill displayName for MAX gateway accounts that are authorized but have no phone stored
+      backfillMaxGatewayDisplayNames()
+        .then((n) => { if (n > 0) log(`MAX gateway displayName backfill: updated ${n} account(s)`, "startup"); })
+        .catch((err: any) => log(`MAX gateway displayName backfill failed: ${err.message}`, "startup"));
+
       // Register notification bot webhook (fire-and-forget, non-blocking)
       import("./routes/notify-bot-webhook").then(({ registerNotifyBotWebhook }) => {
         try {
@@ -310,6 +315,45 @@ app.use((req, res, next) => {
     },
   );
 })();
+
+// Backfill displayName (phone number) for MAX gateway accounts that were authorized
+// before the phone-capture logic was in place (displayName IS NULL, status = "authorized").
+async function backfillMaxGatewayDisplayNames(): Promise<number> {
+  const { db } = await import("./db");
+  const { maxPersonalAccounts } = await import("@shared/schema");
+  const { and, eq, isNull } = await import("drizzle-orm");
+  const { maxGatewayClient } = await import("./services/max-gateway-client");
+
+  const rows = await db.select({
+    accountId: maxPersonalAccounts.accountId,
+    tenantId: maxPersonalAccounts.tenantId,
+    idInstance: maxPersonalAccounts.idInstance,
+  }).from(maxPersonalAccounts)
+    .where(and(
+      eq(maxPersonalAccounts.provider, "max_gateway"),
+      eq(maxPersonalAccounts.status, "authorized"),
+      isNull(maxPersonalAccounts.displayName),
+    ));
+
+  let updated = 0;
+  for (const row of rows) {
+    try {
+      const status = await maxGatewayClient.getInstanceStatus(row.idInstance);
+      const name = status.phone ?? status.displayName;
+      if (!name) continue;
+      await db.update(maxPersonalAccounts)
+        .set({ displayName: name, updatedAt: new Date() })
+        .where(and(
+          eq(maxPersonalAccounts.tenantId, row.tenantId),
+          eq(maxPersonalAccounts.accountId, row.accountId),
+        ));
+      updated++;
+    } catch {
+      // non-fatal — skip this instance
+    }
+  }
+  return updated;
+}
 
 // Restore saved WhatsApp Personal sessions on server start.
 // Collects tenant IDs from BOTH the file system and the DB so sessions

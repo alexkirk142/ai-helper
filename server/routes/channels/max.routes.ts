@@ -103,8 +103,9 @@ router.get("/api/channels/max-personal/:accountId/status", requireAuth, async (r
       const instanceStatus = await maxGatewayClient.getInstanceStatus(account.idInstance);
       state = instanceStatus.authenticated ? "authorized" : "notAuthorized";
 
-      if (instanceStatus.authenticated && account.status !== "authorized") {
-        const displayName = instanceStatus.displayName ?? instanceStatus.phone ?? undefined;
+      const incomingDisplayName = instanceStatus.displayName ?? instanceStatus.phone ?? undefined;
+      if (instanceStatus.authenticated && (account.status !== "authorized" || (!account.displayName && incomingDisplayName))) {
+        const displayName = incomingDisplayName;
 
         let webhookRegistered = false;
         try {
