@@ -2016,10 +2016,7 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
   const deleteAccount = async (accountId: string) => {
     setDeletingAccount(accountId);
     try {
-      const res = await fetch(`/api/channels/max-personal/${accountId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
+      const res = await apiRequest("DELETE", `/api/channels/max-personal/${accountId}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Ошибка удаления");
