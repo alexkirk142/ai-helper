@@ -210,18 +210,24 @@ export class MaxGatewayClient {
     fileName: string,
     mimeType: string,
   ): Promise<{ messageId?: string }> {
-    // Always use send-file endpoint — more reliable across all MIME types
-    const body: Record<string, unknown> = {
-      chatId: typeof chatId === "string" ? Number(chatId) || chatId : chatId,
-      fileBase64,
-      fileName,
-      mimeType,
-    };
-    const data = await this.request<{ ok: boolean; message?: { id?: string } }>(
-      "POST",
-      `/instances/${instanceId}/send-file`,
-      body
-    );
+    const numericChatId = typeof chatId === "string" ? Number(chatId) || chatId : chatId;
+    const isPhoto = mimeType.startsWith("image/");
+
+    let data: { ok: boolean; message?: { id?: string } };
+    if (isPhoto) {
+      data = await this.request("POST", `/instances/${instanceId}/send-photo`, {
+        chatId: numericChatId,
+        photoBase64: fileBase64,
+        mimeType,
+      });
+    } else {
+      data = await this.request("POST", `/instances/${instanceId}/send-file`, {
+        chatId: numericChatId,
+        fileBase64,
+        fileName,
+        mimeType,
+      });
+    }
     return { messageId: data.message?.id };
   }
 
