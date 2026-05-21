@@ -390,8 +390,11 @@ router.post("/api/max-personal/start-conversation", requireAuth, requireTenant, 
 });
 
 // ── Media proxy for gateway instances ────────────────────────────────────────
-// Proxies MAX CDN images/files through the gateway so the browser can load them.
-// Usage: GET /api/channels/max-personal/:accountId/media/photo?url=<i.oneme.ru url>
+// Proxies MAX CDN images through the gateway so the browser can load them.
+// Usage: GET /api/channels/max-personal/:accountId/media/photo?url=<cdn url (i.oneme.ru)>
+// The `url` param must be the raw CDN URL, NOT the full gateway download URL.
+// buildAttachment extracts the CDN URL from the gateway's ?baseUrl= param before
+// storing it, so even if the gateway domain changes, the stored messages still work.
 router.get("/api/channels/max-personal/:accountId/media/photo", requireAuth, async (req: Request, res: Response) => {
   try {
     const { url: mediaUrl } = req.query as { url?: string };
