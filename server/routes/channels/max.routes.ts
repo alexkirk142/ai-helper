@@ -55,9 +55,16 @@ router.get("/api/channels/max-personal/:accountId/qr", requireAuth, async (req: 
     // Gateway instances use native admin API for QR
     if ((account as any).provider === "max_gateway") {
       const { maxGatewayClient } = await import("../../services/max-gateway-client");
-      // Ensure QR session is started
-      try { await maxGatewayClient.startQrSession(account.idInstance); } catch { /* already started */ }
-      const base64 = await maxGatewayClient.getQrImageBase64(account.idInstance);
+      // Try to get existing QR first; only start a new session if none is active
+      let base64 = await maxGatewayClient.getQrImageBase64(account.idInstance);
+      if (!base64) {
+        // No active QR session — check if already authenticated
+        const status = await maxGatewayClient.getInstanceStatus(account.idInstance);
+        if (status.authenticated) return res.json({ type: "alreadyLogged", message: "" });
+        // Start a new QR session and fetch the image
+        try { await maxGatewayClient.startQrSession(account.idInstance); } catch { /* ignore */ }
+        base64 = await maxGatewayClient.getQrImageBase64(account.idInstance);
+      }
       if (!base64) return res.json({ type: "alreadyLogged", message: "" });
       return res.json({ type: "qrCode", message: base64 });
     }
