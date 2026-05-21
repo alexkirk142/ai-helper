@@ -179,6 +179,73 @@ router.patch("/api/channels/max-personal/:accountId/auto-reply", requireAuth, as
   }
 });
 
+// GET /api/channels/max-personal/gateway-available — check if self-service creation is possible
+router.get("/api/channels/max-personal/gateway-available", requireAuth, (_req: Request, res: Response) => {
+  res.json({ available: !!process.env.MAX_GATEWAY_URL && !!process.env.MAX_GATEWAY_ADMIN_KEY });
+});
+
+// POST /api/channels/max-personal/create — self-service account creation via gateway
+router.post("/api/channels/max-personal/create", requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!process.env.MAX_GATEWAY_URL || !process.env.MAX_GATEWAY_ADMIN_KEY) {
+      return res.status(503).json({ error: "MAX Gateway не настроен на платформе" });
+    }
+
+    const user = req.userId ? await storage.getUser(req.userId) : undefined;
+    const tenantId = user?.tenantId;
+    if (!tenantId) return res.status(404).json({ error: "Tenant not found" });
+
+    const { label } = req.body as { label?: string };
+
+    const { db } = await import("../../db");
+    const { maxPersonalAccounts } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+
+    const existingAccounts = await db.select().from(maxPersonalAccounts)
+      .where(eq(maxPersonalAccounts.tenantId, tenantId));
+    if (existingAccounts.length >= 50) {
+      return res.status(400).json({ error: "Достигнут максимальный лимит аккаунтов (50)" });
+    }
+
+    const { randomUUID } = await import("crypto");
+    const accountId = randomUUID();
+    const instanceId = `mpa-${accountId.replace(/-/g, "").slice(0, 16)}`;
+
+    const appUrl = getAppUrl();
+    const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
+
+    const { maxGatewayClient } = await import("../../services/max-gateway-client");
+    let apiToken: string;
+    try {
+      const result = await maxGatewayClient.createInstance(instanceId, tenantId, webhookUrl);
+      apiToken = result.apiToken;
+    } catch (err: any) {
+      console.error("[MaxPersonal] Gateway createInstance failed:", err.message);
+      return res.status(400).json({ error: `Не удалось создать инстанс: ${err.message}` });
+    }
+
+    await db.insert(maxPersonalAccounts).values({
+      tenantId,
+      accountId,
+      idInstance: instanceId,
+      apiTokenInstance: apiToken,
+      apiUrl: process.env.MAX_GATEWAY_URL,
+      mediaUrl: process.env.MAX_GATEWAY_URL,
+      label: label ?? null,
+      displayName: null,
+      status: "unknown",
+      webhookRegistered: true,
+      provider: "max_gateway",
+    });
+
+    console.log(`[MaxPersonal] Self-service instance created: ${instanceId} for tenant ${tenantId}`);
+    return res.json({ success: true, accountId });
+  } catch (error: any) {
+    console.error("[MaxPersonal] Self-service create error:", error);
+    res.status(500).json({ error: error.message || "Failed to create account" });
+  }
+});
+
 // ── /api/max-personal ─────────────────────────────────────────────────────────
 
 router.post("/api/max-personal/start-conversation", requireAuth, requireTenant, async (req: Request, res: Response) => {

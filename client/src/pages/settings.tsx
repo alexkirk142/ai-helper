@@ -1884,8 +1884,20 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
   const [checkingStatus, setCheckingStatus] = useState<string | null>(null);
   const [reregisteringWebhook, setReregisteringWebhook] = useState<string | null>(null);
   const [togglingAutoReply, setTogglingAutoReply] = useState<string | null>(null);
+  const [creatingAccount, setCreatingAccount] = useState(false);
   const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastQrFetchRef = useRef<number>(0);
+
+  const { data: gatewayConfig } = useQuery<{ available: boolean }>({
+    queryKey: ["/api/channels/max-personal/gateway-available"],
+    queryFn: async () => {
+      const res = await fetch("/api/channels/max-personal/gateway-available", { credentials: "include" });
+      if (!res.ok) return { available: false };
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+  });
+  const gatewayAvailable = gatewayConfig?.available === true;
 
   const reregisterWebhook = async (accountId: string) => {
     setReregisteringWebhook(accountId);
@@ -1998,6 +2010,30 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
     refetchAccounts();
   };
 
+  const createAccount = async () => {
+    setCreatingAccount(true);
+    try {
+      const res = await fetch("/api/channels/max-personal/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as any).error || "Не удалось создать аккаунт");
+      }
+      const data = await res.json() as { accountId: string };
+      toast({ title: "Инстанс создан", description: "Отсканируйте QR-код для авторизации" });
+      await refetchAccounts();
+      await openQrDialog(data.accountId);
+    } catch (err: any) {
+      toast({ title: "Ошибка", description: err.message || "Не удалось создать аккаунт", variant: "destructive" });
+    } finally {
+      setCreatingAccount(false);
+    }
+  };
+
   useEffect(() => {
     if (qrDialogOpen && qrAccountId) {
       fetchQR(qrAccountId);
@@ -2069,14 +2105,31 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
             </div>
           )}
           {allAccounts.length === 0 && (
-            <div className="rounded-md border p-4 flex items-start gap-3">
-              <XCircle className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
-              <div>
-                <p className="font-medium text-muted-foreground">Не подключён</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Обратитесь к администратору платформы для добавления аккаунта
-                </p>
+            <div className="rounded-md border p-4 flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <XCircle className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-muted-foreground">Не подключён</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {gatewayAvailable
+                      ? "Нажмите кнопку чтобы создать и подключить аккаунт MAX"
+                      : "Обратитесь к администратору платформы для добавления аккаунта"}
+                  </p>
+                </div>
               </div>
+              {gatewayAvailable && (
+                <Button
+                  size="sm"
+                  onClick={createAccount}
+                  disabled={creatingAccount || !canAccess || isTrial}
+                  className="shrink-0"
+                >
+                  {creatingAccount
+                    ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Создание...</>
+                    : "Подключить аккаунт"
+                  }
+                </Button>
+              )}
             </div>
           )}
           {authorizedAccounts.map((acc, idx) => (
@@ -2149,6 +2202,20 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
               </Button>
             </div>
           ))}
+          {allAccounts.length > 0 && gatewayAvailable && canAccess && !isTrial && allAccounts.length < 50 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={createAccount}
+              disabled={creatingAccount}
+              className="w-full mt-1"
+            >
+              {creatingAccount
+                ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Создание...</>
+                : <><span className="mr-1">+</span> Добавить ещё аккаунт</>
+              }
+            </Button>
+          )}
         </CardContent>
       </Card>
 
