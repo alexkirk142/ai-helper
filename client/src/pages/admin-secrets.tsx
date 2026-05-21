@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Key, Shield, Check, X, RotateCw, MessageCircle, Send, Coins, Bot, MessageSquare, Eye, EyeOff, Bell, Database, FlaskConical } from "lucide-react";
+import { Loader2, Key, Shield, Check, X, RotateCw, MessageCircle, Send, Coins, Bot, MessageSquare, Eye, EyeOff, Bell, Database, FlaskConical, Network } from "lucide-react";
 import { SiTelegram, SiWhatsapp, SiOpenai } from "react-icons/si";
 
 interface SecretMetadata {
@@ -211,6 +211,29 @@ const INTEGRATIONS: IntegrationConfig[] = [
         placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         required: false,
         hint: "Ключ API из личного кабинета partsapi.ru",
+      },
+    ],
+  },
+  {
+    id: "max-gateway",
+    name: "MAX Gateway",
+    description: "Шлюз для MAX Personal аккаунтов — автоматическое создание и управление инстансами",
+    icon: <Network className="h-6 w-6" />,
+    color: "bg-[#0EA5E9]",
+    secrets: [
+      {
+        keyName: "MAX_GATEWAY_URL",
+        label: "Gateway URL",
+        placeholder: "https://max-api.aimessagehelper.online",
+        required: true,
+        hint: "Base URL шлюза MAX Gateway",
+      },
+      {
+        keyName: "MAX_GATEWAY_ADMIN_KEY",
+        label: "Admin Key",
+        placeholder: "••••••••••••••••••••",
+        required: true,
+        hint: "Административный ключ доступа к MAX Gateway",
       },
     ],
   },

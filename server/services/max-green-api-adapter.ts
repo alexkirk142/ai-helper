@@ -23,8 +23,10 @@ function sanitizeMaxChatId(chatId: string): string {
   return chatId;
 }
 
-const BASE_URL = (idInstance: string) =>
-  `${getApiHost(idInstance)}/v3/waInstance${idInstance}`;
+const BASE_URL = (idInstance: string, apiUrl?: string | null) =>
+  apiUrl
+    ? `${apiUrl.replace(/\/$/, "")}/v3/waInstance${idInstance}`
+    : `${getApiHost(idInstance)}/v3/waInstance${idInstance}`;
 
 function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 20000): Promise<Response> {
   const controller = new AbortController();
@@ -34,8 +36,8 @@ function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 20
 }
 
 export class MaxGreenApiAdapter {
-  async getState(idInstance: string, token: string): Promise<string> {
-    const url = `${BASE_URL(idInstance)}/getStateInstance/${token}`;
+  async getState(idInstance: string, token: string, apiUrl?: string | null): Promise<string> {
+    const url = `${BASE_URL(idInstance, apiUrl)}/getStateInstance/${token}`;
     let res: Response;
     try {
       res = await fetchWithTimeout(url);
@@ -54,9 +56,10 @@ export class MaxGreenApiAdapter {
 
   async getAccountInfo(
     idInstance: string,
-    token: string
+    token: string,
+    apiUrl?: string | null
   ): Promise<{ nameAccount?: string; wid?: string }> {
-    const url = `${BASE_URL(idInstance)}/getAccountSettings/${token}`;
+    const url = `${BASE_URL(idInstance, apiUrl)}/getAccountSettings/${token}`;
     let res: Response;
     try {
       res = await fetchWithTimeout(url);
@@ -72,8 +75,8 @@ export class MaxGreenApiAdapter {
     return res.json();
   }
 
-  async getQR(idInstance: string, token: string): Promise<{ type: string; message: string }> {
-    const url = `${BASE_URL(idInstance)}/qr/${token}`;
+  async getQR(idInstance: string, token: string, apiUrl?: string | null): Promise<{ type: string; message: string }> {
+    const url = `${BASE_URL(idInstance, apiUrl)}/qr/${token}`;
     let res: Response;
     try {
       res = await fetchWithTimeout(url);
@@ -89,8 +92,8 @@ export class MaxGreenApiAdapter {
     return res.json() as Promise<{ type: string; message: string }>;
   }
 
-  async setWebhook(idInstance: string, token: string, webhookUrl: string): Promise<void> {
-    const url = `${BASE_URL(idInstance)}/setSettings/${token}`;
+  async setWebhook(idInstance: string, token: string, webhookUrl: string, apiUrl?: string | null): Promise<void> {
+    const url = `${BASE_URL(idInstance, apiUrl)}/setSettings/${token}`;
     let res: Response;
     try {
       res = await fetchWithTimeout(url, {
@@ -129,10 +132,11 @@ export class MaxGreenApiAdapter {
     idInstance: string,
     token: string,
     phoneNumber: string,
+    apiUrl?: string | null,
   ): Promise<boolean> {
     // Strip all non-digits and leading +
     const digits = phoneNumber.replace(/\D/g, "");
-    const url = `${BASE_URL(idInstance)}/checkWhatsapp/${token}`;
+    const url = `${BASE_URL(idInstance, apiUrl)}/checkWhatsapp/${token}`;
     try {
       const res = await fetchWithTimeout(url, {
         method: "POST",
@@ -152,9 +156,10 @@ export class MaxGreenApiAdapter {
     idInstance: string,
     token: string,
     chatId: string,
-    text: string
+    text: string,
+    apiUrl?: string | null
   ): Promise<{ idMessage: string }> {
-    const url = `${BASE_URL(idInstance)}/sendMessage/${token}`;
+    const url = `${BASE_URL(idInstance, apiUrl)}/sendMessage/${token}`;
     const sanitizedChatId = sanitizeMaxChatId(chatId);
     if (sanitizedChatId !== chatId) {
       console.log(`[MaxGreenApi] chatId sanitized for send: "${chatId}" → "${sanitizedChatId}"`);
@@ -188,13 +193,14 @@ export class MaxGreenApiAdapter {
     fileName: string,
     caption?: string,
     mediaUrl?: string | null,
+    apiUrl?: string | null,
   ): Promise<{ idMessage: string }> {
     // Use the mediaUrl from the GREEN-API dashboard when available — GREEN-API
     // recommends using this dedicated host for sendFileByUpload. Falling back to
     // the cluster-derived API host works for text but may silently drop files.
     const baseUrl = mediaUrl
       ? `${mediaUrl.replace(/\/$/, "")}/waInstance${idInstance}`
-      : BASE_URL(idInstance);
+      : BASE_URL(idInstance, apiUrl);
     const url = `${baseUrl}/sendFileByUpload/${token}`;
     const sanitizedChatId = sanitizeMaxChatId(chatId);
     const form = new FormData();

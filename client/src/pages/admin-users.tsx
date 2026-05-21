@@ -306,6 +306,7 @@ export default function AdminUsers() {
     status: string;
     webhookRegistered?: boolean | null;
     label?: string | null;
+    provider?: string | null;
   }
 
   interface MaxPersonalListData {
@@ -331,13 +332,23 @@ export default function AdminUsers() {
   const maxPersonalAccList = maxPersonalData?.accounts ?? [];
   const maxPersonalAtLimit = maxPersonalAccList.length >= 50;
 
+  const { data: gatewayConfig } = useQuery<{ configured: boolean; gatewayUrl: string | null }>({
+    queryKey: ["/api/admin/max-gateway/config"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/max-gateway/config", { credentials: "include" });
+      if (!res.ok) return { configured: false, gatewayUrl: null };
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+  });
+  const gatewayMode = gatewayConfig?.configured === true;
+
   const addMaxPersonalMutation = useMutation({
-    mutationFn: async ({ idInstance, apiTokenInstance, label }: { idInstance: string; apiTokenInstance: string; label?: string }) => {
-      const res = await apiRequest("POST", `/api/admin/users/${selectedUser?.id}/max-personal`, {
-        idInstance,
-        apiTokenInstance,
-        label: label || undefined,
-      });
+    mutationFn: async ({ idInstance, apiTokenInstance, label }: { idInstance?: string; apiTokenInstance?: string; label?: string }) => {
+      const body = gatewayMode
+        ? { label: label || undefined }
+        : { idInstance, apiTokenInstance, label: label || undefined };
+      const res = await apiRequest("POST", `/api/admin/users/${selectedUser?.id}/max-personal`, body);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to save");
       return data;
@@ -953,7 +964,9 @@ export default function AdminUsers() {
                             <CardContent className="space-y-4">
                               <div className="space-y-3">
                                 <div className="flex items-center justify-between">
-                                  <p className="text-sm font-medium">MAX Personal (GREEN-API)</p>
+                                  <p className="text-sm font-medium">
+                                    MAX Personal {gatewayMode ? "(max-gateway)" : "(GREEN-API)"}
+                                  </p>
                                   {!maxPersonalLoading && !maxPersonalAtLimit && (
                                     <Button
                                       variant="outline"
@@ -989,11 +1002,18 @@ export default function AdminUsers() {
                                               : <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
                                             }
                                             <div className="min-w-0">
-                                              <p className="text-sm font-medium truncate">
-                                                Аккаунт {idx + 1}
-                                                {acc.label ? ` — ${acc.label}` : ""}
-                                                {acc.displayName ? ` (${acc.displayName})` : ""}
-                                              </p>
+                                              <div className="flex items-center gap-1.5 flex-wrap">
+                                                <p className="text-sm font-medium truncate">
+                                                  Аккаунт {idx + 1}
+                                                  {acc.label ? ` — ${acc.label}` : ""}
+                                                  {acc.displayName ? ` (${acc.displayName})` : ""}
+                                                </p>
+                                                {acc.provider === "max_gateway" ? (
+                                                  <Badge variant="secondary" className="text-xs">max-gateway</Badge>
+                                                ) : (
+                                                  <Badge variant="outline" className="text-xs">GREEN-API</Badge>
+                                                )}
+                                              </div>
                                               <p className="text-xs text-muted-foreground truncate">
                                                 Статус: {acc.status} · Instance: {acc.idInstance}
                                               </p>
@@ -1063,60 +1083,88 @@ export default function AdminUsers() {
                                     )}
 
                                     {!maxPersonalAtLimit && (maxPersonalShowForm || maxPersonalAccList.length === 0) && (
-                                      <div className="rounded-md border p-3 space-y-2 bg-muted/30">
-                                        <p className="text-xs text-muted-foreground font-medium">
-                                          Добавить аккаунт ({maxPersonalAccList.length}/50 использовано)
-                                        </p>
-                                        <div className="space-y-1">
-                                          <Label className="text-xs">Instance ID</Label>
-                                          <Input
-                                            placeholder="1234567890"
-                                            value={maxPersonalIdInstance}
-                                            onChange={(e) => setMaxPersonalIdInstance(e.target.value)}
-                                            data-testid="input-max-personal-id-instance"
-                                          />
+                                      gatewayMode ? (
+                                        <div className="rounded-md border p-3 space-y-2 bg-muted/30">
+                                          <p className="text-xs text-muted-foreground font-medium">
+                                            Добавить аккаунт через max-gateway ({maxPersonalAccList.length}/50)
+                                          </p>
+                                          <div className="space-y-1">
+                                            <Label className="text-xs">Метка (необязательно)</Label>
+                                            <Input
+                                              placeholder="Например: Менеджер 1"
+                                              value={maxPersonalLabel}
+                                              onChange={(e) => setMaxPersonalLabel(e.target.value)}
+                                            />
+                                          </div>
+                                          <Button
+                                            size="sm"
+                                            onClick={() => addMaxPersonalMutation.mutate({ label: maxPersonalLabel || undefined })}
+                                            disabled={addMaxPersonalMutation.isPending}
+                                            data-testid="button-max-personal-save"
+                                          >
+                                            {addMaxPersonalMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                                            Создать инстанс
+                                          </Button>
+                                          <p className="text-xs text-muted-foreground">
+                                            Инстанс будет создан автоматически. После создания отсканируйте QR для авторизации.
+                                          </p>
                                         </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-xs">API Token</Label>
-                                          <Input
-                                            placeholder="••••••••••••••••"
-                                            type="password"
-                                            value={maxPersonalApiToken}
-                                            onChange={(e) => setMaxPersonalApiToken(e.target.value)}
-                                            data-testid="input-max-personal-api-token"
-                                          />
+                                      ) : (
+                                        <div className="rounded-md border p-3 space-y-2 bg-muted/30">
+                                          <p className="text-xs text-muted-foreground font-medium">
+                                            Добавить аккаунт ({maxPersonalAccList.length}/50 использовано)
+                                          </p>
+                                          <div className="space-y-1">
+                                            <Label className="text-xs">Instance ID</Label>
+                                            <Input
+                                              placeholder="1234567890"
+                                              value={maxPersonalIdInstance}
+                                              onChange={(e) => setMaxPersonalIdInstance(e.target.value)}
+                                              data-testid="input-max-personal-id-instance"
+                                            />
+                                          </div>
+                                          <div className="space-y-1">
+                                            <Label className="text-xs">API Token</Label>
+                                            <Input
+                                              placeholder="••••••••••••••••"
+                                              type="password"
+                                              value={maxPersonalApiToken}
+                                              onChange={(e) => setMaxPersonalApiToken(e.target.value)}
+                                              data-testid="input-max-personal-api-token"
+                                            />
+                                          </div>
+                                          <div className="space-y-1">
+                                            <Label className="text-xs">Метка (необязательно)</Label>
+                                            <Input
+                                              placeholder="Основной, Продажи…"
+                                              value={maxPersonalLabel}
+                                              onChange={(e) => setMaxPersonalLabel(e.target.value)}
+                                              data-testid="input-max-personal-label"
+                                            />
+                                          </div>
+                                          <Button
+                                            size="sm"
+                                            onClick={() =>
+                                              addMaxPersonalMutation.mutate({
+                                                idInstance: maxPersonalIdInstance,
+                                                apiTokenInstance: maxPersonalApiToken,
+                                                label: maxPersonalLabel || undefined,
+                                              })
+                                            }
+                                            disabled={
+                                              !maxPersonalIdInstance ||
+                                              !maxPersonalApiToken ||
+                                              addMaxPersonalMutation.isPending
+                                            }
+                                            data-testid="button-max-personal-save"
+                                          >
+                                            {addMaxPersonalMutation.isPending ? (
+                                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            ) : null}
+                                            Сохранить и активировать
+                                          </Button>
                                         </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-xs">Метка (необязательно)</Label>
-                                          <Input
-                                            placeholder="Основной, Продажи…"
-                                            value={maxPersonalLabel}
-                                            onChange={(e) => setMaxPersonalLabel(e.target.value)}
-                                            data-testid="input-max-personal-label"
-                                          />
-                                        </div>
-                                        <Button
-                                          size="sm"
-                                          onClick={() =>
-                                            addMaxPersonalMutation.mutate({
-                                              idInstance: maxPersonalIdInstance,
-                                              apiTokenInstance: maxPersonalApiToken,
-                                              label: maxPersonalLabel || undefined,
-                                            })
-                                          }
-                                          disabled={
-                                            !maxPersonalIdInstance ||
-                                            !maxPersonalApiToken ||
-                                            addMaxPersonalMutation.isPending
-                                          }
-                                          data-testid="button-max-personal-save"
-                                        >
-                                          {addMaxPersonalMutation.isPending ? (
-                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                          ) : null}
-                                          Сохранить и активировать
-                                        </Button>
-                                      </div>
+                                      )
                                     )}
                                   </div>
                                 )}

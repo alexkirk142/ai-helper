@@ -79,12 +79,12 @@ router.get("/api/channels/max-personal/:accountId/status", requireAuth, async (r
     if (!account) return res.status(404).json({ error: "Account not found" });
 
     const { maxGreenApiAdapter } = await import("../../services/max-green-api-adapter");
-    const state = await maxGreenApiAdapter.getState(account.idInstance, account.apiTokenInstance);
+    const state = await maxGreenApiAdapter.getState(account.idInstance, account.apiTokenInstance, account.apiUrl);
 
     if (state === "authorized" && account.status !== "authorized") {
       let displayName: string | undefined;
       try {
-        const info = await maxGreenApiAdapter.getAccountInfo(account.idInstance, account.apiTokenInstance);
+        const info = await maxGreenApiAdapter.getAccountInfo(account.idInstance, account.apiTokenInstance, account.apiUrl);
         displayName = info.nameAccount || info.wid;
       } catch { /* non-fatal */ }
 
@@ -95,7 +95,7 @@ router.get("/api/channels/max-personal/:accountId/status", requireAuth, async (r
         const appUrl = getAppUrl();
         const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${account.accountId}`;
         console.log(`[DEBUG] Registering webhook for tenant=${tenantId} account=${account.accountId} url=${webhookUrl}`);
-        await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
+        await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl, account.apiUrl);
         webhookRegistered = true;
         console.log(`[DEBUG] setWebhook SUCCESS for idInstance=${account.idInstance}`);
       } catch (err: any) {
@@ -138,7 +138,7 @@ router.post("/api/channels/max-personal/:accountId/reregister-webhook", requireA
     console.log(`[Routes] Re-registering webhook: ${webhookUrl}`);
 
     const { maxGreenApiAdapter: greenApi } = await import("../../services/max-green-api-adapter");
-    await greenApi.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
+    await greenApi.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl, account.apiUrl);
 
     await dbInst.update(mpTable)
       .set({ webhookRegistered: true, updatedAt: new Date() })

@@ -35,7 +35,8 @@ export class MaxPersonalAdapter implements ChannelAdapter {
         account.idInstance,
         account.apiTokenInstance,
         chatId,
-        text
+        text,
+        account.apiUrl,
       );
       return {
         success: true,
@@ -133,6 +134,7 @@ export class MaxPersonalAdapter implements ChannelAdapter {
           att.fileName ?? "file",
           att.caption,
           account.mediaUrl,
+          account.apiUrl,
         );
         return { success: true, externalMessageId: result.idMessage, timestamp: new Date() };
       }
@@ -141,7 +143,8 @@ export class MaxPersonalAdapter implements ChannelAdapter {
         account.idInstance,
         account.apiTokenInstance,
         chatId,
-        text
+        text,
+        account.apiUrl,
       );
       return { success: true, externalMessageId: result.idMessage, timestamp: new Date() };
     } catch (error: any) {
@@ -189,6 +192,7 @@ export class MaxPersonalAdapter implements ChannelAdapter {
         fileName,
         caption || undefined,
         account.mediaUrl,
+        account.apiUrl,
       );
       return { success: true, externalMessageId: result.idMessage, timestamp: new Date() };
     } catch (error: any) {

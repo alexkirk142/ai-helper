@@ -39,6 +39,7 @@ const AdminSecrets = lazy(() => import("@/pages/admin-secrets"));
 const AdminUsers = lazy(() => import("@/pages/admin-users"));
 const AdminBilling = lazy(() => import("@/pages/admin-billing"));
 const AdminProxies = lazy(() => import("@/pages/admin-proxies"));
+const AdminMaxGateway = lazy(() => import("@/pages/admin-max-gateway"));
 const AdminTenants = lazy(() => import("@/pages/admin-tenants"));
 const AdminBroadcast = lazy(() => import("@/pages/admin-broadcast"));
 const NotFound = lazy(() => import("@/pages/not-found"));
@@ -110,6 +111,9 @@ function Router() {
         </Route>
         <Route path="/admin/proxies">
           {() => <AdminGuard><AdminProxies /></AdminGuard>}
+        </Route>
+        <Route path="/admin/max-gateway">
+          {() => <AdminGuard><AdminMaxGateway /></AdminGuard>}
         </Route>
         <Route path="/admin/tenants">
           {() => <AdminGuard><AdminTenants /></AdminGuard>}

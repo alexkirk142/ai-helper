@@ -1626,6 +1626,7 @@ export const maxPersonalAccounts = pgTable("max_personal_accounts", {
   status: text("status").notNull().default("unknown"),
   webhookRegistered: boolean("webhook_registered").default(false),
   autoReplyEnabled: boolean("auto_reply_enabled").notNull().default(true),
+  provider: text("provider").notNull().default("green_api"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [

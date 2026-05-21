@@ -2597,8 +2597,8 @@ router.get(
 const MAX_PERSONAL_ACCOUNTS_LIMIT = 50;
 
 const maxPersonalAddSchema = z.object({
-  idInstance: z.string().min(1),
-  apiTokenInstance: z.string().min(1),
+  idInstance: z.string().min(1).optional(),
+  apiTokenInstance: z.string().min(1).optional(),
   label: z.string().optional(),
   // GREEN-API dashboard URLs — apiUrl for text, mediaUrl for file uploads
   apiUrl: z.string().url().optional(),
@@ -2654,6 +2654,7 @@ router.get(
           status: a.status,
           webhookRegistered: a.webhookRegistered,
           label: a.label,
+          provider: a.provider ?? "green_api",
         })),
       });
     } catch (error) {
@@ -2673,9 +2674,8 @@ router.post(
       const { userId } = req.params;
       const parsed = maxPersonalAddSchema.safeParse(req.body);
       if (!parsed.success) {
-        return res.status(400).json({ error: "idInstance and apiTokenInstance are required" });
+        return res.status(400).json({ error: "Invalid request body" });
       }
-      const { idInstance, apiTokenInstance, label, apiUrl, mediaUrl } = parsed.data;
 
       const userRow = await db.select({ tenantId: users.tenantId }).from(users).where(eq(users.id, userId)).limit(1);
       if (!userRow[0]?.tenantId) {
@@ -2700,73 +2700,125 @@ router.post(
         return res.status(400).json({ error: `Максимум ${MAX_PERSONAL_ACCOUNTS_LIMIT} аккаунтов достигнут` });
       }
 
-      // 2. Check duplicate idInstance for this tenant
-      const duplicate = existingAccounts.find((a) => a.idInstance === idInstance);
-      if (duplicate) {
-        return res.status(400).json({ error: "Этот инстанс уже добавлен для данного тенанта" });
-      }
+      const gatewayConfigured = !!process.env.MAX_GATEWAY_URL && !!process.env.MAX_GATEWAY_ADMIN_KEY;
 
-      const { maxGreenApiAdapter } = await import("../services/max-green-api-adapter");
+      if (gatewayConfigured) {
+        // === MAX GATEWAY PATH ===
+        const { maxGatewayClient } = await import("../services/max-gateway-client");
+        const { randomUUID } = await import("crypto");
+        const accountId = randomUUID();
+        const instanceId = `mpa-${accountId.replace(/-/g, "").slice(0, 16)}`;
 
-      // 3. Check current state (non-blocking — save regardless)
-      let state = "unknown";
-      try {
-        state = await maxGreenApiAdapter.getState(idInstance, apiTokenInstance);
-      } catch (err: any) {
-        return res.status(400).json({ error: `Не удалось проверить инстанс GREEN-API: ${err.message}` });
-      }
+        const appUrl = getAppUrl();
+        const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
 
-      // 4. Get account display name (only if authorized)
-      let displayName: string | undefined;
-      if (state === "authorized") {
+        let apiToken: string;
         try {
-          const info = await maxGreenApiAdapter.getAccountInfo(idInstance, apiTokenInstance);
-          displayName = info.nameAccount || info.wid;
-        } catch {
-          // non-fatal
-        }
-      }
-
-      // 5. Generate accountId and register webhook only if authorized
-      const { randomUUID } = await import("crypto");
-      const accountId = randomUUID();
-      let webhookRegistered = false;
-      if (state === "authorized") {
-        try {
-          const appUrl = getAppUrl();
-          const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
-          await maxGreenApiAdapter.setWebhook(idInstance, apiTokenInstance, webhookUrl);
-          webhookRegistered = true;
+          const result = await maxGatewayClient.createInstance(instanceId, String(tenantId), webhookUrl);
+          apiToken = result.apiToken;
         } catch (err: any) {
-          console.error("[Admin] GREEN-API setWebhook failed:", err.message);
+          return res.status(400).json({ error: `Failed to create gateway instance: ${err.message}` });
         }
+
+        const [inserted] = await db.insert(maxPersonalAccounts).values({
+          tenantId,
+          accountId,
+          idInstance: instanceId,
+          apiTokenInstance: apiToken,
+          apiUrl: process.env.MAX_GATEWAY_URL ?? null,
+          mediaUrl: process.env.MAX_GATEWAY_URL ?? null,
+          label: parsed.data.label ?? null,
+          displayName: null,
+          status: "unknown",
+          webhookRegistered: true,
+          provider: "max_gateway",
+        }).returning();
+
+        return res.json({
+          success: true,
+          accountId: inserted.accountId,
+          idInstance: inserted.idInstance,
+          status: inserted.status,
+          provider: "max_gateway",
+          message: "Instance created on max-gateway. Scan QR to authorize.",
+        });
+      } else {
+        // === GREEN-API LEGACY PATH ===
+        if (!parsed.data.idInstance || !parsed.data.apiTokenInstance) {
+          return res.status(400).json({ error: "idInstance and apiTokenInstance are required when gateway is not configured" });
+        }
+        const { idInstance, apiTokenInstance, label, apiUrl, mediaUrl } = parsed.data as Required<typeof parsed.data>;
+
+        // 2. Check duplicate idInstance for this tenant
+        const duplicate = existingAccounts.find((a) => a.idInstance === idInstance);
+        if (duplicate) {
+          return res.status(400).json({ error: "Этот инстанс уже добавлен для данного тенанта" });
+        }
+
+        const { maxGreenApiAdapter } = await import("../services/max-green-api-adapter");
+
+        // 3. Check current state (non-blocking — save regardless)
+        let state = "unknown";
+        try {
+          state = await maxGreenApiAdapter.getState(idInstance, apiTokenInstance, apiUrl);
+        } catch (err: any) {
+          return res.status(400).json({ error: `Не удалось проверить инстанс GREEN-API: ${err.message}` });
+        }
+
+        // 4. Get account display name (only if authorized)
+        let displayName: string | undefined;
+        if (state === "authorized") {
+          try {
+            const info = await maxGreenApiAdapter.getAccountInfo(idInstance, apiTokenInstance, apiUrl);
+            displayName = info.nameAccount || info.wid;
+          } catch {
+            // non-fatal
+          }
+        }
+
+        // 5. Generate accountId and register webhook only if authorized
+        const { randomUUID } = await import("crypto");
+        const accountId = randomUUID();
+        let webhookRegistered = false;
+        if (state === "authorized") {
+          try {
+            const appUrl = getAppUrl();
+            const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
+            await maxGreenApiAdapter.setWebhook(idInstance, apiTokenInstance, webhookUrl, apiUrl);
+            webhookRegistered = true;
+          } catch (err: any) {
+            console.error("[Admin] GREEN-API setWebhook failed:", err.message);
+          }
+        }
+
+        // 6. Insert new row
+        const [inserted] = await db.insert(maxPersonalAccounts).values({
+          tenantId,
+          accountId,
+          idInstance,
+          apiTokenInstance,
+          apiUrl: apiUrl ?? null,
+          mediaUrl: mediaUrl ?? null,
+          label: label ?? null,
+          displayName: displayName ?? null,
+          status: state,
+          webhookRegistered,
+          provider: "green_api",
+        }).returning();
+
+        return res.json({
+          accountId: inserted.accountId,
+          idInstance: inserted.idInstance,
+          apiTokenInstance: maskToken(inserted.apiTokenInstance),
+          apiUrl: inserted.apiUrl,
+          mediaUrl: inserted.mediaUrl,
+          displayName: inserted.displayName,
+          status: inserted.status,
+          webhookRegistered: inserted.webhookRegistered,
+          label: inserted.label,
+          provider: "green_api",
+        });
       }
-
-      // 6. Insert new row
-      const [inserted] = await db.insert(maxPersonalAccounts).values({
-        tenantId,
-        accountId,
-        idInstance,
-        apiTokenInstance,
-        apiUrl: apiUrl ?? null,
-        mediaUrl: mediaUrl ?? null,
-        label: label ?? null,
-        displayName: displayName ?? null,
-        status: state,
-        webhookRegistered,
-      }).returning();
-
-      return res.json({
-        accountId: inserted.accountId,
-        idInstance: inserted.idInstance,
-        apiTokenInstance: maskToken(inserted.apiTokenInstance),
-        apiUrl: inserted.apiUrl,
-        mediaUrl: inserted.mediaUrl,
-        displayName: inserted.displayName,
-        status: inserted.status,
-        webhookRegistered: inserted.webhookRegistered,
-        label: inserted.label,
-      });
     } catch (error) {
       console.error("[Admin] Error saving MAX Personal account:", error);
       res.status(500).json({ error: "Failed to save MAX Personal account" });
@@ -2797,7 +2849,7 @@ router.get(
       }
 
       const { maxGreenApiAdapter } = await import("../services/max-green-api-adapter");
-      const qrResult = await maxGreenApiAdapter.getQR(account.idInstance, account.apiTokenInstance);
+      const qrResult = await maxGreenApiAdapter.getQR(account.idInstance, account.apiTokenInstance, account.apiUrl);
 
       return res.json(qrResult);
     } catch (error: any) {
@@ -2830,13 +2882,13 @@ router.get(
       }
 
       const { maxGreenApiAdapter } = await import("../services/max-green-api-adapter");
-      const state = await maxGreenApiAdapter.getState(account.idInstance, account.apiTokenInstance);
+      const state = await maxGreenApiAdapter.getState(account.idInstance, account.apiTokenInstance, account.apiUrl);
 
       // If now authorized — register webhook and update DB
       if (state === "authorized" && account.status !== "authorized") {
         let displayName: string | undefined;
         try {
-          const info = await maxGreenApiAdapter.getAccountInfo(account.idInstance, account.apiTokenInstance);
+          const info = await maxGreenApiAdapter.getAccountInfo(account.idInstance, account.apiTokenInstance, account.apiUrl);
           displayName = info.nameAccount || info.wid;
         } catch {
           // non-fatal
@@ -2846,7 +2898,7 @@ router.get(
         try {
           const appUrl = getAppUrl();
           const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
-          await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
+          await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl, account.apiUrl);
           webhookRegistered = true;
         } catch (err: any) {
           console.error("[Admin] GREEN-API setWebhook failed:", err.message);
@@ -2929,7 +2981,7 @@ router.post(
       const appUrl = getAppUrl();
       const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
       const { maxGreenApiAdapter } = await import("../services/max-green-api-adapter");
-      await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl);
+      await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, webhookUrl, account.apiUrl);
 
       await db.update(maxPersonalAccounts)
         .set({ webhookRegistered: true, updatedAt: new Date() })
@@ -2975,12 +3027,23 @@ router.delete(
         return res.status(404).json({ error: "Account not found" });
       }
 
-      // Clear webhook on GREEN-API
-      try {
-        const { maxGreenApiAdapter } = await import("../services/max-green-api-adapter");
-        await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, "");
-      } catch {
-        // non-fatal
+      // If gateway instance — delete from gateway
+      if (account.provider === "max_gateway") {
+        try {
+          const { maxGatewayClient } = await import("../services/max-gateway-client");
+          await maxGatewayClient.deleteInstance(account.idInstance);
+        } catch (err: any) {
+          console.error("[Admin] Failed to delete gateway instance:", err.message);
+          // non-fatal — continue with DB deletion
+        }
+      } else {
+        // Clear webhook on GREEN-API
+        try {
+          const { maxGreenApiAdapter } = await import("../services/max-green-api-adapter");
+          await maxGreenApiAdapter.setWebhook(account.idInstance, account.apiTokenInstance, "", account.apiUrl);
+        } catch {
+          // non-fatal
+        }
       }
 
       await db.delete(maxPersonalAccounts)
@@ -2993,5 +3056,123 @@ router.delete(
     }
   }
 );
+
+// =====================
+// MAX GATEWAY ADMIN API
+// =====================
+
+// GET /max-gateway/config — check if gateway is configured
+router.get("/max-gateway/config", requireAuth, requirePlatformAdmin(), (req, res) => {
+  res.json({
+    configured: !!process.env.MAX_GATEWAY_URL && !!process.env.MAX_GATEWAY_ADMIN_KEY,
+    gatewayUrl: process.env.MAX_GATEWAY_URL || null,
+  });
+});
+
+// GET /max-gateway/stats — stats for all instances
+router.get("/max-gateway/stats", requireAuth, requirePlatformAdmin(), async (req, res) => {
+  try {
+    const { maxGatewayClient } = await import("../services/max-gateway-client");
+    const stats = await maxGatewayClient.getStats();
+    res.json(stats);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /max-gateway/instances — all instances on gateway
+router.get("/max-gateway/instances", requireAuth, requirePlatformAdmin(), async (req, res) => {
+  try {
+    const { maxGatewayClient } = await import("../services/max-gateway-client");
+    const instances = await maxGatewayClient.getAllInstances();
+    res.json({ instances });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /max-gateway/tenants/:tenantId/instances
+router.get("/max-gateway/tenants/:tenantId/instances", requireAuth, requirePlatformAdmin(), async (req, res) => {
+  try {
+    const { maxGatewayClient } = await import("../services/max-gateway-client");
+    const instances = await maxGatewayClient.getTenantInstances(req.params.tenantId);
+    res.json({ tenantId: req.params.tenantId, instances });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /max-gateway/proxies
+router.get("/max-gateway/proxies", requireAuth, requirePlatformAdmin(), async (req, res) => {
+  try {
+    const { maxGatewayClient } = await import("../services/max-gateway-client");
+    const result = await maxGatewayClient.getProxies();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /max-gateway/proxies — add proxies as text
+router.post("/max-gateway/proxies", requireAuth, requirePlatformAdmin(), async (req, res) => {
+  try {
+    const { proxies, label } = req.body as { proxies: string; label?: string };
+    if (!proxies) return res.status(400).json({ error: "proxies text is required" });
+    const { maxGatewayClient } = await import("../services/max-gateway-client");
+    const result = await maxGatewayClient.addProxies(proxies, label);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /max-gateway/proxies/upload — upload proxy list as text body
+router.post("/max-gateway/proxies/upload", requireAuth, requirePlatformAdmin(), async (req, res) => {
+  try {
+    const { text, label, replace } = req.body as { text: string; label?: string; replace?: boolean };
+    if (!text) return res.status(400).json({ error: "proxy list text is required" });
+    const { maxGatewayClient } = await import("../services/max-gateway-client");
+    const buf = Buffer.from(text, "utf-8");
+    const result = await maxGatewayClient.uploadProxies(buf, label, replace === true);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /max-gateway/proxies — clear entire proxy pool
+router.delete("/max-gateway/proxies", requireAuth, requirePlatformAdmin(), async (req, res) => {
+  try {
+    const { maxGatewayClient } = await import("../services/max-gateway-client");
+    await maxGatewayClient.clearProxies();
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /max-gateway/proxies/:id
+router.delete("/max-gateway/proxies/:id", requireAuth, requirePlatformAdmin(), async (req, res) => {
+  try {
+    const { maxGatewayClient } = await import("../services/max-gateway-client");
+    await maxGatewayClient.deleteProxy(req.params.id);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /max-gateway/proxies/:id
+router.patch("/max-gateway/proxies/:id", requireAuth, requirePlatformAdmin(), async (req, res) => {
+  try {
+    const { active } = req.body as { active: boolean };
+    if (typeof active !== "boolean") return res.status(400).json({ error: "active boolean is required" });
+    const { maxGatewayClient } = await import("../services/max-gateway-client");
+    await maxGatewayClient.toggleProxy(req.params.id, active);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 export default router;

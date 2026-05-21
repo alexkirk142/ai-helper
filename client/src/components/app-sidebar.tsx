@@ -40,6 +40,7 @@ const ownerItems = [
   { title: "Биллинг",      url: "/admin/billing",   icon: CreditCard,  testId: "nav-admin-billing" },
   { title: "Пользователи", url: "/admin/users",     icon: Users,       testId: "nav-admin-users" },
   { title: "Прокси",       url: "/admin/proxies",   icon: Server,      testId: "nav-admin-proxies" },
+  { title: "MAX Gateway",  url: "/admin/max-gateway", icon: Server,    testId: "nav-admin-max-gateway" },
   { title: "Тенанты",      url: "/admin/tenants",   icon: LayoutDashboard, testId: "nav-admin-tenants" },
   { title: "Рассылки",     url: "/admin/broadcast", icon: Send,        testId: "nav-admin-broadcast" },
   { title: "Обновления",   url: "/owner/updates",   icon: RefreshCw,   testId: "nav-owner-updates" },
