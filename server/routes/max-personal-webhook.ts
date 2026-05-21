@@ -29,9 +29,6 @@ interface GreenApiSenderData {
   chatName?: string;
   senderName?: string;
   sender?: string;
-  phone?: string;        // may be present in MAX gateway payloads
-  phoneNumber?: string;  // alternate field name from some gateway versions
-  msisdn?: string;       // E.164 phone as used by some MAX configurations
 }
 
 interface GreenApiFileData {
@@ -239,9 +236,6 @@ router.post("/:tenantId/:accountId", async (req, res) => {
     const sender = payload.senderData;
     const msgData = payload.messageData;
 
-    // Log full senderData to inspect available fields (phone, etc.)
-    console.log(`[MaxPersonalWebhook] senderData:`, JSON.stringify(sender));
-
     // Debug: log full payload for media messages to inspect downloadUrl format
     if (msgData?.typeMessage && !["textMessage", "extendedTextMessage"].includes(msgData.typeMessage)) {
       console.log(`[MaxPersonalWebhook] Media payload (${msgData.typeMessage}):`, JSON.stringify(msgData));
@@ -339,9 +333,6 @@ router.post("/:tenantId/:accountId", async (req, res) => {
       }
     }
 
-    // Extract phone number if the gateway provides it in any known field
-    const senderPhone = sender.phone || sender.phoneNumber || sender.msisdn || null;
-
     const parsed: ParsedIncomingMessage = {
       externalMessageId: payload.idMessage || `mp_${Date.now()}`,
       externalConversationId: normalizedChatId,
@@ -355,7 +346,6 @@ router.post("/:tenantId/:accountId", async (req, res) => {
         senderName: sender.senderName || sender.chatName,
         chatId: normalizedChatId,
         accountId: account.accountId,
-        ...(senderPhone ? { phone: senderPhone } : {}),
       },
       attachments: attachments.length > 0 ? attachments : undefined,
     };
