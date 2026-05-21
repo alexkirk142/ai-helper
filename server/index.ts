@@ -298,10 +298,10 @@ app.use((req, res, next) => {
         .then(() => log("Telegram Personal sessions initialized", "startup"))
         .catch((err: any) => log(`Telegram Personal initialization failed: ${err.message}`, "startup"));
 
-      // Backfill displayName for MAX gateway accounts that are authorized but have no phone stored
+      // Reconcile MAX gateway accounts: fix provider, sync status & displayName from gateway
       backfillMaxGatewayDisplayNames()
-        .then((n) => { if (n > 0) log(`MAX gateway displayName backfill: updated ${n} account(s)`, "startup"); })
-        .catch((err: any) => log(`MAX gateway displayName backfill failed: ${err.message}`, "startup"));
+        .then((n) => log(`MAX gateway reconcile complete: ${n} account(s) updated`, "startup"))
+        .catch((err: any) => log(`MAX gateway reconcile failed: ${err.message}`, "startup"));
 
       // Register notification bot webhook (fire-and-forget, non-blocking)
       import("./routes/notify-bot-webhook").then(({ registerNotifyBotWebhook }) => {
@@ -316,56 +316,77 @@ app.use((req, res, next) => {
   );
 })();
 
-// Backfill displayName (phone number) for MAX gateway accounts that were authorized
-// before the phone-capture logic was in place (displayName IS NULL, status = "authorized").
-// Also fixes provider = "green_api" for legacy mpa-* instances created before the
-// provider column existed (they got the default "green_api" value).
+// Reconcile all MAX gateway accounts on startup:
+//  1. Fix provider = "green_api" for legacy mpa-* instances
+//  2. For every gateway account call getInstanceStatus and sync:
+//     - displayName (phone number)
+//     - status: if gateway says authenticated=false but DB says "authorized" → mark notAuthorized
+// Returns number of rows actually changed.
 async function backfillMaxGatewayDisplayNames(): Promise<number> {
   const { db } = await import("./db");
   const { maxPersonalAccounts } = await import("@shared/schema");
-  const { and, eq, isNull, like, ne, or } = await import("drizzle-orm");
+  const { and, eq, like, ne, or } = await import("drizzle-orm");
   const { maxGatewayClient } = await import("./services/max-gateway-client");
 
-  // Step 1: fix provider for legacy mpa-* accounts that still have provider = "green_api"
+  // Step 1: fix provider for legacy mpa-* accounts stored as "green_api"
   try {
-    await db.update(maxPersonalAccounts)
+    const fixed = await db.update(maxPersonalAccounts)
       .set({ provider: "max_gateway", updatedAt: new Date() })
       .where(and(
         like(maxPersonalAccounts.idInstance, "mpa-%"),
         ne(maxPersonalAccounts.provider, "max_gateway"),
-      ));
+      ))
+      .returning({ accountId: maxPersonalAccounts.accountId });
+    if (fixed.length > 0) {
+      log(`MAX gateway provider fix: corrected ${fixed.length} account(s)`, "startup");
+    }
   } catch (err: any) {
     log(`MAX gateway provider fix failed: ${err.message}`, "startup");
   }
 
-  // Step 2: fetch displayName for all gateway accounts that still have it null
+  // Step 2: load ALL gateway accounts (by provider OR idInstance prefix)
   const rows = await db.select({
     accountId: maxPersonalAccounts.accountId,
     tenantId: maxPersonalAccounts.tenantId,
     idInstance: maxPersonalAccounts.idInstance,
+    status: maxPersonalAccounts.status,
+    displayName: maxPersonalAccounts.displayName,
   }).from(maxPersonalAccounts)
-    .where(and(
-      or(
-        eq(maxPersonalAccounts.provider, "max_gateway"),
-        like(maxPersonalAccounts.idInstance, "mpa-%"),
-      ),
-      eq(maxPersonalAccounts.status, "authorized"),
-      isNull(maxPersonalAccounts.displayName),
+    .where(or(
+      eq(maxPersonalAccounts.provider, "max_gateway"),
+      like(maxPersonalAccounts.idInstance, "mpa-%"),
     ));
 
   let updated = 0;
   for (const row of rows) {
     try {
-      const status = await maxGatewayClient.getInstanceStatus(row.idInstance);
-      const name = status.phone ?? status.displayName;
-      if (!name) continue;
-      await db.update(maxPersonalAccounts)
-        .set({ displayName: name, updatedAt: new Date() })
-        .where(and(
-          eq(maxPersonalAccounts.tenantId, row.tenantId),
-          eq(maxPersonalAccounts.accountId, row.accountId),
-        ));
-      updated++;
+      const gwStatus = await maxGatewayClient.getInstanceStatus(row.idInstance);
+      const updates: Record<string, unknown> = { updatedAt: new Date() };
+      let changed = false;
+
+      // Sync displayName from gateway phone/displayName
+      const name = gwStatus.phone ?? gwStatus.displayName ?? null;
+      if (name && !row.displayName) {
+        updates.displayName = name;
+        changed = true;
+      }
+
+      // Sync auth status: mark notAuthorized if gateway says not authenticated
+      if (!gwStatus.authenticated && row.status === "authorized") {
+        updates.status = "notAuthorized";
+        changed = true;
+        log(`MAX gateway reconcile: ${row.idInstance} marked notAuthorized (was authorized in DB)`, "startup");
+      }
+
+      if (changed) {
+        await db.update(maxPersonalAccounts)
+          .set(updates)
+          .where(and(
+            eq(maxPersonalAccounts.tenantId, row.tenantId),
+            eq(maxPersonalAccounts.accountId, row.accountId),
+          ));
+        updated++;
+      }
     } catch {
       // non-fatal — skip this instance
     }
