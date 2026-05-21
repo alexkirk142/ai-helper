@@ -1885,6 +1885,8 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
   const [reregisteringWebhook, setReregisteringWebhook] = useState<string | null>(null);
   const [togglingAutoReply, setTogglingAutoReply] = useState<string | null>(null);
   const [creatingAccount, setCreatingAccount] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const isCreatingRef = useRef(false);
   const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastQrFetchRef = useRef<number>(0);
@@ -2009,6 +2011,27 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
     if (qrPollRef.current) clearInterval(qrPollRef.current);
     setQrDialogOpen(false);
     refetchAccounts();
+  };
+
+  const deleteAccount = async (accountId: string) => {
+    setDeletingAccount(accountId);
+    try {
+      const res = await fetch(`/api/channels/max-personal/${accountId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Ошибка удаления");
+      }
+      toast({ title: "Аккаунт удалён" });
+      refetchAccounts();
+    } catch (err: any) {
+      toast({ title: "Ошибка удаления", description: err.message, variant: "destructive" });
+    } finally {
+      setDeletingAccount(null);
+      setDeleteConfirmId(null);
+    }
   };
 
   const createAccount = async () => {
@@ -2138,19 +2161,32 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
                   </p>
                   <p className="text-xs text-muted-foreground">Статус: авторизован</p>
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => reregisterWebhook(acc.accountId)}
-                  disabled={reregisteringWebhook === acc.accountId}
-                  title="Переподключить вебхук для получения входящих сообщений"
-                >
-                  {reregisteringWebhook === acc.accountId
-                    ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Подключение...</>
-                    : "Обновить вебхук"
-                  }
-                </Button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => reregisterWebhook(acc.accountId)}
+                    disabled={reregisteringWebhook === acc.accountId}
+                    title="Переподключить вебхук для получения входящих сообщений"
+                  >
+                    {reregisteringWebhook === acc.accountId
+                      ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Подключение...</>
+                      : "Обновить вебхук"
+                    }
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setDeleteConfirmId(acc.accountId)}
+                    disabled={deletingAccount === acc.accountId}
+                    title="Удалить аккаунт"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
               <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50">
                 <div>
@@ -2185,16 +2221,29 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
                   <p className="text-xs text-muted-foreground">Требуется авторизация через MAX</p>
                 </div>
               </div>
-              <Button
-                size="sm"
-                onClick={() => openQrDialog(acc.accountId)}
-                disabled={checkingStatus === acc.accountId}
-              >
-                {checkingStatus === acc.accountId
-                  ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Проверка...</>
-                  : "Подключить"
-                }
-              </Button>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  size="sm"
+                  onClick={() => openQrDialog(acc.accountId)}
+                  disabled={checkingStatus === acc.accountId}
+                >
+                  {checkingStatus === acc.accountId
+                    ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Проверка...</>
+                    : "Подключить"
+                  }
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setDeleteConfirmId(acc.accountId)}
+                  disabled={deletingAccount === acc.accountId}
+                  title="Удалить аккаунт"
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           ))}
           {allAccounts.length > 0 && gatewayAvailable && canAccess && !isTrial && allAccounts.length < 50 && (
@@ -2242,6 +2291,27 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить аккаунт MAX?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Инстанс будет отключён от платформы и удалён. Это действие нельзя отменить.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!deletingAccount}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteConfirmId && deleteAccount(deleteConfirmId)}
+              disabled={!!deletingAccount}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingAccount ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Удаление...</> : "Удалить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -4224,7 +4294,7 @@ function AIAgentSettingsCard() {
 // Вкладка «Приём заявок»
 // ─────────────────────────────────────────────────────────────────────────────
 
-const APP_URL = "https://aimessagehelper.online";
+const APP_URL = window.location.origin;
 
 function WebhookUrlCard({
   title,

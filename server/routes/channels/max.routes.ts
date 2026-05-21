@@ -226,6 +226,49 @@ router.patch("/api/channels/max-personal/:accountId/auto-reply", requireAuth, as
   }
 });
 
+// DELETE /api/channels/max-personal/:accountId — delete an instance (tenant self-service)
+router.delete("/api/channels/max-personal/:accountId", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = req.userId ? await storage.getUser(req.userId) : undefined;
+    const tenantId = user?.tenantId;
+    if (!tenantId) return res.status(404).json({ error: "Tenant not found" });
+
+    const { db } = await import("../../db");
+    const { maxPersonalAccounts } = await import("@shared/schema");
+    const { and, eq } = await import("drizzle-orm");
+
+    const account = await db.query.maxPersonalAccounts.findFirst({
+      where: and(
+        eq(maxPersonalAccounts.tenantId, tenantId),
+        eq(maxPersonalAccounts.accountId, req.params.accountId),
+      ),
+    });
+    if (!account) return res.status(404).json({ error: "Account not found" });
+
+    // For gateway instances — remove from the gateway first (best-effort)
+    if (isGatewayAccount(account as any)) {
+      try {
+        const { maxGatewayClient } = await import("../../services/max-gateway-client");
+        await maxGatewayClient.deleteInstance(account.idInstance);
+      } catch (err: any) {
+        console.warn(`[Routes] Gateway deleteInstance failed (continuing): ${err.message}`);
+      }
+    }
+
+    await db.delete(maxPersonalAccounts)
+      .where(and(
+        eq(maxPersonalAccounts.tenantId, tenantId),
+        eq(maxPersonalAccounts.accountId, account.accountId),
+      ));
+
+    console.log(`[Routes] MAX account ${account.accountId} (${account.idInstance}) deleted by tenant ${tenantId}`);
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("[Routes] deleteAccount error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/channels/max-personal/gateway-available — check if self-service creation is possible
 router.get("/api/channels/max-personal/gateway-available", requireAuth, async (_req: Request, res: Response) => {
   try {
