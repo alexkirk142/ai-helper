@@ -85,21 +85,27 @@ function buildAttachment(
   const type: ParsedAttachment["type"] = typeMap[msgData.typeMessage] ?? "document";
 
   let url = fileData.downloadUrl;
-  if (provider === "max_gateway" && type === "image") {
-    if (fileData.jpegThumbnail) {
-      // Use base64 thumbnail directly — no auth required, instant display
-      url = fileData.jpegThumbnail;
-    } else if (accountId && url) {
-      // Fallback: proxy through our server
+  let thumbnail: string | undefined;
+
+  if (provider === "max_gateway" && type === "image" && accountId) {
+    // Full photo: proxy through our server (downloadUrl needs admin auth)
+    if (url) {
       url = `/api/channels/max-personal/${accountId}/media/photo?url=${encodeURIComponent(url)}`;
+    }
+    // Quick preview: base64 thumbnail for instant display in chat
+    if (fileData.jpegThumbnail) {
+      thumbnail = fileData.jpegThumbnail;
     }
   }
 
   return {
     type,
     url,
+    thumbnail,
     mimeType: fileData.mimeType,
     fileName: fileData.fileName,
+    width: fileData.width,
+    height: fileData.height,
   };
 }
 
