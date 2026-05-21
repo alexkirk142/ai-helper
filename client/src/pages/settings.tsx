@@ -1885,6 +1885,7 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
   const [reregisteringWebhook, setReregisteringWebhook] = useState<string | null>(null);
   const [togglingAutoReply, setTogglingAutoReply] = useState<string | null>(null);
   const [creatingAccount, setCreatingAccount] = useState(false);
+  const isCreatingRef = useRef(false);
   const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastQrFetchRef = useRef<number>(0);
 
@@ -2011,6 +2012,8 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
   };
 
   const createAccount = async () => {
+    if (isCreatingRef.current) return;
+    isCreatingRef.current = true;
     setCreatingAccount(true);
     try {
       const res = await apiRequest("POST", "/api/channels/max-personal/create", {});
@@ -2021,6 +2024,7 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
     } catch (err: any) {
       toast({ title: "Ошибка", description: err.message || "Не удалось создать аккаунт", variant: "destructive" });
     } finally {
+      isCreatingRef.current = false;
       setCreatingAccount(false);
     }
   };
