@@ -39,6 +39,8 @@ interface GreenApiFileData {
   jpegThumbnail?: string; // data:image/...;base64,... preview (gateway extension)
   width?: number;
   height?: number;
+  duration?: number;       // audio/video duration in seconds (gateway extension)
+  waveformData?: string;   // data:image/webp;base64,... waveform preview (gateway extension)
 }
 
 interface GreenApiMessageData {
@@ -116,6 +118,8 @@ function buildAttachment(
     fileName: fileData.fileName,
     width: fileData.width,
     height: fileData.height,
+    duration: fileData.duration,
+    waveformData: fileData.waveformData,
   };
 }
 

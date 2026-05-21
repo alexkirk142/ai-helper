@@ -19,6 +19,7 @@ export interface ParsedAttachment {
   fileName?: string;
   fileSize?: number;
   duration?: number;
+  waveformData?: string;
   width?: number;
   height?: number;
   thumbnail?: string;

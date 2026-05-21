@@ -31,6 +31,8 @@ import {
   Bell,
   ClipboardList,
   Trash2,
+  Play,
+  Pause,
 } from "lucide-react";
 import { CsatDialog } from "@/components/csat-dialog";
 import { cn } from "@/lib/utils";
@@ -171,6 +173,7 @@ interface MessageAttachment {
   fileName?: string;
   fileSize?: number;
   duration?: number;
+  waveformData?: string;
   width?: number;
   height?: number;
   thumbnail?: string;
@@ -247,25 +250,19 @@ function AttachmentRenderer({
 
         if (att.type === "voice" || att.type === "audio") {
           const label = att.type === "voice" ? "🎙 Голосовое" : "🎵 Аудио";
-          const subtitle = [
-            att.fileName,
-            att.duration ? `${att.duration}с` : undefined,
-            formatFileSize(att.fileSize),
-          ]
-            .filter(Boolean)
-            .join(" · ");
           return att.url ? (
             <div key={i} className="space-y-1">
-              <div className="text-xs opacity-70">
-                {label}
-                {subtitle && <span className="ml-1 opacity-60">{subtitle}</span>}
-              </div>
-              <audio controls src={att.url} className="h-9 w-full max-w-[240px]" preload="none" />
+              <div className="text-xs opacity-70">{label}</div>
+              <VoicePlayer
+                url={att.url}
+                duration={att.duration}
+                waveformData={att.waveformData}
+              />
             </div>
           ) : (
             <div key={i} className="text-xs opacity-60">
               {label}
-              {subtitle && <span className="ml-1 opacity-60">{subtitle}</span>}
+              {att.duration && <span className="ml-1 opacity-60">{att.duration}с</span>}
             </div>
           );
         }
@@ -359,6 +356,116 @@ function AttachmentRenderer({
 
         return null;
       })}
+    </div>
+  );
+}
+
+// ── VoicePlayer ───────────────────────────────────────────────────────────────
+// Custom audio player for voice/audio messages.
+// Shows known duration immediately, supports seeking, optionally shows waveform.
+function VoicePlayer({
+  url,
+  duration: knownDuration,
+  waveformData,
+}: {
+  url: string;
+  duration?: number;
+  waveformData?: string;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [totalDuration, setTotalDuration] = useState(knownDuration ?? 0);
+
+  const fmt = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, "0")}`;
+  };
+
+  const toggle = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing) {
+      audio.pause();
+    } else {
+      audio.play().catch(() => {});
+    }
+  };
+
+  const seek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const audio = audioRef.current;
+    if (!audio || !totalDuration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    audio.currentTime = pct * totalDuration;
+    setCurrentTime(audio.currentTime);
+  };
+
+  const progress = totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0;
+
+  return (
+    <div className="flex items-center gap-2 bg-muted/40 rounded-2xl px-3 py-2 max-w-[260px]">
+      <button
+        type="button"
+        onClick={toggle}
+        className="shrink-0 w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground hover:opacity-90 transition-opacity"
+      >
+        {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 ml-0.5" />}
+      </button>
+
+      <div className="flex-1 min-w-0 space-y-1">
+        {/* Progress / waveform track */}
+        <div
+          className="h-8 relative rounded overflow-hidden cursor-pointer"
+          onClick={seek}
+        >
+          {waveformData ? (
+            <>
+              <img
+                src={waveformData}
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover opacity-50"
+                draggable={false}
+              />
+              {/* Played portion overlay */}
+              <div
+                className="absolute inset-0 bg-primary/40 origin-left"
+                style={{ clipPath: `inset(0 ${100 - progress}% 0 0)` }}
+              />
+            </>
+          ) : (
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full h-1.5 bg-muted-foreground/20 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-none"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Timestamps */}
+        <div className="flex justify-between text-xs text-muted-foreground leading-none">
+          <span>{fmt(currentTime)}</span>
+          <span>{fmt(totalDuration)}</span>
+        </div>
+      </div>
+
+      <audio
+        ref={audioRef}
+        src={url}
+        preload="none"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setCurrentTime(0); }}
+        onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime ?? 0)}
+        onLoadedMetadata={() => {
+          const dur = audioRef.current?.duration;
+          if (dur && isFinite(dur)) setTotalDuration(dur);
+        }}
+      />
     </div>
   );
 }
