@@ -389,4 +389,46 @@ router.post("/api/max-personal/start-conversation", requireAuth, requireTenant, 
   }
 });
 
+// ── Media proxy for gateway instances ────────────────────────────────────────
+// Proxies MAX CDN images/files through the gateway so the browser can load them.
+// Usage: GET /api/channels/max-personal/:accountId/media/photo?url=<i.oneme.ru url>
+router.get("/api/channels/max-personal/:accountId/media/photo", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { url: mediaUrl } = req.query as { url?: string };
+    if (!mediaUrl) return res.status(400).json({ error: "url is required" });
+
+    const { db } = await import("../../db");
+    const { maxPersonalAccounts } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const account = await db.query.maxPersonalAccounts.findFirst({
+      where: eq(maxPersonalAccounts.accountId, req.params.accountId),
+    });
+    if (!account) return res.status(404).json({ error: "Account not found" });
+
+    const { maxGatewayClient } = await import("../../services/max-gateway-client");
+    const gatewayUrl = (await import("../../services/secret-resolver")).getSecret
+      ? (await (await import("../../services/secret-resolver")).getSecret({ scope: "global", keyName: "MAX_GATEWAY_URL" })) ?? ""
+      : "";
+    const adminKey = (await (await import("../../services/secret-resolver")).getSecret({ scope: "global", keyName: "MAX_GATEWAY_ADMIN_KEY" })) ?? "";
+
+    const baseUrl = gatewayUrl.replace(/\/$/, "");
+    const proxyUrl = `${baseUrl}/instances/${account.idInstance}/download/photo?baseUrl=${encodeURIComponent(mediaUrl)}`;
+
+    const upstream = await fetch(proxyUrl, {
+      headers: { Authorization: `Bearer ${adminKey}` },
+    });
+
+    if (!upstream.ok) return res.status(upstream.status).end();
+
+    const contentType = upstream.headers.get("content-type") || "image/jpeg";
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    return res.send(buf);
+  } catch (err: any) {
+    console.error("[MaxPersonal] media proxy error:", err.message);
+    res.status(500).end();
+  }
+});
+
 export default router;

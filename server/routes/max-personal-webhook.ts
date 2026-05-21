@@ -62,7 +62,11 @@ interface GreenApiWebhook {
   messageData?: GreenApiMessageData;
 }
 
-function buildAttachment(msgData: GreenApiMessageData): ParsedAttachment | null {
+function buildAttachment(
+  msgData: GreenApiMessageData,
+  accountId?: string,
+  provider?: string
+): ParsedAttachment | null {
   const fileData = msgData.fileMessageData;
   if (!fileData) return null;
 
@@ -77,9 +81,15 @@ function buildAttachment(msgData: GreenApiMessageData): ParsedAttachment | null 
 
   const type: ParsedAttachment["type"] = typeMap[msgData.typeMessage] ?? "document";
 
+  let url = fileData.downloadUrl;
+  // For gateway instances, proxy MAX CDN photo URLs through our server so the browser can load them
+  if (provider === "max_gateway" && accountId && type === "image" && url) {
+    url = `/api/channels/max-personal/${accountId}/media/photo?url=${encodeURIComponent(url)}`;
+  }
+
   return {
     type,
-    url: fileData.downloadUrl,
+    url,
     mimeType: fileData.mimeType,
     fileName: fileData.fileName,
   };
@@ -204,6 +214,11 @@ router.post("/:tenantId/:accountId", async (req, res) => {
     const sender = payload.senderData;
     const msgData = payload.messageData;
 
+    // Debug: log full payload for media messages to inspect downloadUrl format
+    if (msgData?.typeMessage && !["textMessage", "extendedTextMessage"].includes(msgData.typeMessage)) {
+      console.log(`[MaxPersonalWebhook] Media payload (${msgData.typeMessage}):`, JSON.stringify(msgData));
+    }
+
     if (!sender?.chatId || !msgData) {
       return res.json({ ok: true });
     }
@@ -225,7 +240,7 @@ router.post("/:tenantId/:accountId", async (req, res) => {
       // GREEN-API sends messages with URLs/emails/links as extendedTextMessage
       text = msgData.extendedTextMessageData.text || "";
     } else {
-      const att = buildAttachment(msgData);
+      const att = buildAttachment(msgData, account.accountId, (account as any).provider);
       if (att) {
         attachments.push(att);
         if (msgData.fileMessageData?.caption) {
