@@ -6,6 +6,7 @@ import { maxPersonalAccounts, customers } from "../../shared/schema";
 import { getRedisConnectionConfig } from "../services/message-queue";
 import type { MarquizLeadJobData } from "../services/marquiz-lead-queue";
 import { MaxPersonalAdapter } from "../services/max-personal-adapter";
+import { maxGatewayClient } from "../services/max-gateway-client";
 import { maxStatusKey } from "../routes/max-personal-webhook";
 import { telegramClientManager } from "../services/telegram-client-manager";
 import { WhatsAppPersonalAdapter } from "../services/whatsapp-personal-adapter";
@@ -503,8 +504,34 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     const account = await getNextAccount(redis, tenantId);
     if (!account) return { success: false, error: "No authorised MAX account" };
 
-    const chatId = toMaxChatId(data.maxPhone);
     console.log(`[MarquizWorker] Trying MAX account: ${account.label ?? account.accountId}`);
+
+    // ── Gateway: pre-check phone registration before touching the DB ─────────
+    // check-phone is fast and synchronous — if the number isn't in MAX we fail
+    // immediately, before creating a customer/conversation, eliminating the need
+    // for the async 4-second noAccount wait used with GREEN-API.
+    const isGateway = (account as any).provider === "max_gateway" || account.idInstance.startsWith("mpa-");
+    let chatId: string;
+
+    if (isGateway) {
+      const phoneDigits = normalizePhone(data.maxPhone);
+      let checkResult: { registered: boolean; userId?: number; name?: string };
+      try {
+        checkResult = await maxGatewayClient.checkPhone(account.idInstance, phoneDigits);
+      } catch (err: any) {
+        console.warn(`[MarquizWorker] checkPhone failed for ${phoneDigits}: ${err.message}`);
+        return { success: false, error: "noAccount" };
+      }
+      if (!checkResult.registered) {
+        console.log(`[MarquizWorker] Phone ${phoneDigits} not registered in MAX — skipping`);
+        return { success: false, error: "noAccount" };
+      }
+      // Use numeric MAX userId as chatId — matches the format used in incoming webhooks,
+      // so replies from the customer will be routed to this conversation correctly.
+      chatId = String(checkResult.userId);
+    } else {
+      chatId = toMaxChatId(data.maxPhone);
+    }
 
     let customer = await storage.getCustomerByExternalId(tenantId, "max_personal", chatId);
     if (!customer) {
@@ -538,14 +565,13 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
       tenantId,
     );
 
-    // ── Async noAccount detection via webhook signal ──────────────────────────
-    // GREEN-API doesn't return "noAccount" synchronously — it comes back as an
-    // outgoingMessageStatus webhook a couple of seconds after the send.
-    // We mark this message as "pending" in Redis, then wait a few seconds for
-    // the webhook handler to overwrite it with "noAccount" if needed.
+    // ── Async noAccount detection via webhook signal (GREEN-API only) ─────────
+    // Gateway accounts do synchronous check-phone above, so the 4-second wait
+    // is only needed for GREEN-API accounts that return 200 OK even when the
+    // number isn't registered and signal noAccount via a subsequent webhook.
     let noAccountDetected = false;
 
-    if (msgId) {
+    if (!isGateway && msgId) {
       const statusKey = maxStatusKey(msgId);
       await redis.set(statusKey, "pending", "EX", 30).catch(() => {});
       console.log(`[MarquizWorker] MAX message sent (id=${msgId}), waiting 4s for noAccount signal…`);

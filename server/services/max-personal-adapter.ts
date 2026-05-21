@@ -9,7 +9,7 @@
 import type { ChannelAdapter, ParsedIncomingMessage, ChannelSendResult } from "./channel-adapter.types";
 import type { ChannelType } from "@shared/schema";
 import { maxGreenApiAdapter } from "./max-green-api-adapter";
-import { maxGatewayClient } from "./max-gateway-client";
+import { maxGatewayClient, GatewayPhoneNotRegisteredError } from "./max-gateway-client";
 import { db } from "../db";
 import { maxPersonalAccounts } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
@@ -182,6 +182,9 @@ export class MaxPersonalAdapter implements ChannelAdapter {
       );
       return { success: true, externalMessageId: result.idMessage, timestamp: new Date() };
     } catch (error: any) {
+      if (error instanceof GatewayPhoneNotRegisteredError) {
+        return { success: false, error: "noAccount" };
+      }
       console.error("[MaxPersonal] sendMessageForTenant error:", error.message);
       return { success: false, error: error.message };
     }
@@ -247,6 +250,9 @@ export class MaxPersonalAdapter implements ChannelAdapter {
       );
       return { success: true, externalMessageId: result.idMessage, timestamp: new Date() };
     } catch (error: any) {
+      if (error instanceof GatewayPhoneNotRegisteredError) {
+        return { success: false, error: "noAccount" };
+      }
       console.error("[MaxPersonal] sendFileMessageForTenant error:", error.message);
       return { success: false, error: error.message };
     }

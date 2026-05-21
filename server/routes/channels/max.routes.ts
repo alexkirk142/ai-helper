@@ -361,8 +361,6 @@ router.post("/api/max-personal/start-conversation", requireAuth, requireTenant, 
       return res.status(400).json({ error: "Invalid phone number format" });
     }
 
-    const chatId = `${cleanDigits}@c.us`;
-
     const { db: dbInst } = await import("../../db");
     const { maxPersonalAccounts: mpTable } = await import("@shared/schema");
     const { eq: eqOp, and: andOp } = await import("drizzle-orm");
@@ -381,6 +379,22 @@ router.post("/api/max-personal/start-conversation", requireAuth, requireTenant, 
 
     if (!account) {
       return res.status(400).json({ error: "No active MAX Personal account connected" });
+    }
+
+    // For gateway accounts: verify the number is registered in MAX before creating anything.
+    // Use the userId returned by check-phone as chatId — it matches the numeric format
+    // used in incoming webhooks, avoiding the @c.us vs. short-id mismatch.
+    let chatId: string;
+    const isGatewayAccount = (account as any).provider === "max_gateway" || account.idInstance.startsWith("mpa-");
+    if (isGatewayAccount) {
+      const { maxGatewayClient: mgc } = await import("../../services/max-gateway-client");
+      const checkResult = await mgc.checkPhone(account.idInstance, cleanDigits);
+      if (!checkResult.registered) {
+        return res.status(422).json({ error: "Этот номер не зарегистрирован в MAX" });
+      }
+      chatId = String(checkResult.userId);
+    } else {
+      chatId = `${cleanDigits}@c.us`;
     }
 
     let customer = await storage.getCustomerByExternalId(tenantId, "max_personal", chatId);

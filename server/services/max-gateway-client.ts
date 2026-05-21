@@ -2,6 +2,14 @@
 // Ключи читаются из зашифрованного хранилища secrets (не process.env).
 import { getSecret } from "./secret-resolver";
 
+/** Thrown when the gateway responds 404 with code=PHONE_NOT_REGISTERED */
+export class GatewayPhoneNotRegisteredError extends Error {
+  constructor(phone: string) {
+    super(`Phone number ${phone} is not registered in MAX`);
+    this.name = "GatewayPhoneNotRegisteredError";
+  }
+}
+
 export interface GatewayStats {
   totals: {
     instances: number;
@@ -101,6 +109,16 @@ export class MaxGatewayClient {
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
+      // 404 with PHONE_NOT_REGISTERED is a known business error, not a crash
+      if (res.status === 404) {
+        let parsed: Record<string, unknown> = {};
+        try { parsed = JSON.parse(errBody); } catch { /* ignore */ }
+        if (parsed.code === "PHONE_NOT_REGISTERED") {
+          // Extract the phone from the path query string if present
+          const phoneMatch = path.match(/[?&]phone=([^&]+)/);
+          throw new GatewayPhoneNotRegisteredError(phoneMatch ? decodeURIComponent(phoneMatch[1]) : "unknown");
+        }
+      }
       throw new Error(
         `MAX Gateway ${method} ${path} failed: ${res.status} ${res.statusText}${errBody ? ` | ${errBody}` : ""}`
       );
@@ -157,6 +175,22 @@ export class MaxGatewayClient {
       displayName?: string;
       phone?: string;
     }>("GET", `/instances/${instanceId}`);
+  }
+
+  /**
+   * Check whether a phone number is registered in MAX.
+   * Returns the MAX userId (usable as chatId) and display name when found.
+   * Pass digits-only phone, e.g. "79991234567".
+   */
+  async checkPhone(
+    instanceId: string,
+    phone: string,
+  ): Promise<{ registered: true; userId: number; name: string } | { registered: false }> {
+    const digits = phone.replace(/\D/g, "");
+    return this.request<{ registered: true; userId: number; name: string } | { registered: false }>(
+      "GET",
+      `/instances/${instanceId}/check-phone?phone=${encodeURIComponent(digits)}`,
+    );
   }
 
   async setWebhook(instanceId: string, url: string): Promise<void> {
