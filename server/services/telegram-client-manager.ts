@@ -1815,7 +1815,14 @@ class TelegramClientManager {
         return Math.floor(hoursAgo);
       }
 
-      // Fuzzy statuses — exact time unavailable
+      // Fuzzy statuses — exact time unavailable, use conservative estimates
+      // UserStatusRecently = был онлайн в последние ~3 дня → 48h (отправляем)
+      // UserStatusLastWeek = был онлайн на прошлой неделе → 168h (блокируем)
+      // UserStatusLastMonth = был онлайн в прошлом месяце → 720h (блокируем)
+      if (status instanceof Api.UserStatusRecently) return 48;
+      if (status instanceof Api.UserStatusLastWeek) return 168;
+      if (status instanceof Api.UserStatusLastMonth) return 720;
+      // Полностью скрытый статус — невозможно определить
       return null;
     } catch (err: any) {
       console.warn(`[TelegramClientManager] getUserLastSeenHours failed for ${cleanPhone}: ${err.message}`);
@@ -1849,6 +1856,11 @@ class TelegramClientManager {
         return Math.floor(hoursAgo);
       }
 
+      // Fuzzy statuses — exact time unavailable, use conservative estimates
+      if (status instanceof Api.UserStatusRecently) return 48;
+      if (status instanceof Api.UserStatusLastWeek) return 168;
+      if (status instanceof Api.UserStatusLastMonth) return 720;
+      // Полностью скрытый статус — невозможно определить
       return null;
     } catch (err: any) {
       console.warn(`[TelegramClientManager] getUserLastSeenHoursByUsername failed for ${cleanUsername}: ${err.message}`);
