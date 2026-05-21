@@ -113,7 +113,12 @@ async function processDelayedMessage(job: Job<DelayedMessageJobData>): Promise<v
     }
     const chatId = conversation.customer.externalId;
     const msgs = conversation.messages ?? [];
+    // Use accountId from the last customer (inbound) message so replies always go
+    // through the same instance the customer last wrote from.
+    const customerMsgs = msgs.filter((m: any) => m.role === "customer");
+    const lastCustomerMsg = customerMsgs[customerMsgs.length - 1];
     const effectiveAccountId: string | undefined =
+      ((lastCustomerMsg?.metadata as any)?.accountId as string | undefined) ??
       (msgs.find((m: any) => (m.metadata as any)?.accountId)?.metadata as any)?.accountId;
 
     const result = await maxPersonalAdapter.sendMessageForTenant(tenantId, chatId, text, undefined, effectiveAccountId);
