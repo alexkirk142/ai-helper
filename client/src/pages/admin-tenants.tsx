@@ -67,7 +67,7 @@ interface TemplateSettings {
   templateTiresEnabled: boolean;
 }
 
-const APP_URL = "https://aimessagehelper.online";
+const APP_URL = window.location.origin;
 
 function CopyWebhookUrl({ tenantId }: { tenantId: string }) {
   const [copied, setCopied] = useState(false);
