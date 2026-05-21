@@ -392,13 +392,21 @@ router.post("/api/max-personal/start-conversation", requireAuth, requireTenant, 
 // ── Media proxy for gateway instances ────────────────────────────────────────
 // Proxies MAX CDN images through the gateway so the browser can load them.
 // Usage: GET /api/channels/max-personal/:accountId/media/photo?url=<cdn url (i.oneme.ru)>
-// The `url` param must be the raw CDN URL, NOT the full gateway download URL.
-// buildAttachment extracts the CDN URL from the gateway's ?baseUrl= param before
-// storing it, so even if the gateway domain changes, the stored messages still work.
+// Handles both new format (raw CDN url) and legacy format (full gateway download URL
+// with ?baseUrl= param) so old stored messages continue to work after a domain change.
 router.get("/api/channels/max-personal/:accountId/media/photo", requireAuth, async (req: Request, res: Response) => {
   try {
-    const { url: mediaUrl } = req.query as { url?: string };
-    if (!mediaUrl) return res.status(400).json({ error: "url is required" });
+    const { url: rawUrl } = req.query as { url?: string };
+    if (!rawUrl) return res.status(400).json({ error: "url is required" });
+
+    // Legacy: stored url may be a full gateway download URL with ?baseUrl=<cdnUrl>.
+    // Extract the actual CDN url so the proxy always uses the currently configured gateway.
+    let mediaUrl = rawUrl;
+    try {
+      const parsed = new URL(rawUrl);
+      const extracted = parsed.searchParams.get("baseUrl");
+      if (extracted) mediaUrl = extracted;
+    } catch { /* rawUrl is not a full URL — use as-is */ }
 
     const { db } = await import("../../db");
     const { maxPersonalAccounts } = await import("@shared/schema");
@@ -408,11 +416,9 @@ router.get("/api/channels/max-personal/:accountId/media/photo", requireAuth, asy
     });
     if (!account) return res.status(404).json({ error: "Account not found" });
 
-    const { maxGatewayClient } = await import("../../services/max-gateway-client");
-    const gatewayUrl = (await import("../../services/secret-resolver")).getSecret
-      ? (await (await import("../../services/secret-resolver")).getSecret({ scope: "global", keyName: "MAX_GATEWAY_URL" })) ?? ""
-      : "";
-    const adminKey = (await (await import("../../services/secret-resolver")).getSecret({ scope: "global", keyName: "MAX_GATEWAY_ADMIN_KEY" })) ?? "";
+    const { getSecret } = await import("../../services/secret-resolver");
+    const gatewayUrl = (await getSecret({ scope: "global", keyName: "MAX_GATEWAY_URL" })) ?? "";
+    const adminKey = (await getSecret({ scope: "global", keyName: "MAX_GATEWAY_ADMIN_KEY" })) ?? "";
 
     const baseUrl = gatewayUrl.replace(/\/$/, "");
     const proxyUrl = `${baseUrl}/instances/${account.idInstance}/download/photo?baseUrl=${encodeURIComponent(mediaUrl)}`;
