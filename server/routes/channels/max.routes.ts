@@ -224,7 +224,7 @@ router.post("/api/channels/max-personal/create", requireAuth, async (req: Reques
     const appUrl = getAppUrl();
     const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
 
-    let apiToken: string;
+    let apiToken: string | null = null;
     try {
       const result = await maxGatewayClient.createInstance(instanceId, tenantId, webhookUrl);
       apiToken = result.apiToken;
@@ -237,7 +237,7 @@ router.post("/api/channels/max-personal/create", requireAuth, async (req: Reques
       tenantId,
       accountId,
       idInstance: instanceId,
-      apiTokenInstance: apiToken,
+      apiTokenInstance: apiToken ?? "",
       apiUrl: gatewayUrl,
       mediaUrl: gatewayUrl,
       label: label ?? null,

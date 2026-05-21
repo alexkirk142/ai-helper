@@ -2714,7 +2714,7 @@ router.post(
         const appUrl = getAppUrl();
         const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
 
-        let apiToken: string;
+        let apiToken: string | null = null;
         try {
           const result = await maxGatewayClient.createInstance(instanceId, String(tenantId), webhookUrl);
           apiToken = result.apiToken;
@@ -2726,7 +2726,7 @@ router.post(
           tenantId,
           accountId,
           idInstance: instanceId,
-          apiTokenInstance: apiToken,
+          apiTokenInstance: apiToken ?? "",
           apiUrl: gatewayUrl,
           mediaUrl: gatewayUrl,
           label: parsed.data.label ?? null,

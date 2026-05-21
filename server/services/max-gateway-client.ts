@@ -115,16 +115,26 @@ export class MaxGatewayClient {
     instanceId: string,
     tenantId: string,
     webhookUrl: string
-  ): Promise<{ apiToken: string }> {
+  ): Promise<{ apiToken: string | null }> {
     const data = await this.request<{
       ok: boolean;
       status: { instanceId: string; connected: boolean; authenticated: boolean; awaitingQr: boolean; apiToken?: string };
     }>("POST", "/instances", { instanceId, tenantId, webhookUrl });
 
-    if (!data.status.apiToken) {
-      throw new Error(`MAX Gateway createInstance: apiToken missing in response for ${instanceId}`);
+    // apiToken may be absent in POST response — fall back to GET /instances/:id
+    if (data.status.apiToken) {
+      return { apiToken: data.status.apiToken };
     }
-    return { apiToken: data.status.apiToken };
+
+    const status = await this.request<{
+      instanceId: string;
+      connected: boolean;
+      authenticated: boolean;
+      awaitingQr: boolean;
+      apiToken?: string;
+    }>("GET", `/instances/${instanceId}`);
+
+    return { apiToken: status.apiToken ?? null };
   }
 
   async deleteInstance(instanceId: string): Promise<void> {
