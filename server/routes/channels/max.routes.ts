@@ -103,22 +103,35 @@ router.get("/api/channels/max-personal/:accountId/status", requireAuth, async (r
       const instanceStatus = await maxGatewayClient.getInstanceStatus(account.idInstance);
       state = instanceStatus.authenticated ? "authorized" : "notAuthorized";
 
-      if (instanceStatus.authenticated && account.status !== "authorized") {
-        const displayName = instanceStatus.displayName ?? instanceStatus.phone ?? undefined;
+      if (instanceStatus.authenticated) {
+        // Prefer phone number as display name so the badge shows "+79..." instead of instance ID
+        const freshDisplayName = instanceStatus.phone ?? instanceStatus.displayName ?? undefined;
 
-        let webhookRegistered = false;
-        try {
-          const appUrl = getAppUrl();
-          const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${account.accountId}`;
-          await maxGatewayClient.setWebhook(account.idInstance, webhookUrl);
-          webhookRegistered = true;
-        } catch (err: any) {
-          console.error("[Routes] Gateway setWebhook failed:", err.message);
+        const updates: Record<string, unknown> = { updatedAt: new Date() };
+
+        if (account.status !== "authorized") {
+          updates.status = "authorized";
+          // Register webhook on first authorization
+          try {
+            const appUrl = getAppUrl();
+            const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${account.accountId}`;
+            await maxGatewayClient.setWebhook(account.idInstance, webhookUrl);
+            updates.webhookRegistered = true;
+          } catch (err: any) {
+            console.error("[Routes] Gateway setWebhook failed:", err.message);
+          }
         }
 
-        await db.update(maxPersonalAccounts)
-          .set({ status: "authorized", webhookRegistered, displayName: displayName ?? account.displayName, updatedAt: new Date() })
-          .where(and(eq(maxPersonalAccounts.tenantId, tenantId), eq(maxPersonalAccounts.accountId, account.accountId)));
+        // Always persist phone/displayName if we got a fresher value from the gateway
+        if (freshDisplayName && freshDisplayName !== account.displayName) {
+          updates.displayName = freshDisplayName;
+        }
+
+        if (Object.keys(updates).length > 1) { // more than just updatedAt
+          await db.update(maxPersonalAccounts)
+            .set(updates)
+            .where(and(eq(maxPersonalAccounts.tenantId, tenantId), eq(maxPersonalAccounts.accountId, account.accountId)));
+        }
       }
     } else {
       const { maxGreenApiAdapter } = await import("../../services/max-green-api-adapter");
