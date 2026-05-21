@@ -2013,16 +2013,7 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
   const createAccount = async () => {
     setCreatingAccount(true);
     try {
-      const res = await fetch("/api/channels/max-personal/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({}),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as any).error || "Не удалось создать аккаунт");
-      }
+      const res = await apiRequest("POST", "/api/channels/max-personal/create", {});
       const data = await res.json() as { accountId: string };
       toast({ title: "Инстанс создан", description: "Отсканируйте QR-код для авторизации" });
       await refetchAccounts();
