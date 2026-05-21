@@ -491,4 +491,49 @@ router.get("/api/channels/max-personal/:accountId/media/photo", requireAuth, asy
   }
 });
 
+// ── Generic media proxy (audio, video, document) ─────────────────────────────
+// Proxies any gateway media URL through the server so the browser can load it.
+// Supports Range requests so audio/video seeking works in the browser.
+// Usage: GET /api/channels/max-personal/:accountId/media/file?url=<gateway url>
+router.get("/api/channels/max-personal/:accountId/media/file", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { url: rawUrl } = req.query as { url?: string };
+    if (!rawUrl) return res.status(400).json({ error: "url is required" });
+
+    const { getSecret } = await import("../../services/secret-resolver");
+    const adminKey = (await getSecret({ scope: "global", keyName: "MAX_GATEWAY_ADMIN_KEY" })) ?? "";
+
+    const headers: Record<string, string> = { Authorization: `Bearer ${adminKey}` };
+    // Forward Range header so the browser can seek inside audio/video
+    if (req.headers.range) {
+      headers["Range"] = req.headers.range;
+    }
+
+    const upstream = await fetch(rawUrl, { headers });
+
+    if (!upstream.ok && upstream.status !== 206) {
+      return res.status(upstream.status).end();
+    }
+
+    const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+    const contentLength = upstream.headers.get("content-length");
+    const contentRange = upstream.headers.get("content-range");
+    const acceptRanges = upstream.headers.get("accept-ranges");
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    if (contentLength) res.setHeader("Content-Length", contentLength);
+    if (contentRange) res.setHeader("Content-Range", contentRange);
+    if (acceptRanges) res.setHeader("Accept-Ranges", acceptRanges);
+    else res.setHeader("Accept-Ranges", "bytes");
+
+    res.status(upstream.status);
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    return res.send(buf);
+  } catch (err: any) {
+    console.error("[MaxPersonal] media/file proxy error:", err.message);
+    res.status(500).end();
+  }
+});
+
 export default router;

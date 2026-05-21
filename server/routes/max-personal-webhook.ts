@@ -87,11 +87,10 @@ function buildAttachment(
   let url = fileData.downloadUrl;
   let thumbnail: string | undefined;
 
-  if (provider === "max_gateway" && type === "image" && accountId) {
-    // Full photo: proxy through our server (downloadUrl needs admin auth).
-    // The gateway embeds the CDN URL as ?baseUrl=... — extract it so the proxy
-    // always uses our currently configured MAX_GATEWAY_URL, not the old domain.
-    if (url) {
+  if (provider === "max_gateway" && accountId && url) {
+    if (type === "image") {
+      // Photo: gateway embeds the CDN URL as ?baseUrl=... — extract it so the proxy
+      // always uses our currently configured MAX_GATEWAY_URL, not the old domain.
       try {
         const parsed = new URL(url);
         const cdnUrl = parsed.searchParams.get("baseUrl") ?? url;
@@ -99,10 +98,13 @@ function buildAttachment(
       } catch {
         url = `/api/channels/max-personal/${accountId}/media/photo?url=${encodeURIComponent(url)}`;
       }
-    }
-    // Quick preview: base64 thumbnail for instant display in chat
-    if (fileData.jpegThumbnail) {
-      thumbnail = fileData.jpegThumbnail;
+      if (fileData.jpegThumbnail) {
+        thumbnail = fileData.jpegThumbnail;
+      }
+    } else {
+      // Audio, voice, video, document — proxy through generic /media/file endpoint.
+      // The gateway URL requires admin auth; the browser can't add it directly.
+      url = `/api/channels/max-personal/${accountId}/media/file?url=${encodeURIComponent(url)}`;
     }
   }
 
