@@ -422,6 +422,7 @@ router.get("/api/channels/max-personal/:accountId/media/photo", requireAuth, asy
 
     const baseUrl = gatewayUrl.replace(/\/$/, "");
     const proxyUrl = `${baseUrl}/instances/${account.idInstance}/download/photo?baseUrl=${encodeURIComponent(mediaUrl)}`;
+    console.log("[MaxPersonal] media proxy fetching:", proxyUrl);
 
     const upstream = await fetch(proxyUrl, {
       headers: { Authorization: `Bearer ${adminKey}` },
@@ -435,7 +436,7 @@ router.get("/api/channels/max-personal/:accountId/media/photo", requireAuth, asy
     const buf = Buffer.from(await upstream.arrayBuffer());
     return res.send(buf);
   } catch (err: any) {
-    console.error("[MaxPersonal] media proxy error:", err.message);
+    console.error("[MaxPersonal] media proxy error:", err.message, err.cause ? String(err.cause) : "");
     res.status(500).end();
   }
 });
