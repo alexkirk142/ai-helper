@@ -2700,11 +2700,13 @@ router.post(
         return res.status(400).json({ error: `Максимум ${MAX_PERSONAL_ACCOUNTS_LIMIT} аккаунтов достигнут` });
       }
 
-      const gatewayConfigured = !!process.env.MAX_GATEWAY_URL && !!process.env.MAX_GATEWAY_ADMIN_KEY;
+      const { MaxGatewayClient, maxGatewayClient } = await import("../services/max-gateway-client");
+      const { getSecret: getSecretVal } = await import("../services/secret-resolver");
+      const gatewayConfigured = await MaxGatewayClient.isConfigured();
 
       if (gatewayConfigured) {
         // === MAX GATEWAY PATH ===
-        const { maxGatewayClient } = await import("../services/max-gateway-client");
+        const gatewayUrl = await getSecretVal({ scope: "global", keyName: "MAX_GATEWAY_URL" });
         const { randomUUID } = await import("crypto");
         const accountId = randomUUID();
         const instanceId = `mpa-${accountId.replace(/-/g, "").slice(0, 16)}`;
@@ -2725,8 +2727,8 @@ router.post(
           accountId,
           idInstance: instanceId,
           apiTokenInstance: apiToken,
-          apiUrl: process.env.MAX_GATEWAY_URL ?? null,
-          mediaUrl: process.env.MAX_GATEWAY_URL ?? null,
+          apiUrl: gatewayUrl,
+          mediaUrl: gatewayUrl,
           label: parsed.data.label ?? null,
           displayName: null,
           status: "unknown",
@@ -3062,11 +3064,15 @@ router.delete(
 // =====================
 
 // GET /max-gateway/config — check if gateway is configured
-router.get("/max-gateway/config", requireAuth, requirePlatformAdmin(), (req, res) => {
-  res.json({
-    configured: !!process.env.MAX_GATEWAY_URL && !!process.env.MAX_GATEWAY_ADMIN_KEY,
-    gatewayUrl: process.env.MAX_GATEWAY_URL || null,
-  });
+router.get("/max-gateway/config", requireAuth, requirePlatformAdmin(), async (req, res) => {
+  try {
+    const { getSecret: gs } = await import("../services/secret-resolver");
+    const gatewayUrl = await gs({ scope: "global", keyName: "MAX_GATEWAY_URL" });
+    const adminKey = await gs({ scope: "global", keyName: "MAX_GATEWAY_ADMIN_KEY" });
+    res.json({ configured: !!(gatewayUrl && adminKey), gatewayUrl: gatewayUrl || null });
+  } catch {
+    res.json({ configured: false, gatewayUrl: null });
+  }
 });
 
 // GET /max-gateway/stats — stats for all instances

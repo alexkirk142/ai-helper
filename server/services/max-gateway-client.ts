@@ -1,5 +1,6 @@
 // Клиент для MAX Gateway Admin API.
-// Конфигурируется через env: MAX_GATEWAY_URL + MAX_GATEWAY_ADMIN_KEY.
+// Ключи читаются из зашифрованного хранилища secrets (не process.env).
+import { getSecret } from "./secret-resolver";
 
 export interface GatewayStats {
   totals: {
@@ -56,20 +57,19 @@ function fetchWithTimeout(
 }
 
 export class MaxGatewayClient {
-  private get baseUrl(): string {
-    return (process.env.MAX_GATEWAY_URL ?? "").replace(/\/$/, "");
+  private async resolveBaseUrl(): Promise<string> {
+    const val = await getSecret({ scope: "global", keyName: "MAX_GATEWAY_URL" });
+    return (val ?? "").replace(/\/$/, "");
   }
 
-  private get adminKey(): string {
-    return process.env.MAX_GATEWAY_ADMIN_KEY ?? "";
+  private async resolveAdminKey(): Promise<string> {
+    return (await getSecret({ scope: "global", keyName: "MAX_GATEWAY_ADMIN_KEY" })) ?? "";
   }
 
-  private get authHeaders(): Record<string, string> {
-    return { Authorization: `Bearer ${this.adminKey}` };
-  }
-
-  static isConfigured(): boolean {
-    return !!(process.env.MAX_GATEWAY_URL && process.env.MAX_GATEWAY_ADMIN_KEY);
+  static async isConfigured(): Promise<boolean> {
+    const url = await getSecret({ scope: "global", keyName: "MAX_GATEWAY_URL" });
+    const key = await getSecret({ scope: "global", keyName: "MAX_GATEWAY_ADMIN_KEY" });
+    return !!(url && key);
   }
 
   private async request<T>(
@@ -78,8 +78,10 @@ export class MaxGatewayClient {
     body?: unknown,
     timeoutMs = 15000
   ): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
-    const headers: Record<string, string> = { ...this.authHeaders };
+    const baseUrl = await this.resolveBaseUrl();
+    const adminKey = await this.resolveAdminKey();
+    const url = `${baseUrl}${path}`;
+    const headers: Record<string, string> = { Authorization: `Bearer ${adminKey}` };
     let fetchBody: BodyInit | undefined;
 
     if (body !== undefined) {
@@ -198,7 +200,9 @@ export class MaxGatewayClient {
     label?: string,
     replace?: boolean
   ): Promise<{ added: number; errors: string[]; total: number; active: number; replaced: boolean }> {
-    const url = `${this.baseUrl}/admin/proxies/upload`;
+    const baseUrl = await this.resolveBaseUrl();
+    const adminKey = await this.resolveAdminKey();
+    const url = `${baseUrl}/admin/proxies/upload`;
     const form = new FormData();
     form.append("file", new Blob([fileBuffer], { type: "text/plain" }), "proxies.txt");
     if (label !== undefined) form.append("label", label);
@@ -208,7 +212,7 @@ export class MaxGatewayClient {
     try {
       res = await fetchWithTimeout(
         url,
-        { method: "POST", headers: this.authHeaders, body: form },
+        { method: "POST", headers: { Authorization: `Bearer ${adminKey}` }, body: form },
         60000
       );
     } catch (err: any) {

@@ -180,14 +180,24 @@ router.patch("/api/channels/max-personal/:accountId/auto-reply", requireAuth, as
 });
 
 // GET /api/channels/max-personal/gateway-available — check if self-service creation is possible
-router.get("/api/channels/max-personal/gateway-available", requireAuth, (_req: Request, res: Response) => {
-  res.json({ available: !!process.env.MAX_GATEWAY_URL && !!process.env.MAX_GATEWAY_ADMIN_KEY });
+router.get("/api/channels/max-personal/gateway-available", requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const { MaxGatewayClient } = await import("../../services/max-gateway-client");
+    const available = await MaxGatewayClient.isConfigured();
+    res.json({ available });
+  } catch {
+    res.json({ available: false });
+  }
 });
 
 // POST /api/channels/max-personal/create — self-service account creation via gateway
 router.post("/api/channels/max-personal/create", requireAuth, async (req: Request, res: Response) => {
   try {
-    if (!process.env.MAX_GATEWAY_URL || !process.env.MAX_GATEWAY_ADMIN_KEY) {
+    const { MaxGatewayClient, maxGatewayClient } = await import("../../services/max-gateway-client");
+    const { getSecret } = await import("../../services/secret-resolver");
+
+    const gatewayUrl = await getSecret({ scope: "global", keyName: "MAX_GATEWAY_URL" });
+    if (!await MaxGatewayClient.isConfigured()) {
       return res.status(503).json({ error: "MAX Gateway не настроен на платформе" });
     }
 
@@ -214,7 +224,6 @@ router.post("/api/channels/max-personal/create", requireAuth, async (req: Reques
     const appUrl = getAppUrl();
     const webhookUrl = `${appUrl}/webhooks/max-personal/${tenantId}/${accountId}`;
 
-    const { maxGatewayClient } = await import("../../services/max-gateway-client");
     let apiToken: string;
     try {
       const result = await maxGatewayClient.createInstance(instanceId, tenantId, webhookUrl);
@@ -229,8 +238,8 @@ router.post("/api/channels/max-personal/create", requireAuth, async (req: Reques
       accountId,
       idInstance: instanceId,
       apiTokenInstance: apiToken,
-      apiUrl: process.env.MAX_GATEWAY_URL,
-      mediaUrl: process.env.MAX_GATEWAY_URL,
+      apiUrl: gatewayUrl,
+      mediaUrl: gatewayUrl,
       label: label ?? null,
       displayName: null,
       status: "unknown",
