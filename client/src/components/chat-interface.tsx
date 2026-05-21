@@ -218,11 +218,10 @@ function AttachmentRenderer({
       )}
       {attachments?.map((att, i) => {
         if (att.type === "image") {
-          const displaySrc = att.thumbnail || att.url;
-          return displaySrc ? (
-            <a key={i} href={att.url || att.thumbnail} target="_blank" rel="noopener noreferrer">
+          return att.url ? (
+            <a key={i} href={att.url} target="_blank" rel="noopener noreferrer">
               <img
-                src={displaySrc}
+                src={att.url}
                 alt="Изображение"
                 className="max-w-[240px] rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity"
                 style={{ maxHeight: 320 }}
