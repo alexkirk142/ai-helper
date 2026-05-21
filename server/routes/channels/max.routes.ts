@@ -24,9 +24,29 @@ router.get("/api/channels/max-personal/accounts", requireAuth, async (req: Reque
       status: maxPersonalAccounts.status,
       webhookRegistered: maxPersonalAccounts.webhookRegistered,
       autoReplyEnabled: maxPersonalAccounts.autoReplyEnabled,
+      provider: (maxPersonalAccounts as any).provider,
     }).from(maxPersonalAccounts)
       .where(eq(maxPersonalAccounts.tenantId, tenantId))
       .orderBy(asc(maxPersonalAccounts.createdAt));
+
+    // For gateway accounts with no displayName, lazily fetch phone from the gateway
+    // and persist it so the badge shows "+7..." instead of the instance ID.
+    const { maxGatewayClient } = await import("../../services/max-gateway-client");
+    if (await maxGatewayClient.isConfigured()) {
+      const needsPhone = rows.filter(r => r.provider === "max_gateway" && !r.displayName && r.status === "authorized");
+      for (const row of needsPhone) {
+        try {
+          const instanceStatus = await maxGatewayClient.getInstanceStatus(row.idInstance);
+          const phone = instanceStatus.phone ?? instanceStatus.displayName ?? null;
+          if (phone) {
+            await db.update(maxPersonalAccounts)
+              .set({ displayName: phone, updatedAt: new Date() })
+              .where(and(eq(maxPersonalAccounts.tenantId, tenantId), eq(maxPersonalAccounts.accountId, row.accountId)));
+            row.displayName = phone;
+          }
+        } catch { /* non-fatal */ }
+      }
+    }
 
     return res.json({ accounts: rows });
   } catch (error) {
