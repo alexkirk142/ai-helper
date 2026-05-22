@@ -779,16 +779,6 @@ export function ChatInterface({
           <div className="space-y-4">
             {(() => {
               const lastReadAt = conversation.lastReadAt ? new Date(conversation.lastReadAt) : null;
-              // Find the id of the last outgoing message that was read by the contact
-              const lastReadMsgId = lastReadAt
-                ? [...conversation.messages]
-                    .reverse()
-                    .find(
-                      (m) =>
-                        (m.role === "assistant" || m.role === "owner") &&
-                        new Date(m.createdAt) <= lastReadAt
-                    )?.id
-                : null;
               return conversation.messages.map((message) => (
               <div
                 key={message.id}
@@ -853,7 +843,7 @@ export function ChatInterface({
                       locale: ru,
                     })}
                     {(message.role === "assistant" || message.role === "owner") && (
-                      message.id === lastReadMsgId ? (
+                      lastReadAt && new Date(message.createdAt) <= lastReadAt ? (
                         // Double check — message was read by contact
                         <span className={cn(
                           "inline-flex items-center shrink-0",
@@ -865,7 +855,7 @@ export function ChatInterface({
                           <Check className="h-3.5 w-3.5 -ml-2" />
                         </span>
                       ) : (
-                        // Single check — message sent
+                        // Single check — message sent but not yet read
                         <span className={cn(
                           "inline-flex items-center shrink-0 opacity-60",
                           message.role === "assistant"
