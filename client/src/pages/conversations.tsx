@@ -304,8 +304,12 @@ export default function Conversations() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations", selectedId] });
     },
-    onError: () => {
-      toast({ title: "Failed to send message", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({
+        title: "Не удалось отправить сообщение",
+        description: error.message || undefined,
+        variant: "destructive",
+      });
     },
   });
 

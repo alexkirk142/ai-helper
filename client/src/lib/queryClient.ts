@@ -54,6 +54,15 @@ async function throwIfResNotOk(res: Response) {
       throw new Error("Сессия истекла. Перенаправление на страницу входа...");
     }
     const text = (await res.text()) || res.statusText;
+    // Try to use the `error` field from a JSON body for a human-readable message
+    try {
+      const json = JSON.parse(text) as Record<string, unknown>;
+      if (typeof json.error === "string") {
+        throw new Error(json.error);
+      }
+    } catch (e) {
+      if (!(e instanceof SyntaxError)) throw e; // re-throw our clean Error
+    }
     throw new Error(`${res.status}: ${text}`);
   }
 }

@@ -242,6 +242,7 @@ router.post(
 
       // ── Media send path ────────────────────────────────────────────────────
       let outboundAttachment: ParsedAttachment | undefined;
+      let maxPersonalRestricted = false;
 
       if (uploadedFile && role === "owner" && conversation.messages.length > 0) {
         const { buffer, mimetype, size } = uploadedFile;
@@ -327,6 +328,9 @@ router.post(
               outboundAttachment = buildAttachmentMeta(mimetype, originalname, size, {});
               console.log(`[OutboundHandler] MAX Personal file sent: msgId=${sendResult.externalMessageId}`);
             } else {
+              if (sendResult.error === "USER_RESTRICTED") {
+                maxPersonalRestricted = true;
+              }
               console.error(`[OutboundHandler] MAX Personal file send failed: ${sendResult.error}`);
             }
           } catch (sendError: any) {
@@ -365,6 +369,12 @@ router.post(
       // If a file was uploaded but we failed to send it, return an error immediately
       // so the client shows a notification and no empty message bubble is saved to DB.
       if (uploadedFile && role === "owner" && !outboundAttachment) {
+        if (maxPersonalRestricted) {
+          return res.status(403).json({
+            error: "Начать диалог не получится — возможности профиля этого пользователя ограничены",
+            code: "USER_RESTRICTED",
+          });
+        }
         return res.status(500).json({ error: "Не удалось отправить файл. Попробуйте ещё раз." });
       }
 
@@ -532,6 +542,14 @@ router.post(
             if (sendResult.success) {
               console.log(`[OutboundHandler] MAX Personal message sent: ${sendResult.externalMessageId}`);
             } else {
+              if (sendResult.error === "USER_RESTRICTED") {
+                // Remove the message we just saved — it was never delivered
+                await storage.deleteMessage(message.id, msgUser.tenantId).catch(() => {});
+                return res.status(403).json({
+                  error: "Начать диалог не получится — возможности профиля этого пользователя ограничены",
+                  code: "USER_RESTRICTED",
+                });
+              }
               console.error(`[OutboundHandler] MAX Personal send failed: ${sendResult.error}`);
             }
           } catch (sendError: any) {
