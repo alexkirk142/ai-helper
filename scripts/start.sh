@@ -1,16 +1,17 @@
 #!/bin/sh
 # Container startup script.
-# Runs DB migrations first; if they fail, logs a warning but always starts the app.
-# Using && in nixpacks.toml cmd caused npm run start to be skipped entirely when
-# drizzle-kit push failed on cold start (DB temporarily unavailable, migration conflict, etc.).
-
-set -e
+# Runs DB migrations via run-migrations.mjs:
+#   1. Tries drizzle-kit push --force
+#   2. Falls back to applying .sql migration files directly if push fails
+# If migrations fail completely (exit 1), the app still starts — but the failure
+# is logged clearly so it can be investigated. This prevents a broken deploy from
+# making the service completely unavailable.
 
 echo "[startup] Running database migrations..."
-if npx drizzle-kit push --force; then
+if node scripts/run-migrations.mjs; then
   echo "[startup] Migrations complete."
 else
-  echo "[startup] WARNING: Migration failed — starting app with current schema. Check DB logs."
+  echo "[startup] WARNING: Migration script failed — starting app anyway. Check DB schema manually."
 fi
 
 echo "[startup] Starting application..."
