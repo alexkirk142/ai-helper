@@ -260,7 +260,34 @@ app.use((req, res, next) => {
           ALTER TABLE subscriptions
             ADD COLUMN IF NOT EXISTS extra_slots SMALLINT NOT NULL DEFAULT 0;
         `);
-        log("DB column check: auto_reply_enabled + tg_role + template flags + escalation_chat_id + lead_channel_priority + extra_slots OK", "startup");
+        // Grandfather pre-billing tenants: if a tenant already has more than 5 MAX accounts,
+        // set extra_slots to the number of accounts they have above the free limit.
+        // This is idempotent — only updates rows where extra_slots is still 0 and
+        // the actual account count exceeds the free limit.
+        await pool.query(`
+          INSERT INTO subscriptions (tenant_id, feature, status, extra_slots, payment_provider, updated_at, created_at)
+          SELECT
+            mpa.tenant_id,
+            'extra_max_accounts',
+            'active',
+            GREATEST(0, COUNT(mpa.account_id) - 5)::smallint,
+            'cryptobot',
+            NOW(),
+            NOW()
+          FROM max_personal_accounts mpa
+          GROUP BY mpa.tenant_id
+          HAVING COUNT(mpa.account_id) > 5
+          ON CONFLICT (tenant_id, feature)
+          DO UPDATE SET
+            extra_slots = GREATEST(
+              subscriptions.extra_slots,
+              EXCLUDED.extra_slots
+            ),
+            status = CASE WHEN subscriptions.extra_slots = 0 THEN 'active' ELSE subscriptions.status END,
+            updated_at = NOW()
+          WHERE subscriptions.extra_slots < EXCLUDED.extra_slots;
+        `);
+        log("DB column check: auto_reply_enabled + tg_role + template flags + escalation_chat_id + lead_channel_priority + extra_slots + grandfather OK", "startup");
       } catch (err: any) {
         log(`DB column migration warning: ${err.message}`, "startup");
       }
