@@ -2338,24 +2338,29 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
           {allAccounts.length > 0 && gatewayAvailable && canAccess && !isTrial && allAccounts.length < 50 && (
             <div className="space-y-2 mt-1">
               {/* Slot usage info */}
-              {allAccounts.length < FREE_MAX_PERSONAL_ACCOUNTS ? (
+              {paidExtraSlots === 0 && allAccounts.length < FREE_MAX_PERSONAL_ACCOUNTS ? (
                 <p className="text-xs text-muted-foreground px-1">
                   {allAccounts.length} из {FREE_MAX_PERSONAL_ACCOUNTS} бесплатных аккаунтов использовано
                 </p>
               ) : (
                 <div className="rounded-md border px-3 py-2 text-xs space-y-0.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Бесплатных слотов:</span>
-                    <span className="font-medium">{FREE_MAX_PERSONAL_ACCOUNTS}</span>
+                    <span className="text-muted-foreground">Слотов всего:</span>
+                    <span className="font-medium">{maxAllowedAccounts}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Куплено дополнительных:</span>
+                    <span className="text-muted-foreground">Из них куплено доп.:</span>
                     <span className="font-medium">{paidExtraSlots}</span>
                   </div>
                   <div className="flex items-center justify-between border-t border-border/50 pt-0.5 mt-0.5">
-                    <span className="font-medium">Аккаунтов использовано:</span>
+                    <span className="font-medium">Использовано / доступно:</span>
                     <span className={`font-semibold ${allAccounts.length >= maxAllowedAccounts ? "text-amber-600" : "text-green-600"}`}>
                       {allAccounts.length} / {maxAllowedAccounts}
+                      {allAccounts.length < maxAllowedAccounts && (
+                        <span className="text-green-500 font-normal ml-1">
+                          (+{maxAllowedAccounts - allAccounts.length} своб.)
+                        </span>
+                      )}
                     </span>
                   </div>
                 </div>
