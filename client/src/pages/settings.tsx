@@ -4935,23 +4935,36 @@ export default function Settings() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("billing") !== "success") return;
+    const billingParam = params.get("billing");
+    if (billingParam !== "success" && billingParam !== "extra_accounts_success") return;
 
     const url = new URL(window.location.href);
     url.searchParams.delete("billing");
     window.history.replaceState({}, "", url.toString());
 
-    // Fallback: verify payment server-side in case the webhook was not delivered
-    apiRequest("POST", "/api/billing/verify-payment")
-      .then((r) => r.json())
-      .then((data: any) => {
-        markSubscriptionDialogShown(data?.billingStatus?.currentPeriodEnd);
-        // Refresh billing status so the UI reflects the new active subscription
-        queryClient.invalidateQueries({ queryKey: ["/api/billing/me"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/billing/ai/me"] });
-      })
-      .catch(() => {/* silent — webhook may have already activated */})
-      .finally(() => setShowPaymentSuccess(true));
+    const isExtraAccounts = billingParam === "extra_accounts_success";
+
+    if (isExtraAccounts) {
+      // Fallback verify for extra MAX accounts subscription
+      apiRequest("POST", "/api/billing/extra-accounts/verify-payment")
+        .then((r) => r.json())
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/billing/extra-accounts/me"] });
+        })
+        .catch(() => {/* silent */})
+        .finally(() => setShowPaymentSuccess(true));
+    } else {
+      // Fallback verify for channels subscription
+      apiRequest("POST", "/api/billing/verify-payment")
+        .then((r) => r.json())
+        .then((data: any) => {
+          markSubscriptionDialogShown(data?.billingStatus?.currentPeriodEnd);
+          queryClient.invalidateQueries({ queryKey: ["/api/billing/me"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/billing/ai/me"] });
+        })
+        .catch(() => {/* silent — webhook may have already activated */})
+        .finally(() => setShowPaymentSuccess(true));
+    }
   }, []);
 
   const { data: tenant, isLoading } = useQuery<Tenant>({

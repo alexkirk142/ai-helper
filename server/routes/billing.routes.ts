@@ -347,7 +347,7 @@ router.post("/api/billing/extra-accounts/checkout", requireAuth, requireAdmin, a
     const { createExtraAccountsInvoice } = await import("../services/cryptobot-billing");
 
     const baseUrl = `${req.protocol}://${req.get("host")}`;
-    const successUrl = `${baseUrl}/settings?tab=channels&billing=success`;
+    const successUrl = `${baseUrl}/settings?tab=channels&billing=extra_accounts_success`;
 
     const result = await createExtraAccountsInvoice(user.tenantId, successUrl);
     res.json({ url: result.payUrl, invoiceId: result.invoiceId });
