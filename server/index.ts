@@ -255,7 +255,12 @@ app.use((req, res, next) => {
             updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
           );
         `);
-        log("DB column check: auto_reply_enabled + tg_role + template flags + escalation_chat_id + lead_channel_priority OK", "startup");
+        // Extra account slots counter for extra_max_accounts subscriptions
+        await pool.query(`
+          ALTER TABLE subscriptions
+            ADD COLUMN IF NOT EXISTS extra_slots SMALLINT NOT NULL DEFAULT 0;
+        `);
+        log("DB column check: auto_reply_enabled + tg_role + template flags + escalation_chat_id + lead_channel_priority + extra_slots OK", "startup");
       } catch (err: any) {
         log(`DB column migration warning: ${err.message}`, "startup");
       }

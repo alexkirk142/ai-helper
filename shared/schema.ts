@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, jsonb, real, serial, uniqueIndex, index, customType } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, smallint, boolean, timestamp, jsonb, real, serial, uniqueIndex, index, customType } from "drizzle-orm/pg-core";
 
 // pgvector custom type for storing and querying OpenAI embeddings (text-embedding-3-large = 3072 dims)
 const pgVector = customType<{ data: number[]; driverData: string; config: { dimensions: number } }>({
@@ -1142,6 +1142,7 @@ export const subscriptions = pgTable("subscriptions", {
   trialEndsAt: timestamp("trial_ends_at"), // When trial expires (72h from start)
   trialEnd: timestamp("trial_end"), // Legacy field - kept for compatibility
   hadTrial: boolean("had_trial").default(false), // Whether tenant ever had a trial (prevents multiple trials)
+  extraSlots: smallint("extra_slots").default(0).notNull(), // For extra_max_accounts: number of individually purchased extra account slots
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
@@ -1193,6 +1194,8 @@ export type BillingStatus = {
   // Grant-specific fields (manual comping)
   hasActiveGrant?: boolean;
   grantEndsAt?: Date | null;
+  // For extra_max_accounts only: number of individually purchased extra slots
+  extraSlots?: number;
 };
 
 // ============================================

@@ -337,17 +337,15 @@ export async function createExtraAccountsInvoice(
     .from(subscriptions)
     .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "extra_max_accounts")));
 
-  if (existingSub?.status === "active") {
-    throw new Error("Tenant already has an active extra accounts subscription");
-  }
-
   const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId));
+
+  const currentSlots = existingSub?.extraSlots ?? 0;
 
   const invoice = await cryptoPayInstance.createInvoice(
     Assets.USDT,
     String(priceUsdt),
     {
-      description: `${plan.name} — месячная подписка`,
+      description: `${plan.name} — 1 дополнительный аккаунт`,
       expires_in: 3600,
       paid_btn_name: "callback" as any,
       paid_btn_url: successUrl,
@@ -363,6 +361,7 @@ export async function createExtraAccountsInvoice(
   );
 
   if (!existingSub) {
+    // First extra-account purchase: create record with 0 slots (slot added on payment)
     await db.insert(subscriptions).values({
       tenantId,
       feature: "extra_max_accounts",
@@ -371,19 +370,20 @@ export async function createExtraAccountsInvoice(
       paymentProvider: "cryptobot",
       status: "incomplete",
     });
-  } else if (existingSub.status === "trialing") {
-    await db
-      .update(subscriptions)
-      .set({ planId: plan.id, cryptoInvoiceId: String(invoice.invoice_id), paymentProvider: "cryptobot", updatedAt: new Date() })
-      .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "extra_max_accounts")));
   } else {
+    // Subsequent purchases (even if already active): just store new invoice ID
     await db
       .update(subscriptions)
-      .set({ cryptoInvoiceId: String(invoice.invoice_id), paymentProvider: "cryptobot", status: "incomplete", updatedAt: new Date() })
+      .set({
+        planId: plan.id,
+        cryptoInvoiceId: String(invoice.invoice_id),
+        paymentProvider: "cryptobot",
+        updatedAt: new Date(),
+      })
       .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "extra_max_accounts")));
   }
 
-  console.log(`[CryptoBilling] Created extra_max_accounts invoice ${invoice.invoice_id} for tenant ${tenantId}`);
+  console.log(`[CryptoBilling] Created extra_max_accounts invoice ${invoice.invoice_id} for tenant ${tenantId} (current slots: ${currentSlots})`);
   return { payUrl: invoice.pay_url, invoiceId: invoice.invoice_id };
 }
 
@@ -430,24 +430,22 @@ export async function getExtraAccountsBillingStatus(tenantId: string): Promise<B
       hadTrial: false,
       hasActiveGrant,
       grantEndsAt,
+      extraSlots: 0,
     };
   }
 
   const plan = subscription.planId ? await getPlanById(subscription.planId) : null;
   const now = new Date();
 
-  const accessibleStatuses: SubscriptionStatus[] = ["active", "past_due"];
-  let canAccess = accessibleStatuses.includes(subscription.status as SubscriptionStatus);
-
-  if (canAccess && subscription.currentPeriodEnd) {
-    canAccess = new Date(subscription.currentPeriodEnd) > now;
-  }
+  const extraSlots = subscription.extraSlots ?? 0;
+  // canAccess = true when tenant has at least 1 paid extra slot
+  let canAccess = extraSlots > 0;
 
   if (hasActiveGrant) canAccess = true;
 
   return {
     hasSubscription: true,
-    status: hasActiveGrant ? "active" as SubscriptionStatus : subscription.status as SubscriptionStatus,
+    status: hasActiveGrant ? "active" as SubscriptionStatus : (extraSlots > 0 ? "active" as SubscriptionStatus : subscription.status as SubscriptionStatus),
     plan,
     currentPeriodEnd: subscription.currentPeriodEnd,
     cancelAtPeriodEnd: subscription.cancelAtPeriodEnd || false,
@@ -458,6 +456,7 @@ export async function getExtraAccountsBillingStatus(tenantId: string): Promise<B
     hadTrial: false,
     hasActiveGrant,
     grantEndsAt,
+    extraSlots,
   };
 }
 
@@ -557,6 +556,32 @@ export async function handleWebhookEvent(payload: CryptoWebhookPayload): Promise
   const now = new Date();
   const periodEnd = new Date(now);
   periodEnd.setMonth(periodEnd.getMonth() + 1);
+
+  if (feature === "extra_max_accounts") {
+    // Per-slot model: each payment adds exactly 1 extra account slot
+    const [existing] = await db
+      .select({ extraSlots: subscriptions.extraSlots })
+      .from(subscriptions)
+      .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "extra_max_accounts")));
+
+    const currentSlots = existing?.extraSlots ?? 0;
+    const newSlots = currentSlots + 1;
+
+    await db
+      .update(subscriptions)
+      .set({
+        status: "active",
+        extraSlots: newSlots,
+        currentPeriodStart: now,
+        currentPeriodEnd: periodEnd,
+        cancelAtPeriodEnd: false,
+        updatedAt: now,
+      })
+      .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "extra_max_accounts")));
+
+    console.log(`[CryptoBilling] Extra account slot added for tenant ${tenantId}: ${currentSlots} → ${newSlots} slots`);
+    return;
+  }
 
   await db
     .update(subscriptions)

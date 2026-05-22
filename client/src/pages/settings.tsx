@@ -1898,17 +1898,19 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
   const { data: publicConfig } = usePublicBillingConfig();
   const extraAccountPrice = publicConfig?.extraAccountPrice ?? 10;
 
-  const { data: extraAccountsBilling, refetch: refetchExtraAccountsBilling } = useQuery<{ canAccess: boolean; status: string | null }>({
+  const { data: extraAccountsBilling, refetch: refetchExtraAccountsBilling } = useQuery<{ canAccess: boolean; status: string | null; extraSlots?: number }>({
     queryKey: ["/api/billing/extra-accounts/me"],
     queryFn: async () => {
       const res = await fetch("/api/billing/extra-accounts/me", { credentials: "include" });
-      if (!res.ok) return { canAccess: false, status: null };
+      if (!res.ok) return { canAccess: false, status: null, extraSlots: 0 };
       return res.json();
     },
     enabled: canAccess && !isTrial,
     staleTime: 30 * 1000,
   });
-  const hasExtraAccountsSubscription = extraAccountsBilling?.canAccess === true;
+  const paidExtraSlots = extraAccountsBilling?.extraSlots ?? 0;
+  const maxAllowedAccounts = FREE_MAX_PERSONAL_ACCOUNTS + paidExtraSlots;
+  const hasExtraAccountsSubscription = paidExtraSlots > 0;
 
   const { data: gatewayConfig } = useQuery<{ available: boolean }>({
     queryKey: ["/api/channels/max-personal/gateway-available"],
@@ -2335,35 +2337,40 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
           })}
           {allAccounts.length > 0 && gatewayAvailable && canAccess && !isTrial && allAccounts.length < 50 && (
             <div className="space-y-2 mt-1">
-              {allAccounts.length >= FREE_MAX_PERSONAL_ACCOUNTS && (
-                <div className={`rounded-md border px-3 py-2 text-xs flex items-center justify-between gap-2 ${hasExtraAccountsSubscription ? "border-green-500/30 bg-green-500/5 text-green-700 dark:text-green-400" : "border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400"}`}>
-                  <span>
-                    {hasExtraAccountsSubscription
-                      ? `Подписка на доп. аккаунты активна — создано ${allAccounts.length} из 50`
-                      : `Использовано ${allAccounts.length} из ${FREE_MAX_PERSONAL_ACCOUNTS} бесплатных слотов. Следующий аккаунт — ${extraAccountPrice} USDT/мес`
-                    }
-                  </span>
-                  {!hasExtraAccountsSubscription && (
-                    <CreditCard className="h-3.5 w-3.5 shrink-0" />
-                  )}
-                </div>
-              )}
-              {allAccounts.length < FREE_MAX_PERSONAL_ACCOUNTS && (
+              {/* Slot usage info */}
+              {allAccounts.length < FREE_MAX_PERSONAL_ACCOUNTS ? (
                 <p className="text-xs text-muted-foreground px-1">
                   {allAccounts.length} из {FREE_MAX_PERSONAL_ACCOUNTS} бесплатных аккаунтов использовано
                 </p>
+              ) : (
+                <div className="rounded-md border px-3 py-2 text-xs space-y-0.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Бесплатных слотов:</span>
+                    <span className="font-medium">{FREE_MAX_PERSONAL_ACCOUNTS}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Куплено дополнительных:</span>
+                    <span className="font-medium">{paidExtraSlots}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border/50 pt-0.5 mt-0.5">
+                    <span className="font-medium">Аккаунтов использовано:</span>
+                    <span className={`font-semibold ${allAccounts.length >= maxAllowedAccounts ? "text-amber-600" : "text-green-600"}`}>
+                      {allAccounts.length} / {maxAllowedAccounts}
+                    </span>
+                  </div>
+                </div>
               )}
               <Button
                 size="sm"
-                variant={allAccounts.length >= FREE_MAX_PERSONAL_ACCOUNTS && !hasExtraAccountsSubscription ? "default" : "outline"}
+                variant={allAccounts.length >= maxAllowedAccounts ? "default" : "outline"}
                 onClick={createAccount}
                 disabled={creatingAccount}
                 className="w-full"
               >
                 {creatingAccount
                   ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Создание...</>
-                  : allAccounts.length >= FREE_MAX_PERSONAL_ACCOUNTS && !hasExtraAccountsSubscription
-                    ? <><CreditCard className="h-3.5 w-3.5 mr-1.5" />Добавить аккаунт — {extraAccountPrice} USDT/мес</>
+                  : allAccounts.length >= maxAllowedAccounts
+                    ? <><CreditCard className="h-3.5 w-3.5 mr-1.5" />Купить слот — {extraAccountPrice} USDT</>
                     : <><span className="mr-1">+</span> Добавить ещё аккаунт</>
                 }
               </Button>
@@ -2383,17 +2390,22 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-sm text-muted-foreground">
-              Первые <strong>{FREE_MAX_PERSONAL_ACCOUNTS} аккаунтов</strong> включены бесплатно при активной подписке на каналы.
+              Первые <strong>{FREE_MAX_PERSONAL_ACCOUNTS} аккаунтов</strong> включены бесплатно в подписку на каналы. Вы использовали все бесплатные слоты.
             </p>
             <p className="text-sm text-muted-foreground">
-              Для создания дополнительных аккаунтов (6 и более) требуется отдельная подписка.
+              Каждый дополнительный аккаунт оплачивается отдельно. После оплаты появится +1 слот.
             </p>
+            {paidExtraSlots > 0 && (
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                Уже куплено дополнительных слотов: <span className="font-semibold text-foreground">{paidExtraSlots}</span>
+              </div>
+            )}
             <div className="rounded-md border bg-muted/30 p-3 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium">Доп. аккаунты MAX Personal</p>
-                <p className="text-xs text-muted-foreground">Безлимитное создание аккаунтов сверх 5</p>
+                <p className="text-sm font-medium">+1 дополнительный аккаунт MAX</p>
+                <p className="text-xs text-muted-foreground">Единоразовый платёж за один слот</p>
               </div>
-              <span className="text-lg font-semibold">{extraAccountPrice} USDT<span className="text-xs font-normal text-muted-foreground">/мес</span></span>
+              <span className="text-lg font-semibold">{extraAccountPrice} <span className="text-sm font-normal">USDT</span></span>
             </div>
           </div>
           <DialogFooter className="gap-2">
@@ -2403,7 +2415,7 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
             <Button onClick={handleExtraAccountsCheckout} disabled={extraAccountsCheckoutPending}>
               {extraAccountsCheckoutPending
                 ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Создание счёта...</>
-                : <><Zap className="mr-2 h-4 w-4" />Оплатить {extraAccountPrice} USDT</>
+                : <><CreditCard className="mr-2 h-4 w-4" />Купить 1 слот — {extraAccountPrice} USDT</>
               }
             </Button>
           </DialogFooter>

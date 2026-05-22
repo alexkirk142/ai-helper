@@ -315,15 +315,20 @@ router.post("/api/channels/max-personal/create", requireAuth, async (req: Reques
 
     const { FREE_MAX_PERSONAL_ACCOUNTS } = await import("../../config/business-constants");
     if (existingAccounts.length >= FREE_MAX_PERSONAL_ACCOUNTS) {
-      // Accounts beyond the free limit require an active extra_max_accounts subscription
+      // Accounts beyond the free limit require paid extra slots (1 slot = 1 extra account)
       const { getExtraAccountsBillingStatus } = await import("../../services/cryptobot-billing");
       const extraStatus = await getExtraAccountsBillingStatus(tenantId);
-      if (!extraStatus.canAccess) {
+      const paidSlots = extraStatus.extraSlots ?? 0;
+      const maxAllowed = FREE_MAX_PERSONAL_ACCOUNTS + paidSlots;
+
+      if (existingAccounts.length >= maxAllowed) {
         return res.status(402).json({
-          error: "Для создания более 5 аккаунтов требуется дополнительная подписка",
+          error: `Для создания более ${maxAllowed} аккаунтов необходимо приобрести дополнительный слот`,
           requiresUpgrade: true,
           feature: "extra_max_accounts",
           freeLimit: FREE_MAX_PERSONAL_ACCOUNTS,
+          paidSlots,
+          maxAllowed,
           currentCount: existingAccounts.length,
         });
       }
