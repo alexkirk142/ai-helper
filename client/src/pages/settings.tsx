@@ -2055,10 +2055,28 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
     isCreatingRef.current = true;
     setCreatingAccount(true);
     try {
-      const res = await apiRequest("POST", "/api/channels/max-personal/create", {});
+      // Use raw fetch so we can inspect the 402 status before it becomes an exception
+      let csrfToken = "";
+      try {
+        const csrfRes = await fetch("/api/csrf-token", { credentials: "include", cache: "no-store" });
+        const csrfData = await csrfRes.json() as { token: string };
+        csrfToken = csrfData.token ?? "";
+      } catch { /* proceed without CSRF — server will reject if required */ }
+
+      const res = await fetch("/api/channels/max-personal/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Csrf-Token": csrfToken },
+        credentials: "include",
+        body: JSON.stringify({}),
+      });
+
       if (res.status === 402) {
         setExtraAccountsPaywallOpen(true);
         return;
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error || "Не удалось создать аккаунт");
       }
       const data = await res.json() as { accountId: string };
       toast({ title: "Инстанс создан", description: "Отсканируйте QR-код для авторизации" });
@@ -2337,14 +2355,16 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
               )}
               <Button
                 size="sm"
-                variant="outline"
+                variant={allAccounts.length >= FREE_MAX_PERSONAL_ACCOUNTS && !hasExtraAccountsSubscription ? "default" : "outline"}
                 onClick={createAccount}
                 disabled={creatingAccount}
                 className="w-full"
               >
                 {creatingAccount
                   ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Создание...</>
-                  : <><span className="mr-1">+</span> Добавить ещё аккаунт</>
+                  : allAccounts.length >= FREE_MAX_PERSONAL_ACCOUNTS && !hasExtraAccountsSubscription
+                    ? <><CreditCard className="h-3.5 w-3.5 mr-1.5" />Добавить аккаунт — {extraAccountPrice} USDT/мес</>
+                    : <><span className="mr-1">+</span> Добавить ещё аккаунт</>
                 }
               </Button>
             </div>
