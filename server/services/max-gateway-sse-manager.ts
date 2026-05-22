@@ -29,14 +29,23 @@ class MaxGatewaySSEManager {
   private connections = new Map<string, Connection>();
 
   /**
-   * Load all gateway accounts from the DB and start an SSE subscription for each.
+   * Load all gateway accounts from the DB, reconcile each against the live gateway,
+   * then start SSE subscriptions for those that still exist.
+   *
+   * Reconciliation ensures we don't miss events that happened while the server was offline:
+   *   - Instance deleted during downtime → 404 from gateway → mark status="deleted", skip SSE
+   *   - Auth state changed during downtime → sync status in DB before subscribing
+   *
    * Called once at app startup after the server is ready.
    */
   async initializeAll(): Promise<void> {
-    let rows: { idInstance: string }[];
+    let rows: { idInstance: string; status: string | null }[];
     try {
       rows = await db
-        .select({ idInstance: maxPersonalAccounts.idInstance })
+        .select({
+          idInstance: maxPersonalAccounts.idInstance,
+          status: maxPersonalAccounts.status,
+        })
         .from(maxPersonalAccounts)
         .where(eq(maxPersonalAccounts.provider, "max_gateway"));
     } catch (err: any) {
@@ -44,12 +53,68 @@ class MaxGatewaySSEManager {
       return;
     }
 
+    let subscribed = 0;
+    let synced = 0;
+    let deleted = 0;
+
     for (const row of rows) {
-      this.subscribe(row.idInstance);
+      const reconciled = await this.reconcileInstance(row.idInstance, row.status);
+      if (reconciled === "deleted") {
+        deleted++;
+      } else {
+        if (reconciled === "synced") synced++;
+        this.subscribe(row.idInstance);
+        subscribed++;
+      }
     }
 
-    if (rows.length > 0) {
-      console.log(`[GatewaySSE] Subscribed to ${rows.length} instance(s)`);
+    console.log(
+      `[GatewaySSE] Init complete: ${subscribed} subscribed, ${synced} state-synced, ${deleted} found-deleted`
+    );
+  }
+
+  /**
+   * Compare the live gateway state for one instance with the DB record.
+   * - Returns "deleted" if the gateway returned 404 (instance was removed while offline)
+   * - Returns "synced" if the auth status in DB was updated
+   * - Returns "ok" if nothing needed changing
+   * Never throws — all errors are swallowed so a single bad instance doesn't block the rest.
+   */
+  private async reconcileInstance(
+    instanceId: string,
+    dbStatus: string | null,
+  ): Promise<"deleted" | "synced" | "ok"> {
+    try {
+      const gwStatus = await maxGatewayClient.getInstanceStatus(instanceId);
+
+      const expectedDbStatus = gwStatus.authenticated ? "authorized" : "notAuthorized";
+      if (dbStatus !== expectedDbStatus) {
+        await db
+          .update(maxPersonalAccounts)
+          .set({ status: expectedDbStatus, updatedAt: new Date() })
+          .where(eq(maxPersonalAccounts.idInstance, instanceId));
+        console.log(`[GatewaySSE] Reconcile ${instanceId}: ${dbStatus} → ${expectedDbStatus}`);
+        return "synced";
+      }
+      return "ok";
+    } catch (err: any) {
+      // A 404 means the instance was deleted on the gateway while we were offline
+      if (/404/.test(err.message)) {
+        console.log(`[GatewaySSE] Reconcile ${instanceId}: not found on gateway — marking deleted`);
+        try {
+          await db
+            .update(maxPersonalAccounts)
+            .set({ status: "deleted", updatedAt: new Date() })
+            .where(eq(maxPersonalAccounts.idInstance, instanceId));
+        } catch (dbErr: any) {
+          console.error(`[GatewaySSE] Failed to mark ${instanceId} as deleted:`, dbErr.message);
+        }
+        return "deleted";
+      }
+
+      // Any other error (network, auth) — log and still subscribe so we don't lose live events
+      console.warn(`[GatewaySSE] Reconcile ${instanceId} failed (will still subscribe): ${err.message}`);
+      return "ok";
     }
   }
 

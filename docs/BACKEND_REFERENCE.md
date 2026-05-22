@@ -614,6 +614,12 @@ interface ChannelAdapter {
 | `subscribe(instanceId)` | После создания нового аккаунта (`POST /api/channels/max-personal/create`) |
 | `unsubscribe(instanceId)` | Перед удалением аккаунта (`DELETE /api/channels/max-personal/:id`) |
 
+**`initializeAll()` — reconciliation при старте:**  
+Перед подпиской на SSE-поток вызывает `GET /instances/{id}` для каждого аккаунта, чтобы синхронизировать состояние, пропущенное во время оффлайна:
+- Инстанс вернул 404 → `status = "deleted"` в БД, SSE-подписка не создаётся
+- Статус авторизации изменился → обновляется в БД, затем SSE-подписка создаётся
+- Ошибка сети/auth при GET → ошибка логируется, SSE-подписка всё равно создаётся (чтобы не пропустить живые события)
+
 **SSE-события, которые обрабатывает менеджер:**
 - `deleted` — шлюз удалил инстанс → `status = "deleted"` в БД, соединение закрывается (без реконнекта)
 - `stateInstanceChanged` — смена авторизации → `status = "authorized"` / `"notAuthorized"` в БД
