@@ -105,6 +105,7 @@ export class MaxGreenApiAdapter {
           outgoingWebhook: "no",
           outgoingMessageWebhook: "no",
           outgoingAPIMessageWebhook: "yes",
+          statusWebhook: "yes",
           stateWebhook: "yes",
           deviceWebhook: "no",
           pollMessageWebhook: "no",
