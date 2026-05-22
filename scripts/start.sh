@@ -1,11 +1,9 @@
 #!/bin/sh
 # Container startup script.
-# Runs DB migrations via run-migrations.mjs:
-#   1. Tries drizzle-kit push --force
-#   2. Falls back to applying .sql migration files directly if push fails
-# If migrations fail completely (exit 1), the app still starts — but the failure
-# is logged clearly so it can be investigated. This prevents a broken deploy from
-# making the service completely unavailable.
+# Applies SQL migration files via run-migrations.mjs (fast, no schema introspection).
+# drizzle-kit push was removed — it hangs on schema introspection in Railway containers.
+# If migrations fail, a warning is logged but the app still starts to avoid
+# a broken deploy making the service completely unavailable.
 
 echo "[startup] Running database migrations..."
 if node scripts/run-migrations.mjs; then
