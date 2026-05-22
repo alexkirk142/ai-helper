@@ -184,6 +184,42 @@ export class MaxGreenApiAdapter {
     return res.json();
   }
 
+  /**
+   * Mark a chat (or a specific message) as read.
+   * GREEN-API readChat: POST {apiUrl}/waInstance{id}/readChat/{token}
+   * Body: { chatId, idMessage? }
+   * If idMessage is provided, that message and all earlier ones are marked read.
+   * If omitted, all messages in the chat are marked read.
+   */
+  async readChat(
+    idInstance: string,
+    token: string,
+    chatId: string,
+    idMessage?: string,
+    apiUrl?: string | null,
+  ): Promise<void> {
+    const url = `${BASE_URL(idInstance, apiUrl)}/readChat/${token}`;
+    const body: Record<string, string> = { chatId };
+    if (idMessage) body.idMessage = idMessage;
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }, 10000);
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        throw new Error(`GREEN-API readChat timed out after 10s: chatId=${chatId}`);
+      }
+      throw err;
+    }
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(`GREEN-API readChat failed: ${res.status} ${res.statusText} | chatId=${chatId} | ${errText}`);
+    }
+  }
+
   async sendFile(
     idInstance: string,
     token: string,

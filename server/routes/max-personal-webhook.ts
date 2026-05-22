@@ -6,6 +6,7 @@ import type { ParsedIncomingMessage, ParsedAttachment } from "../services/channe
 import { processIncomingMessageFull } from "../services/inbound-message-handler";
 import { storage } from "../storage";
 import { handleIncomingReadReceipt } from "../services/read-receipt-handler";
+import { maxGreenApiAdapter } from "../services/max-green-api-adapter";
 import IORedis from "ioredis";
 
 /** Redis client shared for MAX status signaling (lazy init) */
@@ -444,6 +445,19 @@ router.post("/:tenantId/:accountId", async (req, res) => {
 
     // Acknowledge immediately so GREEN-API doesn't retry due to timeout.
     res.json({ ok: true });
+
+    // Mark the incoming message as read on the GREEN-API side (fire-and-forget).
+    // This signals to the customer that we've seen their message (read receipt / blue ticks).
+    // Use the raw (non-normalized) chatId since GREEN-API requires its own internal format.
+    maxGreenApiAdapter.readChat(
+      account.idInstance,
+      account.apiTokenInstance,
+      sender.chatId,
+      payload.idMessage,
+      account.apiUrl,
+    ).catch((err: Error) => {
+      console.warn(`[MaxPersonalWebhook] readChat failed for chatId=${sender.chatId}: ${err.message}`);
+    });
 
     processIncomingMessageFull(tenantId, parsed).then(() => {
       console.log(`[MaxPersonalWebhook] Processed ${msgType} from ${sender.chatId} for tenant ${tenantId} account ${accountId}`);
