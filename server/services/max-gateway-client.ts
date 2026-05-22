@@ -10,6 +10,14 @@ export class GatewayPhoneNotRegisteredError extends Error {
   }
 }
 
+/** Thrown when the gateway responds 403 with code=USER_RESTRICTED */
+export class GatewayUserRestrictedError extends Error {
+  constructor() {
+    super("Target account is restricted and cannot receive messages");
+    this.name = "GatewayUserRestrictedError";
+  }
+}
+
 export interface GatewayStats {
   totals: {
     instances: number;
@@ -109,14 +117,16 @@ export class MaxGatewayClient {
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
-      // 404 with PHONE_NOT_REGISTERED is a known business error, not a crash
-      if (res.status === 404) {
+      // Known business errors — parse JSON once and branch on code
+      if (res.status === 404 || res.status === 403) {
         let parsed: Record<string, unknown> = {};
         try { parsed = JSON.parse(errBody); } catch { /* ignore */ }
-        if (parsed.code === "PHONE_NOT_REGISTERED") {
-          // Extract the phone from the path query string if present
+        if (res.status === 404 && parsed.code === "PHONE_NOT_REGISTERED") {
           const phoneMatch = path.match(/[?&]phone=([^&]+)/);
           throw new GatewayPhoneNotRegisteredError(phoneMatch ? decodeURIComponent(phoneMatch[1]) : "unknown");
+        }
+        if (res.status === 403 && parsed.code === "USER_RESTRICTED") {
+          throw new GatewayUserRestrictedError();
         }
       }
       throw new Error(

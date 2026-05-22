@@ -430,6 +430,16 @@ router.post("/api/max-personal/start-conversation", requireAuth, requireTenant, 
       const trimmed = String(initialMessage).trim();
       const { maxPersonalAdapter } = await import("../../services/max-personal-adapter");
       const sendResult = await maxPersonalAdapter.sendMessageForTenant(tenantId, chatId, trimmed);
+
+      if (sendResult.error === "USER_RESTRICTED") {
+        // Clean up the just-created conversation — no message was delivered
+        await storage.deleteConversation(conversation!.id, tenantId).catch(() => {});
+        return res.status(403).json({
+          error: "Начать диалог не получится — возможности профиля этого пользователя ограничены",
+          code: "USER_RESTRICTED",
+        });
+      }
+
       if (sendResult.success) {
         await storage.createMessage({
           conversationId: conversation!.id,

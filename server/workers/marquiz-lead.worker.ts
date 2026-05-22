@@ -550,6 +550,9 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     if (!result.success) {
       // Hard-delete — no message was ever sent, nothing should appear in the list.
       await storage.deleteConversation(conversation.id, tenantId).catch(() => {});
+      if (result.error === "USER_RESTRICTED") {
+        console.log(`[MarquizWorker] Phone ${chatId} is restricted in MAX — cannot start dialog`);
+      }
       return { success: false, error: result.error };
     }
 
