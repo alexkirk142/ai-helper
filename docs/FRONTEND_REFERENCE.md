@@ -428,7 +428,7 @@ function AdminGuard({ children }) {
 | Компонент | Что делает |
 |-----------|-----------|
 | `ChannelSettings` | Статус каналов, toggle (paywall), конфиг (токен), Telegram Personal QR/код/2FA, WhatsApp Baileys QR, MAX Personal GREEN-API список аккаунтов |
-| `MaxPersonalCard` | Управление аккаунтами MAX Personal. Первые 5 — бесплатно при подписке `channels`. Аккаунты 6+ требуют подписки `extra_max_accounts`. При попытке создания 6+ показывает диалог оплаты с ценой из `publicConfig.extraAccountPrice`. Запрос к `GET /api/billing/extra-accounts/me` отражает статус подписки. |
+| `MaxPersonalCard` | Управление аккаунтами MAX Personal. Первые 5 — бесплатно при подписке `channels`. Аккаунты 6+ требуют подписки `extra_max_accounts`. При попытке создания 6+ показывает диалог оплаты с ценой из `publicConfig.extraAccountPrice`. Кнопка при исчерпании бесплатных слотов меняется на «Добавить аккаунт — N USDT/мес». Создание аккаунта использует raw `fetch` (не `apiRequest`) чтобы корректно обработать `402`. Запрос к `GET /api/billing/extra-accounts/me` отражает статус подписки. |
 | `TrainingPoliciesSettings` | Forbidden topics, AUTO_LEARNING_ENABLED флаг, always-escalate intents |
 | `TemplatesTab` | CRUD шаблонов message_templates с preview рендерером |
 | `PaymentMethodsTab` | CRUD + реордер payment_methods (drag-and-drop порядок) |
@@ -451,7 +451,10 @@ const { data: tenant } = useQuery<Tenant>({ queryKey: ["/api/tenant"] });
 // Payment success detection
 useEffect(() => {
   const params = new URLSearchParams(window.location.search);
-  if (params.get("billing") !== "success") return;
+  const billingParam = params.get("billing");
+  // "success" — channels subscription
+  // "extra_accounts_success" — extra MAX accounts subscription
+  if (billingParam !== "success" && billingParam !== "extra_accounts_success") return;
   // verify payment + invalidate billing queries
 }, []);
 ```
@@ -898,10 +901,16 @@ canAccess = status === "active" OR status === "trial"
 
 **Payment Success Flow:**
 
-1. CryptoBot redirect → `/settings?billing=success`
-2. Settings: detect param → `POST /api/billing/verify-payment` → invalidate queries
-3. Показать `PaymentSuccessDialog` + `markSubscriptionDialogShown(periodEnd)`
-4. Глобально (не на settings): `AuthenticatedApp` тоже отслеживает billing status → показывает диалог (с dedupe через localStorage)
+| Тип подписки | successUrl | billing param | verify endpoint | invalidates |
+|---|---|---|---|---|
+| channels | `/settings?billing=success` | `success` | `POST /api/billing/verify-payment` | `/api/billing/me`, `/api/billing/ai/me` |
+| extra_max_accounts | `/settings?tab=channels&billing=extra_accounts_success` | `extra_accounts_success` | `POST /api/billing/extra-accounts/verify-payment` | `/api/billing/extra-accounts/me` |
+
+1. CryptoBot redirect → settings с соответствующим `?billing=…` параметром
+2. `useEffect` в Settings обнаруживает параметр, вызывает нужный verify endpoint (fallback если webhook не пришёл)
+3. После верификации инвалидирует нужные query keys → UI обновляется
+4. Показывает `PaymentSuccessDialog` + `markSubscriptionDialogShown(periodEnd)` (только для channels)
+5. Глобально (не на settings): `AuthenticatedApp` тоже отслеживает billing status → показывает диалог (с dedupe через localStorage)
 
 ---
 

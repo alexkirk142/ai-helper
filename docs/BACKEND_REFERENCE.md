@@ -456,6 +456,9 @@ request
 - При попытке создания 6+ аккаунта без подписки API возвращает `402` с `requiresUpgrade: true`
 - Цена задаётся ключом `PRICE_EXTRA_MAX_ACCOUNT_USDT` (дефолт: 10 USDT/мес, константа `EXTRA_MAX_ACCOUNTS_PRICE_USDT`)
 - Free-лимит задан константой `FREE_MAX_PERSONAL_ACCOUNTS = 5`
+- `successUrl` инвойса → `/settings?tab=channels&billing=extra_accounts_success` (отличается от channels `billing=success`)
+- Fallback верификация: `POST /api/billing/extra-accounts/verify-payment` — вызывается фронтендом при обнаружении `?billing=extra_accounts_success` в URL
+- Администратор может регулировать цену через `PUT /api/admin/billing/prices` → поле `extraAccountPrice` → ключ `PRICE_EXTRA_MAX_ACCOUNT_USDT`
 
 ### Tenant Config (`routes/tenant-config.routes.ts`)
 
