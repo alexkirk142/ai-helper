@@ -276,6 +276,35 @@ export class MaxGatewayClient {
     return { messageId: data.message?.id };
   }
 
+  // ── Instance SSE Events ───────────────────────────────────────────────────
+
+  /**
+   * Opens a raw SSE stream for an instance.
+   * Returns the fetch Response (caller must read `.body` and handle reconnects).
+   * Pass `signal` to support cancellation.
+   */
+  async openInstanceEventsStream(
+    instanceId: string,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    const baseUrl = await this.resolveBaseUrl();
+    const adminKey = await this.resolveAdminKey();
+    const url = `${baseUrl}/instances/${instanceId}/events`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        Accept: "text/event-stream",
+        "Cache-Control": "no-cache",
+      },
+      signal,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`MAX Gateway SSE ${instanceId}: ${res.status} ${res.statusText}${body ? ` | ${body}` : ""}`);
+    }
+    return res;
+  }
+
   // ── Stats & Monitoring ────────────────────────────────────────────────────
 
   async getStats(): Promise<GatewayStats> {

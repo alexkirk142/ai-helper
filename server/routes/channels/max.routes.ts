@@ -245,8 +245,14 @@ router.delete("/api/channels/max-personal/:accountId", requireAuth, async (req: 
     });
     if (!account) return res.status(404).json({ error: "Account not found" });
 
-    // For gateway instances — remove from the gateway first (best-effort)
+    // For gateway instances — stop SSE watcher first to avoid reconnect race,
+    // then remove from the gateway (best-effort).
     if (isGatewayAccount(account as any)) {
+      try {
+        const { gatewaySSEManager } = await import("../../services/max-gateway-sse-manager");
+        gatewaySSEManager.unsubscribe(account.idInstance);
+      } catch { /* non-fatal */ }
+
       try {
         const { maxGatewayClient } = await import("../../services/max-gateway-client");
         await maxGatewayClient.deleteInstance(account.idInstance);
@@ -336,6 +342,11 @@ router.post("/api/channels/max-personal/create", requireAuth, async (req: Reques
       webhookRegistered: true,
       provider: "max_gateway",
     });
+
+    // Start watching for gateway-side events (e.g. `deleted`) immediately after creation
+    import("../../services/max-gateway-sse-manager")
+      .then(({ gatewaySSEManager }) => gatewaySSEManager.subscribe(instanceId))
+      .catch(() => {});
 
     console.log(`[MaxPersonal] Self-service instance created: ${instanceId} for tenant ${tenantId}`);
     return res.json({ success: true, accountId });

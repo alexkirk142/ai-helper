@@ -303,6 +303,16 @@ app.use((req, res, next) => {
         .then((n) => log(`MAX gateway reconcile complete: ${n} account(s) updated`, "startup"))
         .catch((err: any) => log(`MAX gateway reconcile failed: ${err.message}`, "startup"));
 
+      // Subscribe to SSE /instances/{id}/events for each gateway account.
+      // Handles the `deleted` event: marks account as deleted in DB when removed from gateway.
+      import("./services/max-gateway-sse-manager")
+        .then(({ gatewaySSEManager }) =>
+          gatewaySSEManager.initializeAll()
+            .then(() => log("MAX Gateway SSE subscriptions initialized", "startup"))
+            .catch((err: any) => log(`MAX Gateway SSE init failed: ${err.message}`, "startup"))
+        )
+        .catch(() => {});
+
       // Register notification bot webhook (fire-and-forget, non-blocking)
       import("./routes/notify-bot-webhook").then(({ registerNotifyBotWebhook }) => {
         try {

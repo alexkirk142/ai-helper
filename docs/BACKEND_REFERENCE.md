@@ -159,7 +159,8 @@ server/
 │   ├── whatsapp-adapter.ts          # WhatsApp Business API адаптер
 │   ├── max-personal-adapter.ts      # GREEN-API адаптер (multi-account по accountId)
 │   ├── max-green-api-adapter.ts     # HTTP-клиент к GREEN-API (sendMessage, checkWhatsapp, setWebhook)
-│   ├── max-gateway-client.ts        # Клиент MAX Gateway (checkPhone, альтернативный роутинг)
+│   ├── max-gateway-client.ts        # Клиент MAX Gateway (checkPhone, sendMessage, SSE stream)
+│   ├── max-gateway-sse-manager.ts   # SSE менеджер — подписка на /instances/{id}/events, обработка `deleted`
 │   ├── max-adapter.ts               # MAX Bot API адаптер
 │   ├── vehicle-lookup-queue.ts      # BullMQ очередь: vehicle_lookup_queue
 │   ├── price-lookup-queue.ts        # BullMQ очередь: price_lookup_queue (отдельный процесс)
@@ -601,6 +602,23 @@ interface ChannelAdapter {
   - `status: "read"` — **read receipt**: контакт прочитал сообщение → `handleMaxReadReceipt()` резолвит chatId (exact + `maxInternalId` fallback) → `handleIncomingReadReceipt()` обновляет `conversations.lastReadAt`, бродкастит WS-событие `message_read: { conversationId, lastReadAt }`
 - `instanceRestricted` — инстанс заблокирован MAX → статус аккаунта `"restricted"`
 - `stateInstanceChanged` — смена авторизации → статус аккаунта `"authorized"` / `"notAuthorized"`
+
+**Gateway SSE (`server/services/max-gateway-sse-manager.ts`):**  
+В дополнение к webhook'ам AI Helper поддерживает push-уведомления через SSE-стрим `/instances/{id}/events` (MAX Gateway API).
+
+`gatewaySSEManager` — синглтон, управляет SSE-соединениями для всех gateway-аккаунтов:
+
+| Метод | Когда вызывается |
+|---|---|
+| `initializeAll()` | Старт сервера (после `backfillMaxGatewayDisplayNames`) |
+| `subscribe(instanceId)` | После создания нового аккаунта (`POST /api/channels/max-personal/create`) |
+| `unsubscribe(instanceId)` | Перед удалением аккаунта (`DELETE /api/channels/max-personal/:id`) |
+
+**SSE-события, которые обрабатывает менеджер:**
+- `deleted` — шлюз удалил инстанс → `status = "deleted"` в БД, соединение закрывается (без реконнекта)
+- `stateInstanceChanged` — смена авторизации → `status = "authorized"` / `"notAuthorized"` в БД
+
+**Реконнект:** экспоненциальный backoff от 3 с до 120 с. При отмене через `AbortController` реконнект не происходит.
 
 **ChatId нормализация:**
 - `79991234567@c.us` — номер телефона (10+ цифр → добавить `@c.us`)
