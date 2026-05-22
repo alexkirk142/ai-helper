@@ -2226,7 +2226,7 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
               ? "text-red-500"
               : "text-muted-foreground";
             const label = isRestricted
-              ? "Аккаунт заблокирован MAX — отправка сообщений ограничена"
+              ? "Аккаунт ограничен MAX — можно отправлять только тем, кто добавил номер в контакты"
               : wasAuthorized
               ? "Сессия завершена — требуется повторная авторизация"
               : "Требуется авторизация через MAX";

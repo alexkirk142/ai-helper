@@ -694,7 +694,7 @@ export function ChatInterface({
               )}
               {isMaxPersonal && activeAccount?.status === "restricted" && (
                 <Badge variant="outline" className="text-xs border-orange-400 text-orange-500">
-                  Аккаунт заблокирован
+                  Аккаунт ограничен
                 </Badge>
               )}
             </div>

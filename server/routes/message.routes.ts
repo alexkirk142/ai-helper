@@ -371,7 +371,7 @@ router.post(
       if (uploadedFile && role === "owner" && !outboundAttachment) {
         if (maxPersonalRestricted) {
           return res.status(403).json({
-            error: "Отправка невозможна — аккаунт MAX заблокирован. Обратитесь к администратору.",
+            error: "Отправка невозможна — аккаунт MAX ограничен. Получатель должен добавить номер в контакты.",
             code: "USER_RESTRICTED",
           });
         }
@@ -546,7 +546,7 @@ router.post(
                 // Remove the message we just saved — it was never delivered
                 await storage.deleteMessage(message.id, msgUser.tenantId).catch(() => {});
                 return res.status(403).json({
-                  error: "Отправка невозможна — аккаунт MAX заблокирован. Обратитесь к администратору.",
+                  error: "Отправка невозможна — аккаунт MAX ограничен. Получатель должен добавить номер в контакты.",
                   code: "USER_RESTRICTED",
                 });
               }

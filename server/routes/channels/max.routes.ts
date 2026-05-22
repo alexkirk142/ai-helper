@@ -435,7 +435,7 @@ router.post("/api/max-personal/start-conversation", requireAuth, requireTenant, 
         // Clean up the just-created conversation — no message was delivered
         await storage.deleteConversation(conversation!.id, tenantId).catch(() => {});
         return res.status(403).json({
-          error: "Отправка невозможна — аккаунт MAX заблокирован. Обратитесь к администратору.",
+          error: "Отправка невозможна — аккаунт MAX ограничен. Получатель должен добавить номер в контакты.",
           code: "USER_RESTRICTED",
         });
       }
