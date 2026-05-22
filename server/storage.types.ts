@@ -38,6 +38,7 @@ import {
   type PriceSnapshot, type InsertPriceSnapshot,
   type InternalPrice, type InsertInternalPrice,
   type TelegramSession, type InsertTelegramSession,
+  type WhatsappAuthSession,
   type MessageTemplate, type InsertMessageTemplate,
   type PaymentMethod, type InsertPaymentMethod,
   type TenantAgentSettings, type InsertTenantAgentSettings,
@@ -308,6 +309,12 @@ export interface IStorage {
   // Internal Prices
   upsertInternalPrice(data: InsertInternalPrice): Promise<InternalPrice>;
   getInternalPricesByOem(tenantId: string, oem: string): Promise<InternalPrice[]>;
+
+  // WhatsApp Personal Auth Sessions
+  getWhatsappAuthSession(tenantId: string, accountId: string): Promise<WhatsappAuthSession | undefined>;
+  upsertWhatsappAuthSession(tenantId: string, accountId: string, authData: string, phoneNumber?: string): Promise<void>;
+  deleteWhatsappAuthSession(tenantId: string, accountId: string): Promise<void>;
+  hasWhatsappAuthSession(tenantId: string, accountId: string): Promise<boolean>;
 
   // Telegram Accounts (multi-account sessions)
   getTelegramAccountsByTenant(tenantId: string): Promise<TelegramSession[]>;

@@ -155,7 +155,8 @@ server/
 │   ├── telegram-personal-adapter.ts # MTProto auth (QR/код/2FA) + send/receive
 │   ├── telegram-session-crypto.ts   # AES-256-GCM шифрование Telegram-сессий
 │   ├── telegram-adapter.ts          # Telegram Bot API адаптер
-│   ├── whatsapp-personal-adapter.ts # Baileys auth + send/receive (44 connections)
+│   ├── whatsapp-personal-adapter.ts # Baileys auth + send/receive — сессия хранится в PostgreSQL
+│   ├── whatsapp-auth-state.ts       # usePostgresAuthState — Baileys AuthenticationState поверх БД
 │   ├── whatsapp-adapter.ts          # WhatsApp Business API адаптер
 │   ├── max-personal-adapter.ts      # GREEN-API адаптер (multi-account по accountId)
 │   ├── max-green-api-adapter.ts     # HTTP-клиент к GREEN-API (sendMessage, checkWhatsapp, setWebhook)
@@ -517,6 +518,24 @@ request
 | POST | `/api/whatsapp/auth/start` |
 | GET | `/api/whatsapp/auth/qr/:sessionId` |
 | POST | `/api/whatsapp/sessions/:id/disconnect` |
+
+#### Хранение сессии Baileys в PostgreSQL
+
+`usePostgresAuthState(tenantId, accountId)` (`server/services/whatsapp-auth-state.ts`) реализует
+интерфейс Baileys `AuthenticationState` напрямую через таблицу `whatsapp_auth_sessions`.
+
+- **creds** и **keys** хранятся в поле `auth_data` как один JSON-блоб `{ creds, keys }`.
+- `keys.set()` делает write-through в БД немедленно (Signal Protocol state должен быть долговечен).
+- `saveCreds()` аналогично сохраняет изменённые creds.
+- Диск не используется. Файлы из `./whatsapp_sessions/{tenantId}/` мигрируются при первом вызове и затем удаляются.
+- Старый формат БД `{ files: { [filename]: base64 } }` конвертируется автоматически.
+- Таблица поддерживает несколько аккаунтов на тенанта: PK = `(tenant_id, account_id)`, дефолтный `account_id = "default"`.
+
+**IStorage методы:**
+- `getWhatsappAuthSession(tenantId, accountId)` — чтение строки
+- `upsertWhatsappAuthSession(tenantId, accountId, authData, phoneNumber?)` — запись/обновление
+- `deleteWhatsappAuthSession(tenantId, accountId)` — удаление (logout, invalid session)
+- `hasWhatsappAuthSession(tenantId, accountId)` — проверка существования
 
 ### MAX Personal (`routes/channels/max.routes.ts`)
 
@@ -1047,7 +1066,7 @@ const data = await storage.getSomething(user.tenantId);
 | `sessions` | express-session (connect-pg-simple) |
 | `auth_users` | OIDC профили (опционально) |
 | `telegram_sessions` | MTProto сессии (AES-256-GCM зашифрованы) |
-| `whatsapp_auth_sessions` | Baileys сессии (base64 файлы, зашифрованы) |
+| `whatsapp_auth_sessions` | Baileys сессии, PK=(tenant\_id, account\_id), JSON `{creds, keys}` |
 | `onboarding_state` | Прогресс 6-шагового wizard |
 
 ### Billing & Anti-Fraud

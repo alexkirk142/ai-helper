@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, smallint, boolean, timestamp, jsonb, real, serial, uniqueIndex, index, customType } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, smallint, boolean, timestamp, jsonb, real, serial, uniqueIndex, index, customType, primaryKey } from "drizzle-orm/pg-core";
 
 // pgvector custom type for storing and querying OpenAI embeddings (text-embedding-3-large = 3072 dims)
 const pgVector = customType<{ data: number[]; driverData: string; config: { dimensions: number } }>({
@@ -527,12 +527,19 @@ export const telegramSessions = pgTable("telegram_sessions", {
 }));
 
 // ============ WhatsApp Personal Auth Sessions (DB-persisted Baileys state) ============
+// Composite PK (tenant_id, account_id) supports multiple WA accounts per tenant.
+// account_id defaults to "default" for backward compatibility with single-account setups.
+// authData JSON format: { creds: {...}, keys: { [type]: { [id]: value } } }
+// Legacy format { files: { [filename]: base64 } } is auto-migrated on first read.
 export const whatsappAuthSessions = pgTable("whatsapp_auth_sessions", {
-  tenantId: varchar("tenant_id").primaryKey().references(() => tenants.id, { onDelete: "cascade" }),
-  authData: text("auth_data").notNull(), // JSON blob: { files: { [filename]: string (base64) } }
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  accountId: varchar("account_id").notNull().default("default"),
+  authData: text("auth_data").notNull(),
   phoneNumber: text("phone_number"),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+}, (table) => [
+  primaryKey({ columns: [table.tenantId, table.accountId] }),
+]);
 
 // ============ PHASE 7: Onboarding State ============
 export const ONBOARDING_STATUS = ["NOT_STARTED", "IN_PROGRESS", "DONE"] as const;
@@ -754,6 +761,9 @@ export type HumanDelaySettings = typeof humanDelaySettings.$inferSelect;
 export type InsertHumanDelaySettings = z.infer<typeof insertHumanDelaySettingsSchema>;
 export type TelegramSession = typeof telegramSessions.$inferSelect;
 export type InsertTelegramSession = z.infer<typeof insertTelegramSessionSchema>;
+export type WhatsappAuthSession = typeof whatsappAuthSessions.$inferSelect;
+export type InsertWhatsappAuthSession = typeof whatsappAuthSessions.$inferInsert;
+export const insertWhatsappAuthSessionSchema = createInsertSchema(whatsappAuthSessions).omit({ updatedAt: true });
 export type OnboardingState = typeof onboardingState.$inferSelect;
 export type InsertOnboardingState = z.infer<typeof insertOnboardingStateSchema>;
 export type ReadinessReport = typeof readinessReports.$inferSelect;

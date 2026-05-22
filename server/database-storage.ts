@@ -11,6 +11,7 @@ import {
   messageTemplates, paymentMethods,
   tenantAgentSettings,
   transmissionIdentityCache,
+  whatsappAuthSessions,
 } from "@shared/schema";
 import {
   type Tenant, type InsertTenant,
@@ -52,6 +53,7 @@ import {
   type PriceSnapshot, type InsertPriceSnapshot,
   type InternalPrice, type InsertInternalPrice,
   type TelegramSession, type InsertTelegramSession,
+  type WhatsappAuthSession,
   type MessageTemplate, type InsertMessageTemplate,
   type PaymentMethod, type InsertPaymentMethod,
   type TenantAgentSettings, type InsertTenantAgentSettings,
@@ -2101,6 +2103,46 @@ export class DatabaseStorage implements IStorage {
   async deleteTelegramAccount(id: string): Promise<boolean> {
     const result = await db.delete(telegramSessions).where(eq(telegramSessions.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // ─── WhatsApp Personal Auth Sessions ─────────────────────────────────────
+
+  async getWhatsappAuthSession(tenantId: string, accountId: string): Promise<WhatsappAuthSession | undefined> {
+    const [row] = await db.select()
+      .from(whatsappAuthSessions)
+      .where(and(
+        eq(whatsappAuthSessions.tenantId, tenantId),
+        eq(whatsappAuthSessions.accountId, accountId),
+      ));
+    return row;
+  }
+
+  async upsertWhatsappAuthSession(tenantId: string, accountId: string, authData: string, phoneNumber?: string): Promise<void> {
+    await db.insert(whatsappAuthSessions)
+      .values({ tenantId, accountId, authData, phoneNumber: phoneNumber ?? null, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: [whatsappAuthSessions.tenantId, whatsappAuthSessions.accountId],
+        set: { authData, ...(phoneNumber !== undefined ? { phoneNumber } : {}), updatedAt: new Date() },
+      });
+  }
+
+  async deleteWhatsappAuthSession(tenantId: string, accountId: string): Promise<void> {
+    await db.delete(whatsappAuthSessions)
+      .where(and(
+        eq(whatsappAuthSessions.tenantId, tenantId),
+        eq(whatsappAuthSessions.accountId, accountId),
+      ));
+  }
+
+  async hasWhatsappAuthSession(tenantId: string, accountId: string): Promise<boolean> {
+    const [row] = await db.select({ tenantId: whatsappAuthSessions.tenantId })
+      .from(whatsappAuthSessions)
+      .where(and(
+        eq(whatsappAuthSessions.tenantId, tenantId),
+        eq(whatsappAuthSessions.accountId, accountId),
+      ))
+      .limit(1);
+    return !!row;
   }
 
   // ─── Message Templates ───────────────────────────────────────────────────
