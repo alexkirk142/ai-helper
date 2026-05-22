@@ -185,6 +185,7 @@ server/
 │   ├── template-renderer.ts         # {{variable}} рендерер шаблонов
 │   ├── feature-flags.ts             # In-memory + JSON file feature flags
 │   ├── websocket-server.ts          # WS на /ws — broadcasts событий
+│   ├── read-receipt-handler.ts      # Общий read receipt handler (MAX/WA/TG) → last_read_at + WS broadcast
 │   ├── auth-service.ts              # Signup, login (lockout 5 попыток), password reset
 │   ├── owner-bootstrap.ts           # Создание platform owner из env при старте
 │   ├── billing-service.ts           # Stripe billing (legacy)
@@ -595,7 +596,11 @@ interface ChannelAdapter {
 **Типы webhook'ов GREEN-API:**
 - `incomingMessageReceived` — входящее сообщение (→ `processIncomingMessageFull`)
 - `outgoingAPIMessageReceived` — подтверждение исходящего (→ обновление `maxInternalId` клиента)
-- `statusInstanceChanged` — смена статуса инстанса
+- `outgoingMessageStatus` — статус исходящего сообщения:
+  - `status: "noAccount"` — клиент не в MAX → сигнал в Redis (`max:status:{msgId}`) для воркера
+  - `status: "read"` — **read receipt**: контакт прочитал сообщение → `handleMaxReadReceipt()` резолвит chatId (exact + `maxInternalId` fallback) → `handleIncomingReadReceipt()` обновляет `conversations.lastReadAt`, бродкастит WS-событие `message_read: { conversationId, lastReadAt }`
+- `instanceRestricted` — инстанс заблокирован MAX → статус аккаунта `"restricted"`
+- `stateInstanceChanged` — смена авторизации → статус аккаунта `"authorized"` / `"notAuthorized"`
 
 **ChatId нормализация:**
 - `79991234567@c.us` — номер телефона (10+ цифр → добавить `@c.us`)
@@ -819,6 +824,12 @@ Channel → processIncomingMessageFull(tenantId, parsed: ParsedIncomingMessage)
   │   ├── Сохранить Message в БД
   │   └── WS broadcast: new_message, conversation_update
   │
+  ├── Read receipts (все личные каналы) → `services/read-receipt-handler.ts`:
+  │   ├── MAX Personal: `outgoingMessageStatus` status=read → `handleMaxReadReceipt()` (chatId + maxInternalId резолвинг) → `handleIncomingReadReceipt()`
+  │   ├── WhatsApp Personal: `message-receipt.update` (Baileys) → readTimestamp + fromMe=true → `handleIncomingReadReceipt()`
+  │   └── Telegram Personal: `UpdateReadHistoryOutbox` (gramjs Raw) → PeerUser.userId → `handleIncomingReadReceipt()`
+  │   handleIncomingReadReceipt(): find customer → find conversation → UPDATE last_read_at → WS broadcast message_read { conversationId, lastReadAt }
+  │
   ├── detectVehicleIdFromText() [если AUTO_PARTS_ENABLED=true]:
   │   ├── Нормализация VIN/FRAME
   │   ├── Regex детектор
@@ -836,9 +847,9 @@ Channel → processIncomingMessageFull(tenantId, parsed: ParsedIncomingMessage)
 
 | Канал | Точка входа |
 |-------|------------|
-| Telegram Personal | `telegram-client-manager.ts` (MTProto event) → `processIncomingMessageFull` |
-| WhatsApp Personal | `whatsapp-personal-adapter.ts` (Baileys event) → `processIncomingMessageFull` |
-| MAX Personal | `routes/max-personal-webhook.ts` (typeWebhook=incomingMessageReceived) → `processIncomingMessageFull` |
+| Telegram Personal | `telegram-client-manager.ts` (NewMessage + Raw `UpdateReadHistoryOutbox`) → `processIncomingMessageFull` / `handleIncomingReadReceipt` |
+| WhatsApp Personal | `whatsapp-personal-adapter.ts` (`messages.upsert` + `message-receipt.update`) → `processIncomingMessageFull` / `handleIncomingReadReceipt` |
+| MAX Personal | `routes/max-personal-webhook.ts` (`incomingMessageReceived` / `outgoingMessageStatus`) → `processIncomingMessageFull` / `handleIncomingReadReceipt` |
 | Telegram Bot | `routes/telegram-webhook.ts` — только парсинг+аудит, **не** вызывает AI |
 | WhatsApp Business | `routes/whatsapp-webhook.ts` — только парсинг+аудит, **не** вызывает AI |
 | MAX Bot | `routes/max-webhook.ts` — только парсинг+аудит, **не** вызывает AI |
@@ -949,7 +960,7 @@ const data = await storage.getSomething(user.tenantId);
 | `customers` | Конечные пользователи. UNIQUE (tenantId, channel, externalId) |
 | `customer_notes` | Заметки операторов |
 | `customer_memory` | Долгосрочная память: предпочтения + частые темы |
-| `conversations` | Треды. Статусы: active, waiting_customer, waiting_operator, escalated, resolved, **failed_delivery** |
+| `conversations` | Треды. Статусы: active, waiting_customer, waiting_operator, escalated, resolved, **failed_delivery**. Поле `last_read_at` (nullable) — timestamp последнего read receipt от контакта |
 | `messages` | Сообщения. Роли: customer, assistant, owner |
 | `escalation_events` | Эскалации с suggested responses |
 

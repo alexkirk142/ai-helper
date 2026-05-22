@@ -14,6 +14,7 @@ import { featureFlagService } from "./feature-flags";
 import { messageBus } from "./message-bus";
 import { sanitizeForLog } from "../utils/sanitizer";
 import { storage } from "../storage";
+import { handleIncomingReadReceipt } from "./read-receipt-handler";
 import * as fs from "fs";
 import * as path from "path";
 import pino from "pino";
@@ -688,6 +689,28 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
     };
     socket.ev.on("contacts.upsert", handleContactsUpdate);
     socket.ev.on("contacts.update", (updates) => handleContactsUpdate(updates as Contact[]));
+
+    // Read receipts: contact has read our outgoing messages
+    socket.ev.on("message-receipt.update", async (receipts) => {
+      for (const receipt of receipts) {
+        // Only process receipts for messages we sent (fromMe) that are now READ
+        if (!receipt.key.fromMe) continue;
+        const readTimestamp = (receipt.receipt as any).readTimestamp as number | undefined;
+        if (!readTimestamp) continue;
+
+        const remoteJid = receipt.key.remoteJid;
+        if (!remoteJid) continue;
+
+        const readAt = new Date(readTimestamp * 1000);
+        console.log(`[WhatsAppPersonal] read receipt from ${remoteJid} at ${readAt.toISOString()} (tenant=${tenantId})`);
+
+        try {
+          await handleIncomingReadReceipt(tenantId, "whatsapp_personal", remoteJid, readAt);
+        } catch (err: any) {
+          console.error(`[WhatsAppPersonal] handleIncomingReadReceipt error for ${remoteJid}:`, err.message);
+        }
+      }
+    });
 
     socket.ev.on("messaging-history.set", async ({ chats, messages, isLatest }) => {
       console.log(`[WhatsAppPersonal] History sync: ${chats?.length || 0} chats, ${messages?.length || 0} messages, isLatest: ${isLatest}`);

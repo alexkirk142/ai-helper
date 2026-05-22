@@ -5,6 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { ParsedIncomingMessage, ParsedAttachment } from "../services/channel-adapter";
 import { processIncomingMessageFull } from "../services/inbound-message-handler";
 import { storage } from "../storage";
+import { handleIncomingReadReceipt } from "../services/read-receipt-handler";
 import IORedis from "ioredis";
 
 /** Redis client shared for MAX status signaling (lazy init) */
@@ -21,6 +22,41 @@ function getStatusRedis(): IORedis | null {
 
 /** Key used to signal noAccount status back to the worker */
 export const maxStatusKey = (messageId: string) => `max:status:${messageId}`;
+
+/**
+ * MAX-specific read receipt resolver.
+ *
+ * chatId from gateway is the numeric MAX internal user ID (e.g. "29445268").
+ * Some customers are stored with a phone-based externalId; their numeric MAX internal ID
+ * lives in metadata.maxInternalId. This function resolves both cases before delegating
+ * to the shared handleIncomingReadReceipt().
+ *
+ * mark is a Unix timestamp in milliseconds of when the contact read the message.
+ */
+async function handleMaxReadReceipt(tenantId: string, chatId: string, mark?: number) {
+  const readAt = mark ? new Date(mark) : new Date();
+
+  // Try exact chatId first, then fall back to maxInternalId metadata lookup
+  let customer = await storage.getCustomerByExternalId(tenantId, "max_personal", chatId);
+  if (!customer) {
+    const byInternalId = await db.query.customers.findFirst({
+      where: and(
+        eq(customers.tenantId, tenantId),
+        eq(customers.channel, "max_personal"),
+        sql`${customers.metadata}->>'maxInternalId' = ${chatId}`
+      ),
+    });
+    customer = byInternalId ?? undefined;
+  }
+
+  if (!customer) {
+    console.log(`[MaxPersonalWebhook] read receipt: no customer found for chatId=${chatId} tenant=${tenantId}`);
+    return;
+  }
+
+  // Delegate to shared handler using the resolved externalId
+  await handleIncomingReadReceipt(tenantId, "max_personal", customer.externalId!, readAt);
+}
 
 const router = Router();
 
@@ -229,6 +265,15 @@ router.post("/:tenantId/:accountId", async (req, res) => {
           const key = maxStatusKey(String(body.idMessage));
           await redis.set(key, "noAccount", "EX", 30).catch(() => {});
           console.log(`[MaxPersonalWebhook] Signalled noAccount for msgId=${body.idMessage}`);
+        }
+      }
+
+      // Handle read receipt: contact has read our messages
+      if (body.status === "read" && body.chatId) {
+        try {
+          await handleMaxReadReceipt(tenantId, body.chatId, body.mark);
+        } catch (err: any) {
+          console.error(`[MaxPersonalWebhook] handleMaxReadReceipt error:`, err.message);
         }
       }
 

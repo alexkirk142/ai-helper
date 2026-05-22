@@ -777,7 +777,19 @@ export function ChatInterface({
           onScrollCapture={handleScroll}
         >
           <div className="space-y-4">
-            {conversation.messages.map((message) => (
+            {(() => {
+              const lastReadAt = conversation.lastReadAt ? new Date(conversation.lastReadAt) : null;
+              // Find the id of the last outgoing message that was read by the contact
+              const lastReadMsgId = lastReadAt
+                ? [...conversation.messages]
+                    .reverse()
+                    .find(
+                      (m) =>
+                        (m.role === "assistant" || m.role === "owner") &&
+                        new Date(m.createdAt) <= lastReadAt
+                    )?.id
+                : null;
+              return conversation.messages.map((message) => (
               <div
                 key={message.id}
                 className={cn(
@@ -832,14 +844,38 @@ export function ChatInterface({
                   />
                   <span
                     className={cn(
-                      "mt-1 block text-xs opacity-70",
-                      message.role !== "customer" && "text-right"
+                      "mt-1 flex items-center gap-1 text-xs opacity-70",
+                      message.role !== "customer" ? "justify-end" : "justify-start"
                     )}
                   >
                     {formatDistanceToNow(new Date(message.createdAt), {
                       addSuffix: true,
                       locale: ru,
                     })}
+                    {(message.role === "assistant" || message.role === "owner") && (
+                      message.id === lastReadMsgId ? (
+                        // Double check — message was read by contact
+                        <span className={cn(
+                          "inline-flex items-center shrink-0",
+                          message.role === "assistant"
+                            ? "text-primary-foreground"
+                            : "text-blue-500 dark:text-blue-400"
+                        )}>
+                          <Check className="h-3.5 w-3.5" />
+                          <Check className="h-3.5 w-3.5 -ml-2" />
+                        </span>
+                      ) : (
+                        // Single check — message sent
+                        <span className={cn(
+                          "inline-flex items-center shrink-0 opacity-60",
+                          message.role === "assistant"
+                            ? "text-primary-foreground"
+                            : "text-muted-foreground"
+                        )}>
+                          <Check className="h-3.5 w-3.5" />
+                        </span>
+                      )
+                    )}
                   </span>
                 </div>
                 {onDeleteMessage && (message.role === "owner" || message.role === "assistant") && (
@@ -852,7 +888,8 @@ export function ChatInterface({
                   </button>
                 )}
               </div>
-            ))}
+              ));
+            })()}
             <div ref={messagesEndRef} />
           </div>
         </ScrollArea>

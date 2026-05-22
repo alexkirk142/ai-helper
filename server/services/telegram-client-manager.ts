@@ -10,6 +10,7 @@ import { getRateLimiterRedisInstance } from "../redis-client";
 import { getSecret } from "./secret-resolver";
 import { messageBus } from "./message-bus";
 import { featureFlagService } from "./feature-flags";
+import { handleIncomingReadReceipt } from "./read-receipt-handler";
 import type { ParsedAttachment } from "./channel-adapter.types";
 
 interface ActiveConnection {
@@ -628,6 +629,26 @@ class TelegramClientManager {
         }
       },
       new NewMessage({})
+    );
+
+    // Read receipts: peer has read our outgoing messages
+    // UpdateReadHistoryOutbox fires when the recipient reads our sent messages.
+    // peer is PeerUser for private chats; userId → customer externalId in DB.
+    connection.client.addEventHandler(
+      async (update: Api.TypeUpdate) => {
+        if (!(update instanceof Api.UpdateReadHistoryOutbox)) return;
+        const peer = update.peer;
+        if (!(peer instanceof Api.PeerUser)) return;
+
+        const userId = peer.userId.toString();
+        console.log(`[TelegramClientManager] read receipt from userId=${userId} (${connectionKey})`);
+
+        try {
+          await handleIncomingReadReceipt(connection.tenantId, "telegram_personal", userId, new Date());
+        } catch (err: any) {
+          console.error(`[TelegramClientManager] handleIncomingReadReceipt error for userId=${userId}:`, err.message);
+        }
+      }
     );
 
     connection.handlersAttached = true;

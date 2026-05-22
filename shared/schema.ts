@@ -244,6 +244,7 @@ export const conversations = pgTable("conversations", {
   mode: text("mode").notNull().default("learning"), // learning, semi-auto, auto
   isMuted: boolean("is_muted").default(false).notNull(),
   lastMessageAt: timestamp("last_message_at").default(sql`CURRENT_TIMESTAMP`),
+  lastReadAt: timestamp("last_read_at"), // when the contact last read our messages (read receipt)
   unreadCount: integer("unread_count").default(0),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),

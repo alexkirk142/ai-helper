@@ -177,6 +177,20 @@ class RealtimeService {
     });
   }
 
+  broadcastMessageRead(tenantId: string, conversationId: string, lastReadAt: Date) {
+    const payload = JSON.stringify({
+      type: "message_read",
+      conversationId,
+      lastReadAt: lastReadAt.toISOString(),
+    });
+
+    Array.from(this.clients).forEach(client => {
+      if (client.ws.readyState === WebSocket.OPEN && client.tenantId === tenantId) {
+        client.ws.send(payload);
+      }
+    });
+  }
+
   broadcastNewSuggestion(tenantId: string, conversationId: string, suggestionId: string) {
     const payload = JSON.stringify({
       type: "new_suggestion",

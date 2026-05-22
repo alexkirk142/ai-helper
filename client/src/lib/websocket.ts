@@ -114,6 +114,13 @@ class WebSocketClient {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations/channel-counts"] });
     }
 
+    if (type === "message_read") {
+      // Contact read our messages — refresh the conversation to get updated lastReadAt
+      if (data.conversationId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/conversations", data.conversationId] });
+      }
+    }
+
     const handlers = this.handlers.get(type);
     if (handlers) {
       handlers.forEach(handler => handler(data));
