@@ -235,6 +235,24 @@ router.post("/:tenantId/:accountId", async (req, res) => {
       return res.json({ ok: true });
     }
 
+    // ── instanceRestricted: MAX blocked the instance from sending messages ───
+    if (payload.typeWebhook === "instanceRestricted") {
+      const body = req.body as any;
+      console.log(`[MaxPersonalWebhook] instanceRestricted: instanceId=${body.instanceId} reason=${body.reason} account=${accountId}`);
+      try {
+        await db.update(maxPersonalAccounts)
+          .set({ status: "restricted", updatedAt: new Date() })
+          .where(and(
+            eq(maxPersonalAccounts.tenantId, tenantId),
+            eq(maxPersonalAccounts.accountId, accountId),
+          ));
+        console.log(`[MaxPersonalWebhook] Account ${accountId} marked as restricted`);
+      } catch (err: any) {
+        console.error(`[MaxPersonalWebhook] Failed to mark account ${accountId} as restricted:`, err.message);
+      }
+      return res.json({ ok: true });
+    }
+
     // ── stateInstanceChanged: sync account status to DB ──────────────────────
     if (payload.typeWebhook === "stateInstanceChanged") {
       const body = req.body as any;

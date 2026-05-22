@@ -10,10 +10,11 @@ export class GatewayPhoneNotRegisteredError extends Error {
   }
 }
 
-/** Thrown when the gateway responds 403 with code=USER_RESTRICTED */
+/** Thrown when the gateway responds 403 with code=USER_RESTRICTED.
+ *  This means the SENDER (the instance account) is restricted by MAX, not the recipient. */
 export class GatewayUserRestrictedError extends Error {
   constructor() {
-    super("Target account is restricted and cannot receive messages");
+    super("Instance account is restricted and cannot send messages");
     this.name = "GatewayUserRestrictedError";
   }
 }

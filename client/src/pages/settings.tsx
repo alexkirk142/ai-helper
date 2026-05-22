@@ -2208,31 +2208,52 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
             </div>
           ))}
           {pendingAccounts.map((acc, idx) => {
+            const isRestricted = acc.status === "restricted";
             const wasAuthorized = acc.status === "notAuthorized";
+            const borderCls = isRestricted
+              ? "bg-orange-500/5 border-orange-500/30"
+              : wasAuthorized
+              ? "bg-red-500/5 border-red-500/30"
+              : "bg-amber-500/5";
+            const iconCls = isRestricted
+              ? "text-orange-500"
+              : wasAuthorized
+              ? "text-red-500"
+              : "text-amber-500";
+            const textCls = isRestricted
+              ? "text-orange-600"
+              : wasAuthorized
+              ? "text-red-500"
+              : "text-muted-foreground";
+            const label = isRestricted
+              ? "Аккаунт заблокирован MAX — отправка сообщений ограничена"
+              : wasAuthorized
+              ? "Сессия завершена — требуется повторная авторизация"
+              : "Требуется авторизация через MAX";
             return (
-            <div key={acc.accountId} className={`rounded-md border p-3 flex items-center justify-between gap-3 ${wasAuthorized ? "bg-red-500/5 border-red-500/30" : "bg-amber-500/5"}`}>
+            <div key={acc.accountId} className={`rounded-md border p-3 flex items-center justify-between gap-3 ${borderCls}`}>
               <div className="flex items-center gap-3 min-w-0">
-                <AlertCircle className={`h-4 w-4 shrink-0 ${wasAuthorized ? "text-red-500" : "text-amber-500"}`} />
+                <AlertCircle className={`h-4 w-4 shrink-0 ${iconCls}`} />
                 <div className="min-w-0">
                   <p className="font-medium text-sm">
                     {acc.displayName ?? acc.label ?? `Аккаунт ${authorizedAccounts.length + idx + 1}`}
                   </p>
-                  <p className={`text-xs ${wasAuthorized ? "text-red-500" : "text-muted-foreground"}`}>
-                    {wasAuthorized ? "Сессия завершена — требуется повторная авторизация" : "Требуется авторизация через MAX"}
-                  </p>
+                  <p className={`text-xs ${textCls}`}>{label}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <Button
-                  size="sm"
-                  onClick={() => openQrDialog(acc.accountId)}
-                  disabled={checkingStatus === acc.accountId}
-                >
-                  {checkingStatus === acc.accountId
-                    ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Проверка...</>
-                    : "Подключить"
-                  }
-                </Button>
+                {!isRestricted && (
+                  <Button
+                    size="sm"
+                    onClick={() => openQrDialog(acc.accountId)}
+                    disabled={checkingStatus === acc.accountId}
+                  >
+                    {checkingStatus === acc.accountId
+                      ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Проверка...</>
+                      : "Подключить"
+                    }
+                  </Button>
+                )}
                 <Button
                   type="button"
                   size="sm"
