@@ -177,21 +177,23 @@ router.get(
   requireAuth,
   requirePlatformAdmin(),
   async (_req, res) => {
-    const { getSubscriptionPriceUsdt, getAiSubscriptionPriceUsdt, getTrialPeriodHours } =
+    const { getSubscriptionPriceUsdt, getAiSubscriptionPriceUsdt, getTrialPeriodHours, getExtraAccountPriceUsdt } =
       await import("../services/cryptobot-billing");
-    const [subscriptionPrice, aiAgentPrice, trialHours] = await Promise.all([
+    const [subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice] = await Promise.all([
       getSubscriptionPriceUsdt(),
       getAiSubscriptionPriceUsdt(),
       getTrialPeriodHours(),
+      getExtraAccountPriceUsdt(),
     ]);
-    res.json({ subscriptionPrice, aiAgentPrice, trialHours });
+    res.json({ subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice });
   }
 );
 
 const pricesSchema = z.object({
-  subscriptionPrice: z.number().positive().optional(),
-  aiAgentPrice:      z.number().positive().optional(),
-  trialHours:        z.number().int().positive().optional(),
+  subscriptionPrice:  z.number().positive().optional(),
+  aiAgentPrice:       z.number().positive().optional(),
+  trialHours:         z.number().int().positive().optional(),
+  extraAccountPrice:  z.number().positive().optional(),
 });
 
 router.put(
@@ -203,14 +205,15 @@ router.put(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid price data", details: parsed.error.errors });
     }
-    const { subscriptionPrice, aiAgentPrice, trialHours } = parsed.data;
+    const { subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice } = parsed.data;
 
     const adminId = (req as any).user?.id;
 
     const priceEntries: Array<{ keyName: string; value: string }> = [];
-    if (subscriptionPrice !== undefined) priceEntries.push({ keyName: "PRICE_SUBSCRIPTION_USDT", value: String(subscriptionPrice) });
-    if (aiAgentPrice      !== undefined) priceEntries.push({ keyName: "PRICE_AI_AGENT_USDT",    value: String(aiAgentPrice) });
-    if (trialHours        !== undefined) priceEntries.push({ keyName: "PRICE_TRIAL_HOURS",      value: String(trialHours) });
+    if (subscriptionPrice !== undefined) priceEntries.push({ keyName: "PRICE_SUBSCRIPTION_USDT",         value: String(subscriptionPrice) });
+    if (aiAgentPrice      !== undefined) priceEntries.push({ keyName: "PRICE_AI_AGENT_USDT",             value: String(aiAgentPrice) });
+    if (trialHours        !== undefined) priceEntries.push({ keyName: "PRICE_TRIAL_HOURS",               value: String(trialHours) });
+    if (extraAccountPrice !== undefined) priceEntries.push({ keyName: "PRICE_EXTRA_MAX_ACCOUNT_USDT",    value: String(extraAccountPrice) });
 
     for (const entry of priceEntries) {
       const { ciphertext, meta, last4 } = encryptSecret(entry.value);

@@ -30,6 +30,7 @@ interface PricesData {
   subscriptionPrice: number;
   aiAgentPrice: number;
   trialHours: number;
+  extraAccountPrice: number;
 }
 
 interface SubscriptionRow {
@@ -100,12 +101,14 @@ export default function AdminBilling() {
   const [subscriptionPrice, setSubscriptionPrice] = useState("");
   const [aiAgentPrice, setAiAgentPrice]           = useState("");
   const [trialHours, setTrialHours]               = useState("");
+  const [extraAccountPrice, setExtraAccountPrice] = useState("");
 
   useEffect(() => {
     if (prices) {
       setSubscriptionPrice(String(prices.subscriptionPrice));
       setAiAgentPrice(String(prices.aiAgentPrice));
       setTrialHours(String(prices.trialHours));
+      setExtraAccountPrice(String(prices.extraAccountPrice));
     }
   }, [prices]);
 
@@ -173,9 +176,11 @@ export default function AdminBilling() {
       const sp = parseFloat(subscriptionPrice);
       const ap = parseFloat(aiAgentPrice);
       const th = parseInt(trialHours, 10);
+      const ea = parseFloat(extraAccountPrice);
       if (!isNaN(sp) && sp > 0) body.subscriptionPrice = sp;
       if (!isNaN(ap) && ap > 0) body.aiAgentPrice = ap;
       if (!isNaN(th) && th > 0) body.trialHours = th;
+      if (!isNaN(ea) && ea > 0) body.extraAccountPrice = ea;
       const res = await apiRequest("PUT", "/api/admin/billing/prices", body);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -304,7 +309,7 @@ export default function AdminBilling() {
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="grid gap-4 sm:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <div className="space-y-2">
                     <Label htmlFor="price-subscription">
                       Подписка на каналы (USDT/мес)
@@ -368,6 +373,28 @@ export default function AdminBilling() {
                     </div>
                     <p className="text-xs text-muted-foreground">
                       Применяется к новым тенантам
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="price-extra-account">
+                      Доп. аккаунты MAX (USDT/мес)
+                    </Label>
+                    <div className="relative">
+                      <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="price-extra-account"
+                        type="number"
+                        min="1"
+                        step="0.01"
+                        className="pl-9"
+                        value={extraAccountPrice}
+                        onChange={(e) => setExtraAccountPrice(e.target.value)}
+                        data-testid="input-extra-account-price"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Аккаунты 6+ сверх бесплатных 5
                     </p>
                   </div>
                 </div>

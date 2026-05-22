@@ -4,7 +4,7 @@ import { plans, subscriptions, tenants, subscriptionGrants } from "@shared/schem
 import type { Plan, Subscription, SubscriptionStatus, BillingStatus, PlanFeatureType } from "@shared/schema";
 import { eq, and, isNull, desc, sql } from "drizzle-orm";
 import crypto from "crypto";
-import { SUBSCRIPTION_PRICE_USDT, AI_SUBSCRIPTION_PRICE_USDT, TRIAL_PERIOD_HOURS } from "../config/business-constants";
+import { SUBSCRIPTION_PRICE_USDT, AI_SUBSCRIPTION_PRICE_USDT, TRIAL_PERIOD_HOURS, EXTRA_MAX_ACCOUNTS_PRICE_USDT } from "../config/business-constants";
 import { getSecret } from "./secret-resolver";
 
 async function getCryptoPayToken(): Promise<string | null> {
@@ -36,6 +36,15 @@ export async function getAiSubscriptionPriceUsdt(): Promise<number> {
   return AI_SUBSCRIPTION_PRICE_USDT;
 }
 
+export async function getExtraAccountPriceUsdt(): Promise<number> {
+  const val = await getSecret({ scope: "global", keyName: "PRICE_EXTRA_MAX_ACCOUNT_USDT" });
+  if (val !== null) {
+    const n = parseFloat(val);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  return EXTRA_MAX_ACCOUNTS_PRICE_USDT;
+}
+
 export async function getTrialPeriodHours(): Promise<number> {
   const val = await getSecret({ scope: "global", keyName: "PRICE_TRIAL_HOURS" });
   if (val !== null) {
@@ -61,6 +70,16 @@ const AI_PLAN_CONFIG = {
   amount: AI_SUBSCRIPTION_PRICE_USDT * 100,
   currency: "usd",
   cryptoAmount: String(AI_SUBSCRIPTION_PRICE_USDT),
+  cryptoAsset: "USDT",
+  interval: "month" as const,
+};
+
+const EXTRA_ACCOUNTS_PLAN_CONFIG = {
+  name: "MAX Personal — дополнительные аккаунты",
+  planType: "extra_max_accounts" as PlanFeatureType,
+  amount: EXTRA_MAX_ACCOUNTS_PRICE_USDT * 100,
+  currency: "usd",
+  cryptoAmount: String(EXTRA_MAX_ACCOUNTS_PRICE_USDT),
   cryptoAsset: "USDT",
   interval: "month" as const,
 };
@@ -279,6 +298,181 @@ export async function createAiInvoice(
   return { payUrl: invoice.pay_url, invoiceId: invoice.invoice_id };
 }
 
+export async function ensureExtraAccountsPlanExists(): Promise<Plan> {
+  const [existingPlan] = await db
+    .select()
+    .from(plans)
+    .where(and(eq(plans.isActive, true), eq(plans.planType, "extra_max_accounts")))
+    .limit(1);
+
+  if (existingPlan) return existingPlan;
+
+  const [plan] = await db.insert(plans).values({
+    name: EXTRA_ACCOUNTS_PLAN_CONFIG.name,
+    planType: EXTRA_ACCOUNTS_PLAN_CONFIG.planType,
+    amount: EXTRA_ACCOUNTS_PLAN_CONFIG.amount,
+    currency: EXTRA_ACCOUNTS_PLAN_CONFIG.currency,
+    cryptoAmount: EXTRA_ACCOUNTS_PLAN_CONFIG.cryptoAmount,
+    cryptoAsset: EXTRA_ACCOUNTS_PLAN_CONFIG.cryptoAsset,
+    interval: EXTRA_ACCOUNTS_PLAN_CONFIG.interval,
+    isActive: true,
+  }).returning();
+
+  console.log(`[CryptoBilling] Created extra_max_accounts plan: ${plan.name}`);
+  return plan;
+}
+
+export async function createExtraAccountsInvoice(
+  tenantId: string,
+  successUrl: string
+): Promise<{ payUrl: string; invoiceId: number }> {
+  const [cryptoPayInstance, plan, priceUsdt] = await Promise.all([
+    getCryptoPay(),
+    ensureExtraAccountsPlanExists(),
+    getExtraAccountPriceUsdt(),
+  ]);
+
+  const [existingSub] = await db
+    .select()
+    .from(subscriptions)
+    .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "extra_max_accounts")));
+
+  if (existingSub?.status === "active") {
+    throw new Error("Tenant already has an active extra accounts subscription");
+  }
+
+  const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId));
+
+  const invoice = await cryptoPayInstance.createInvoice(
+    Assets.USDT,
+    String(priceUsdt),
+    {
+      description: `${plan.name} — месячная подписка`,
+      expires_in: 3600,
+      paid_btn_name: "callback" as any,
+      paid_btn_url: successUrl,
+      payload: JSON.stringify({
+        tenantId,
+        planId: plan.id,
+        feature: "extra_max_accounts",
+        tenantName: tenant?.name || "Unknown",
+      }),
+      allow_comments: false,
+      allow_anonymous: false,
+    }
+  );
+
+  if (!existingSub) {
+    await db.insert(subscriptions).values({
+      tenantId,
+      feature: "extra_max_accounts",
+      planId: plan.id,
+      cryptoInvoiceId: String(invoice.invoice_id),
+      paymentProvider: "cryptobot",
+      status: "incomplete",
+    });
+  } else if (existingSub.status === "trialing") {
+    await db
+      .update(subscriptions)
+      .set({ planId: plan.id, cryptoInvoiceId: String(invoice.invoice_id), paymentProvider: "cryptobot", updatedAt: new Date() })
+      .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "extra_max_accounts")));
+  } else {
+    await db
+      .update(subscriptions)
+      .set({ cryptoInvoiceId: String(invoice.invoice_id), paymentProvider: "cryptobot", status: "incomplete", updatedAt: new Date() })
+      .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "extra_max_accounts")));
+  }
+
+  console.log(`[CryptoBilling] Created extra_max_accounts invoice ${invoice.invoice_id} for tenant ${tenantId}`);
+  return { payUrl: invoice.pay_url, invoiceId: invoice.invoice_id };
+}
+
+export async function getExtraAccountsSubscriptionByTenant(tenantId: string): Promise<Subscription | null> {
+  const [sub] = await db
+    .select()
+    .from(subscriptions)
+    .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "extra_max_accounts")));
+  return sub || null;
+}
+
+export async function getExtraAccountsBillingStatus(tenantId: string): Promise<BillingStatus> {
+  const subscription = await getExtraAccountsSubscriptionByTenant(tenantId);
+
+  const [activeGrant] = await db
+    .select({ endsAt: subscriptionGrants.endsAt })
+    .from(subscriptionGrants)
+    .where(
+      and(
+        eq(subscriptionGrants.tenantId, tenantId),
+        eq(subscriptionGrants.feature, "extra_max_accounts"),
+        isNull(subscriptionGrants.revokedAt),
+        sql`${subscriptionGrants.startsAt} <= NOW()`,
+        sql`${subscriptionGrants.endsAt} > NOW()`
+      )
+    )
+    .orderBy(desc(subscriptionGrants.endsAt))
+    .limit(1);
+
+  const hasActiveGrant = !!activeGrant;
+  const grantEndsAt = activeGrant?.endsAt ?? null;
+
+  if (!subscription) {
+    return {
+      hasSubscription: false,
+      status: hasActiveGrant ? "active" as SubscriptionStatus : null,
+      plan: null,
+      currentPeriodEnd: grantEndsAt,
+      cancelAtPeriodEnd: false,
+      canAccess: hasActiveGrant,
+      isTrial: false,
+      trialEndsAt: null,
+      trialDaysRemaining: null,
+      hadTrial: false,
+      hasActiveGrant,
+      grantEndsAt,
+    };
+  }
+
+  const plan = subscription.planId ? await getPlanById(subscription.planId) : null;
+  const now = new Date();
+
+  const accessibleStatuses: SubscriptionStatus[] = ["active", "past_due"];
+  let canAccess = accessibleStatuses.includes(subscription.status as SubscriptionStatus);
+
+  if (canAccess && subscription.currentPeriodEnd) {
+    canAccess = new Date(subscription.currentPeriodEnd) > now;
+  }
+
+  if (hasActiveGrant) canAccess = true;
+
+  return {
+    hasSubscription: true,
+    status: hasActiveGrant ? "active" as SubscriptionStatus : subscription.status as SubscriptionStatus,
+    plan,
+    currentPeriodEnd: subscription.currentPeriodEnd,
+    cancelAtPeriodEnd: subscription.cancelAtPeriodEnd || false,
+    canAccess,
+    isTrial: false,
+    trialEndsAt: null,
+    trialDaysRemaining: null,
+    hadTrial: false,
+    hasActiveGrant,
+    grantEndsAt,
+  };
+}
+
+export async function cancelExtraAccountsSubscription(tenantId: string): Promise<void> {
+  const subscription = await getExtraAccountsSubscriptionByTenant(tenantId);
+  if (!subscription) throw new Error("No extra accounts subscription found");
+
+  await db
+    .update(subscriptions)
+    .set({ cancelAtPeriodEnd: true, updatedAt: new Date() })
+    .where(and(eq(subscriptions.tenantId, tenantId), eq(subscriptions.feature, "extra_max_accounts")));
+
+  console.log(`[CryptoBilling] Extra accounts subscription marked for cancellation: tenant ${tenantId}`);
+}
+
 export async function checkInvoiceStatus(invoiceId: string): Promise<"active" | "paid" | "expired"> {
   const cryptoPayInstance = await getCryptoPay();
   
@@ -354,7 +548,11 @@ export async function handleWebhookEvent(payload: CryptoWebhookPayload): Promise
     return;
   }
 
-  const feature: PlanFeatureType = (metadata as any).feature === "ai_agent" ? "ai_agent" : "channels";
+  const rawFeature = (metadata as any).feature;
+  const feature: PlanFeatureType =
+    rawFeature === "ai_agent" ? "ai_agent" :
+    rawFeature === "extra_max_accounts" ? "extra_max_accounts" :
+    "channels";
 
   const now = new Date();
   const periodEnd = new Date(now);

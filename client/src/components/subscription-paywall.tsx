@@ -34,13 +34,14 @@ export interface PublicBillingConfig {
   subscriptionPrice: number;
   aiAgentPrice: number;
   trialHours: number;
+  extraAccountPrice: number;
 }
 
 export function usePublicBillingConfig() {
   return useQuery<PublicBillingConfig>({
     queryKey: ["/api/billing/public-config"],
     staleTime: 5 * 60 * 1000,
-    placeholderData: { notifyBotUsername: null, subscriptionPrice: 50, aiAgentPrice: 30, trialHours: 72 },
+    placeholderData: { notifyBotUsername: null, subscriptionPrice: 50, aiAgentPrice: 30, trialHours: 72, extraAccountPrice: 10 },
   });
 }
 

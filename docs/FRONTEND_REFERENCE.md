@@ -387,7 +387,7 @@ function AdminGuard({ children }) {
 | Страница | Файл | Описание |
 |---------|------|----------|
 | SecurityStatus | `security-status.tsx` | Security readiness: RBAC, PII, webhook, rate-limiting |
-| AdminBilling | `admin-billing.tsx` | Метрики биллинга, все подписки, цены, гранты, trial hours |
+| AdminBilling | `admin-billing.tsx` | Метрики биллинга, все подписки, цены (subscriptionPrice, aiAgentPrice, trialHours, **extraAccountPrice**), гранты, trial hours |
 | AdminSecrets | `admin-secrets.tsx` | API-ключи интеграций: OpenAI, Telegram, Yandex и др. |
 | AdminUsers | `admin-users.tsx` | Пользователи платформы: enable/disable |
 | AdminProxies | `admin-proxies.tsx` | Прокси-пул: добавление, тест, удаление |
@@ -428,6 +428,7 @@ function AdminGuard({ children }) {
 | Компонент | Что делает |
 |-----------|-----------|
 | `ChannelSettings` | Статус каналов, toggle (paywall), конфиг (токен), Telegram Personal QR/код/2FA, WhatsApp Baileys QR, MAX Personal GREEN-API список аккаунтов |
+| `MaxPersonalCard` | Управление аккаунтами MAX Personal. Первые 5 — бесплатно при подписке `channels`. Аккаунты 6+ требуют подписки `extra_max_accounts`. При попытке создания 6+ показывает диалог оплаты с ценой из `publicConfig.extraAccountPrice`. Запрос к `GET /api/billing/extra-accounts/me` отражает статус подписки. |
 | `TrainingPoliciesSettings` | Forbidden topics, AUTO_LEARNING_ENABLED флаг, always-escalate intents |
 | `TemplatesTab` | CRUD шаблонов message_templates с preview рендерером |
 | `PaymentMethodsTab` | CRUD + реордер payment_methods (drag-and-drop порядок) |

@@ -313,17 +313,137 @@ router.post("/api/billing/ai/verify-payment", requireAuth, async (req: Request, 
   }
 });
 
+// ─── Extra MAX accounts subscription routes ──────────────────────────────────
+
+router.get("/api/billing/extra-accounts/me", requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!req.userId || req.userId === "system") {
+      return res.status(403).json({ error: "User authentication required" });
+    }
+    const user = await getUserForBilling(req.userId);
+    if (!user?.tenantId) {
+      return res.status(403).json({ error: "User not associated with a tenant" });
+    }
+
+    const { getExtraAccountsBillingStatus } = await import("../services/cryptobot-billing");
+    const billingStatus = await getExtraAccountsBillingStatus(user.tenantId);
+    res.json(billingStatus);
+  } catch (error: any) {
+    console.error("Error fetching extra accounts billing status:", error);
+    res.status(500).json({ error: "Failed to fetch extra accounts billing status" });
+  }
+});
+
+router.post("/api/billing/extra-accounts/checkout", requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!req.userId || req.userId === "system") {
+      return res.status(403).json({ error: "User authentication required" });
+    }
+    const user = await getUserForBilling(req.userId);
+    if (!user?.tenantId) {
+      return res.status(403).json({ error: "User not associated with a tenant" });
+    }
+
+    const { createExtraAccountsInvoice } = await import("../services/cryptobot-billing");
+
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const successUrl = `${baseUrl}/settings?tab=channels&billing=success`;
+
+    const result = await createExtraAccountsInvoice(user.tenantId, successUrl);
+    res.json({ url: result.payUrl, invoiceId: result.invoiceId });
+  } catch (error: any) {
+    console.error("Error creating extra accounts invoice:", error);
+    res.status(500).json({ error: error.message || "Failed to create extra accounts invoice" });
+  }
+});
+
+router.post("/api/billing/extra-accounts/cancel", requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!req.userId || req.userId === "system") {
+      return res.status(403).json({ error: "User authentication required" });
+    }
+    const user = await getUserForBilling(req.userId);
+    if (!user?.tenantId) {
+      return res.status(403).json({ error: "User not associated with a tenant" });
+    }
+
+    const { cancelExtraAccountsSubscription } = await import("../services/cryptobot-billing");
+    await cancelExtraAccountsSubscription(user.tenantId);
+
+    res.json({ success: true, message: "Extra accounts subscription will be canceled at period end" });
+  } catch (error: any) {
+    console.error("Error canceling extra accounts subscription:", error);
+    res.status(500).json({ error: error.message || "Failed to cancel extra accounts subscription" });
+  }
+});
+
+router.post("/api/billing/extra-accounts/verify-payment", requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!req.userId || req.userId === "system") {
+      return res.status(403).json({ error: "User authentication required" });
+    }
+    const user = await getUserForBilling(req.userId);
+    if (!user?.tenantId) {
+      return res.status(403).json({ error: "User not associated with a tenant" });
+    }
+
+    const { getExtraAccountsSubscriptionByTenant, checkInvoiceStatus, handleWebhookEvent, getExtraAccountsBillingStatus } =
+      await import("../services/cryptobot-billing");
+
+    const subscription = await getExtraAccountsSubscriptionByTenant(user.tenantId);
+    if (!subscription?.cryptoInvoiceId) {
+      const billingStatus = await getExtraAccountsBillingStatus(user.tenantId);
+      return res.json({ activated: billingStatus.canAccess, billingStatus });
+    }
+
+    if (subscription.status === "active") {
+      const billingStatus = await getExtraAccountsBillingStatus(user.tenantId);
+      return res.json({ activated: true, billingStatus });
+    }
+
+    const invoiceStatus = await checkInvoiceStatus(subscription.cryptoInvoiceId);
+    if (invoiceStatus === "paid") {
+      await handleWebhookEvent({
+        update_type: "invoice_paid",
+        request_date: new Date().toISOString(),
+        update_id: 0,
+        payload: {
+          invoice_id: Number(subscription.cryptoInvoiceId),
+          status: "paid",
+          hash: "",
+          asset: "",
+          amount: "",
+          pay_url: "",
+          description: "",
+          created_at: new Date().toISOString(),
+          paid_at: new Date().toISOString(),
+          paid_anonymously: false,
+          payload: JSON.stringify({ tenantId: user.tenantId, feature: "extra_max_accounts" }),
+        },
+      });
+      console.log(`[BillingVerify] Fallback-activated extra_max_accounts subscription for tenant ${user.tenantId}`);
+    }
+
+    const billingStatus = await getExtraAccountsBillingStatus(user.tenantId);
+    return res.json({ activated: billingStatus.canAccess, invoiceStatus, billingStatus });
+  } catch (error: any) {
+    console.error("[BillingVerify-ExtraAccounts] Error:", error);
+    res.status(500).json({ error: error.message || "Verification failed" });
+  }
+});
+
 router.get("/api/billing/public-config", async (_req: Request, res: Response) => {
   try {
     const { getSecret } = await import("../services/secret-resolver");
-    const { getSubscriptionPriceUsdt, getAiSubscriptionPriceUsdt, getTrialPeriodHours } =
+    const { getSubscriptionPriceUsdt, getAiSubscriptionPriceUsdt, getTrialPeriodHours, getExtraAccountPriceUsdt } =
       await import("../services/cryptobot-billing");
 
-    const [token, subscriptionPrice, aiAgentPrice, trialHours] = await Promise.all([
+    const [token, subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice] = await Promise.all([
       getSecret({ scope: "global", keyName: "TELEGRAM_ESCALATION_BOT_TOKEN" }),
       getSubscriptionPriceUsdt(),
       getAiSubscriptionPriceUsdt(),
       getTrialPeriodHours(),
+      getExtraAccountPriceUsdt(),
     ]);
 
     let notifyBotUsername: string | null = null;
@@ -335,9 +455,9 @@ router.get("/api/billing/public-config", async (_req: Request, res: Response) =>
       } catch {/* ignore Telegram errors */}
     }
 
-    res.json({ notifyBotUsername, subscriptionPrice, aiAgentPrice, trialHours });
+    res.json({ notifyBotUsername, subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice });
   } catch {
-    res.json({ notifyBotUsername: null, subscriptionPrice: 50, aiAgentPrice: 30, trialHours: 72 });
+    res.json({ notifyBotUsername: null, subscriptionPrice: 50, aiAgentPrice: 30, trialHours: 72, extraAccountPrice: 10 });
   }
 });
 

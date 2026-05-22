@@ -1875,6 +1875,8 @@ interface WhatsAppPersonalCardProps {
 type WhatsAppAuthStatus = "disconnected" | "connecting" | "qr_ready" | "pairing_code_ready" | "connected" | "error" | "reconnecting";
 type WhatsAppAuthMethod = "qr" | "phone";
 
+const FREE_MAX_PERSONAL_ACCOUNTS = 5;
+
 function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick }: Pick<WhatsAppPersonalCardProps, "channelStatuses"> & { canAccess: boolean; isTrial: boolean; onSubscribeClick: () => void }) {
   const { toast } = useToast();
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
@@ -1887,9 +1889,26 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [extraAccountsPaywallOpen, setExtraAccountsPaywallOpen] = useState(false);
+  const [extraAccountsCheckoutPending, setExtraAccountsCheckoutPending] = useState(false);
   const isCreatingRef = useRef(false);
   const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastQrFetchRef = useRef<number>(0);
+
+  const { data: publicConfig } = usePublicBillingConfig();
+  const extraAccountPrice = publicConfig?.extraAccountPrice ?? 10;
+
+  const { data: extraAccountsBilling, refetch: refetchExtraAccountsBilling } = useQuery<{ canAccess: boolean; status: string | null }>({
+    queryKey: ["/api/billing/extra-accounts/me"],
+    queryFn: async () => {
+      const res = await fetch("/api/billing/extra-accounts/me", { credentials: "include" });
+      if (!res.ok) return { canAccess: false, status: null };
+      return res.json();
+    },
+    enabled: canAccess && !isTrial,
+    staleTime: 30 * 1000,
+  });
+  const hasExtraAccountsSubscription = extraAccountsBilling?.canAccess === true;
 
   const { data: gatewayConfig } = useQuery<{ available: boolean }>({
     queryKey: ["/api/channels/max-personal/gateway-available"],
@@ -2037,6 +2056,10 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
     setCreatingAccount(true);
     try {
       const res = await apiRequest("POST", "/api/channels/max-personal/create", {});
+      if (res.status === 402) {
+        setExtraAccountsPaywallOpen(true);
+        return;
+      }
       const data = await res.json() as { accountId: string };
       toast({ title: "Инстанс создан", description: "Отсканируйте QR-код для авторизации" });
       await refetchAccounts();
@@ -2046,6 +2069,29 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
     } finally {
       isCreatingRef.current = false;
       setCreatingAccount(false);
+    }
+  };
+
+  const handleExtraAccountsCheckout = async () => {
+    setExtraAccountsCheckoutPending(true);
+    try {
+      const res = await apiRequest("POST", "/api/billing/extra-accounts/checkout", {});
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Не удалось создать счёт");
+      }
+      const { url } = await res.json();
+      if (url) window.open(url, "_blank");
+      setExtraAccountsPaywallOpen(false);
+      toast({
+        title: "Счёт создан",
+        description: "После оплаты вы сможете добавлять новые аккаунты. Страница обновится автоматически.",
+      });
+      setTimeout(() => refetchExtraAccountsBilling(), 5000);
+    } catch (err: any) {
+      toast({ title: "Ошибка", description: err.message, variant: "destructive" });
+    } finally {
+      setExtraAccountsCheckoutPending(false);
     }
   };
 
@@ -2270,21 +2316,79 @@ function MaxPersonalCard({ channelStatuses, canAccess, isTrial, onSubscribeClick
             );
           })}
           {allAccounts.length > 0 && gatewayAvailable && canAccess && !isTrial && allAccounts.length < 50 && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={createAccount}
-              disabled={creatingAccount}
-              className="w-full mt-1"
-            >
-              {creatingAccount
-                ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Создание...</>
-                : <><span className="mr-1">+</span> Добавить ещё аккаунт</>
-              }
-            </Button>
+            <div className="space-y-2 mt-1">
+              {allAccounts.length >= FREE_MAX_PERSONAL_ACCOUNTS && (
+                <div className={`rounded-md border px-3 py-2 text-xs flex items-center justify-between gap-2 ${hasExtraAccountsSubscription ? "border-green-500/30 bg-green-500/5 text-green-700 dark:text-green-400" : "border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400"}`}>
+                  <span>
+                    {hasExtraAccountsSubscription
+                      ? `Подписка на доп. аккаунты активна — создано ${allAccounts.length} из 50`
+                      : `Использовано ${allAccounts.length} из ${FREE_MAX_PERSONAL_ACCOUNTS} бесплатных слотов. Следующий аккаунт — ${extraAccountPrice} USDT/мес`
+                    }
+                  </span>
+                  {!hasExtraAccountsSubscription && (
+                    <CreditCard className="h-3.5 w-3.5 shrink-0" />
+                  )}
+                </div>
+              )}
+              {allAccounts.length < FREE_MAX_PERSONAL_ACCOUNTS && (
+                <p className="text-xs text-muted-foreground px-1">
+                  {allAccounts.length} из {FREE_MAX_PERSONAL_ACCOUNTS} бесплатных аккаунтов использовано
+                </p>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={createAccount}
+                disabled={creatingAccount}
+                className="w-full"
+              >
+                {creatingAccount
+                  ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Создание...</>
+                  : <><span className="mr-1">+</span> Добавить ещё аккаунт</>
+                }
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>
+
+      {/* Extra accounts paywall dialog */}
+      <Dialog open={extraAccountsPaywallOpen} onOpenChange={setExtraAccountsPaywallOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5" />
+              Дополнительные аккаунты MAX
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Первые <strong>{FREE_MAX_PERSONAL_ACCOUNTS} аккаунтов</strong> включены бесплатно при активной подписке на каналы.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Для создания дополнительных аккаунтов (6 и более) требуется отдельная подписка.
+            </p>
+            <div className="rounded-md border bg-muted/30 p-3 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Доп. аккаунты MAX Personal</p>
+                <p className="text-xs text-muted-foreground">Безлимитное создание аккаунтов сверх 5</p>
+              </div>
+              <span className="text-lg font-semibold">{extraAccountPrice} USDT<span className="text-xs font-normal text-muted-foreground">/мес</span></span>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setExtraAccountsPaywallOpen(false)}>
+              Отмена
+            </Button>
+            <Button onClick={handleExtraAccountsCheckout} disabled={extraAccountsCheckoutPending}>
+              {extraAccountsCheckoutPending
+                ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Создание счёта...</>
+                : <><Zap className="mr-2 h-4 w-4" />Оплатить {extraAccountPrice} USDT</>
+              }
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={qrDialogOpen} onOpenChange={(open) => { if (!open) closeQrDialog(); }}>
         <DialogContent className="max-w-sm">

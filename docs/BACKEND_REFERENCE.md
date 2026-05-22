@@ -255,7 +255,7 @@ server/
 │   └── migrate.ts               # Standalone migration runner
 │
 ├── config/
-│   └── business-constants.ts    # SUBSCRIPTION_PRICE_USDT и другие бизнес-константы
+│   └── business-constants.ts    # SUBSCRIPTION_PRICE_USDT, AI_SUBSCRIPTION_PRICE_USDT, TRIAL_PERIOD_HOURS, FREE_MAX_PERSONAL_ACCOUNTS (5), EXTRA_MAX_ACCOUNTS_PRICE_USDT (10)
 │
 ├── types/
 │   └── vendor.d.ts              # Ambient type declarations
@@ -437,10 +437,25 @@ request
 
 | Метод | Путь |
 |-------|------|
-| GET | `/api/billing/status` |
-| POST | `/api/billing/checkout` — CryptoBot invoice |
+| GET | `/api/billing/me` — статус подписки channels |
+| POST | `/api/billing/checkout` — CryptoBot invoice (channels) |
 | POST | `/api/billing/cancel` |
-| POST | `/api/billing/cryptobot/webhook` |
+| GET | `/api/billing/ai/me` — статус подписки ai_agent |
+| POST | `/api/billing/ai/checkout` |
+| POST | `/api/billing/ai/cancel` |
+| GET | `/api/billing/extra-accounts/me` — статус подписки extra_max_accounts |
+| POST | `/api/billing/extra-accounts/checkout` — инвойс для доп. аккаунтов MAX |
+| POST | `/api/billing/extra-accounts/cancel` |
+| POST | `/api/billing/extra-accounts/verify-payment` — fallback верификация |
+| POST | `/webhooks/cryptobot` — webhook CryptoBot (все feature-типы) |
+| GET | `/api/billing/public-config` — публичные цены (subscriptionPrice, aiAgentPrice, trialHours, **extraAccountPrice**) |
+
+**Логика доп. аккаунтов MAX Personal:**
+- 5 аккаунтов бесплатно при активной подписке `channels`
+- Аккаунты 6+ требуют активной подписки `extra_max_accounts`
+- При попытке создания 6+ аккаунта без подписки API возвращает `402` с `requiresUpgrade: true`
+- Цена задаётся ключом `PRICE_EXTRA_MAX_ACCOUNT_USDT` (дефолт: 10 USDT/мес, константа `EXTRA_MAX_ACCOUNTS_PRICE_USDT`)
+- Free-лимит задан константой `FREE_MAX_PERSONAL_ACCOUNTS = 5`
 
 ### Tenant Config (`routes/tenant-config.routes.ts`)
 

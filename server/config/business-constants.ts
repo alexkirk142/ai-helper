@@ -15,5 +15,11 @@ export const TRIAL_PERIOD_HOURS = 72;
 /** Maximum Telegram personal accounts per tenant */
 export const MAX_TELEGRAM_ACCOUNTS_PER_TENANT = 5;
 
+/** Number of MAX Personal accounts included free with an active channels subscription */
+export const FREE_MAX_PERSONAL_ACCOUNTS = 5;
+
+/** Monthly price in USDT for extra MAX Personal accounts beyond the free limit */
+export const EXTRA_MAX_ACCOUNTS_PRICE_USDT = 10;
+
 /** Maximum discount percent allowed by default */
 export const DEFAULT_MAX_DISCOUNT_PERCENT = 0;

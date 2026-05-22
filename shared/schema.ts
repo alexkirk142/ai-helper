@@ -1104,7 +1104,7 @@ export const SUBSCRIPTION_STATUSES = [
 export type SubscriptionStatus = typeof SUBSCRIPTION_STATUSES[number];
 
 // Plan feature types — distinguishes what a plan grants access to
-export const PLAN_FEATURE_TYPES = ["channels", "ai_agent"] as const;
+export const PLAN_FEATURE_TYPES = ["channels", "ai_agent", "extra_max_accounts"] as const;
 export type PlanFeatureType = typeof PLAN_FEATURE_TYPES[number];
 
 // Plans table
