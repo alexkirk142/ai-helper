@@ -692,7 +692,7 @@ export const useTheme = () => useContext(ThemeProviderContext)
 **Отключение:** `wsClient.disconnect()` при unmount.  
 **Platform staff** (без tenantId) — WS **не подключается** (сервер отверг бы с 403).
 
-**WS событие `message_read`** — отправляется когда контакт в MAX прочитал наши сообщения. Payload: `{ conversationId, lastReadAt: ISO8601 }`. Клиент инвалидирует `["/api/conversations", conversationId]`. `ChatInterface` показывает двойную галочку (✓✓) на последнем исходящем сообщении, время отправки которого ≤ `lastReadAt`.
+**WS событие `message_read`** — отправляется когда контакт прочитал наши сообщения (MAX, Telegram Personal, WhatsApp Personal). Payload: `{ conversationId, lastReadAt: ISO8601 }`. Клиент инвалидирует `["/api/conversations", conversationId]`. `ChatInterface` показывает двойную галочку (✓✓) на **всех** исходящих сообщениях, у которых `createdAt ≤ lastReadAt`; одиночная галочка — на отправленных позже. Это гарантирует, что уже прочитанные сообщения не теряют статус при отправке новых.
 
 **Протокол (client → server):**
 

@@ -1221,9 +1221,23 @@ npm run dev      # tsx server/index.ts + Vite HMR middleware
 ### Startup script (`start.sh`)
 
 ```bash
-npx drizzle-kit migrate   # Применить pending миграции
-node dist/index.cjs       # Запустить сервер
+node scripts/run-migrations.mjs   # Применить SQL-миграции из migrations/*.sql
+npm run start                     # Запустить сервер
 ```
+
+> **Важно:** `drizzle-kit push --force` удалён из стартапа — в Railway-контейнере он зависает при introspection схемы (exit -1 через ~80 с), после чего колонки не добавляются.
+
+### Migration runner (`scripts/run-migrations.mjs`)
+
+Простой Node.js-скрипт на `pg` клиенте без зависимости от drizzle-kit:
+
+- Создаёт таблицу `_manual_migrations (filename TEXT PRIMARY KEY)` для трекинга применённых файлов.
+- Читает все `migrations/*.sql` файлы в алфавитном порядке.
+- Пропускает уже применённые (есть запись в `_manual_migrations`).
+- При ошибке выполнения файла (например, `already exists` от старых миграций) — логирует предупреждение и продолжает; файл всё равно помечается как применённый.
+- Exit 0 = успех, Exit 1 = фатальная ошибка подключения.
+
+**Добавление новой миграции:** создать `migrations/NNNN_description.sql` с DDL-операторами, использующими `IF NOT EXISTS` / `IF EXISTS` для идемпотентности. При следующем деплое скрипт применит его автоматически.
 
 ---
 
@@ -1341,19 +1355,20 @@ node dist/index.cjs       # Запустить сервер
 11. **НЕ** сохранять результаты mock price source в `internal_prices`
 12. **НЕ** добавлять синхронную AI генерацию или отправку сообщений в HTTP handlers — использовать BullMQ
 13. **НЕ** перезаписывать зашифрованные сессии мессенджеров при каждом запросе
-14. **НЕ** использовать `drizzle-kit push --force` — молча дропает колонки
+14. **НЕ** использовать `drizzle-kit push --force` — в Railway зависает при introspection схемы и не применяет изменения
 15. **НЕ** обходить `storage` слой с прямыми `db` запросами в роутах
 
 ### Checklist изменения схемы
 
-1. Добавить таблицу в `shared/schema.ts`
+1. Добавить колонку/таблицу в `shared/schema.ts`
 2. Экспортировать типы: `export type X = typeof x.$inferSelect` + insert type
 3. Создать Zod insert схему: `createInsertSchema(x).omit({ id: true, createdAt: true })`
 4. Добавить методы в `IStorage` (`server/storage.ts`)
 5. Реализовать в `DatabaseStorage` (`server/database-storage.ts`)
-6. Сгенерировать миграцию: `npx drizzle-kit generate`
-7. В dev: `npm run db:push`
-8. В prod: `npm run db:migrate` ТОЛЬКО
+6. Создать файл `migrations/NNNN_description.sql` с DDL (`IF NOT EXISTS` обязателен)
+7. При следующем деплое `run-migrations.mjs` применит файл автоматически
+
+> `drizzle-kit generate` / `push` / `migrate` CLI — **не использовать в продакшне**.
 
 ### Паттерны схемы
 
