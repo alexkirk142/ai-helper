@@ -212,23 +212,26 @@ export default function Products() {
   );
 
   return (
-    <div className="space-y-4 sm:space-y-6 p-3 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-semibold">Товары</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Управление каталогом товаров для AI-ответов
+    <div className="space-y-6 p-4 sm:p-8 max-w-7xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/40 pb-5">
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-1.5 text-xs text-primary font-semibold tracking-wider uppercase">
+            База данных
+          </div>
+          <h1 className="text-3xl font-extrabold tracking-tight">Товары</h1>
+          <p className="text-sm text-muted-foreground font-medium">
+            Управление каталогом товаров для генерации точных ответов AI-агента.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline" data-testid="button-import-products">
-                <Upload className="mr-2 h-4 w-4" />
+              <Button variant="outline" data-testid="button-import-products" className="rounded-xl font-semibold hover:bg-card/80 border-border/40">
+                <Upload className="mr-2 h-4 w-4 text-primary" />
                 Импорт CSV
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="rounded-2xl">
               <DialogHeader>
                 <DialogTitle>Импорт товаров из CSV</DialogTitle>
               </DialogHeader>
@@ -237,15 +240,15 @@ export default function Products() {
                   Загрузите CSV-файл с колонками: name, sku, description, price, category, inStock, stockQuantity
                 </p>
                 <div
-                  className="flex flex-col items-center justify-center rounded-md border-2 border-dashed p-8 cursor-pointer hover-elevate"
+                  className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border/60 p-8 cursor-pointer hover:bg-muted/25 transition-all"
                   onClick={() => fileInputRef.current?.click()}
                   data-testid="dropzone-csv"
                 >
-                  <FileSpreadsheet className="h-12 w-12 text-muted-foreground" />
-                  <p className="mt-2 text-sm text-muted-foreground">
+                  <FileSpreadsheet className="h-12 w-12 text-primary/85" />
+                  <p className="mt-3 text-sm font-semibold text-foreground">
                     Нажмите для загрузки или перетащите файл
                   </p>
-                  <p className="text-xs text-muted-foreground">Только CSV файлы</p>
+                  <p className="text-xs text-muted-foreground mt-1">Поддерживаются только .csv файлы</p>
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -257,7 +260,7 @@ export default function Products() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setIsImportDialogOpen(false)}>
+                <Button variant="outline" onClick={() => setIsImportDialogOpen(false)} className="rounded-xl">
                   Отмена
                 </Button>
               </DialogFooter>
@@ -265,12 +268,12 @@ export default function Products() {
           </Dialog>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button onClick={handleOpenCreate} data-testid="button-add-product">
+              <Button onClick={handleOpenCreate} data-testid="button-add-product" className="rounded-xl font-semibold shadow-lg shadow-primary/20">
                 <Plus className="mr-2 h-4 w-4" />
                 Добавить товар
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="max-w-2xl rounded-2xl">
               <DialogHeader>
                 <DialogTitle>
                   {editingProduct ? "Редактировать товар" : "Добавить товар"}
@@ -289,6 +292,7 @@ export default function Products() {
                             <Input
                               placeholder="Название товара"
                               {...field}
+                              className="rounded-xl"
                               data-testid="input-product-name"
                             />
                           </FormControl>
@@ -306,6 +310,7 @@ export default function Products() {
                             <Input
                               placeholder="SKU-001"
                               {...field}
+                              className="rounded-xl"
                               data-testid="input-product-sku"
                             />
                           </FormControl>
@@ -324,6 +329,7 @@ export default function Products() {
                           <Textarea
                             placeholder="Описание товара..."
                             {...field}
+                            className="rounded-xl min-h-[100px]"
                             data-testid="textarea-product-description"
                           />
                         </FormControl>
@@ -344,6 +350,7 @@ export default function Products() {
                               step="0.01"
                               placeholder="0.00"
                               {...field}
+                              className="rounded-xl"
                               data-testid="input-product-price"
                             />
                           </FormControl>
@@ -361,6 +368,7 @@ export default function Products() {
                             <Input
                               placeholder="Категория"
                               {...field}
+                              className="rounded-xl"
                               data-testid="input-product-category"
                             />
                           </FormControl>
@@ -379,6 +387,7 @@ export default function Products() {
                               type="number"
                               placeholder="0"
                               {...field}
+                              className="rounded-xl"
                               data-testid="input-product-stock"
                             />
                           </FormControl>
@@ -391,7 +400,7 @@ export default function Products() {
                     control={form.control}
                     name="inStock"
                     render={({ field }) => (
-                      <FormItem className="flex items-center justify-between rounded-md border p-4">
+                      <FormItem className="flex items-center justify-between rounded-xl border p-4">
                         <div>
                           <FormLabel>В наличии</FormLabel>
                           <FormDescription>
@@ -418,6 +427,7 @@ export default function Products() {
                           <Textarea
                             placeholder="Сроки доставки, способы..."
                             {...field}
+                            className="rounded-xl"
                             data-testid="textarea-product-delivery"
                           />
                         </FormControl>
@@ -430,12 +440,14 @@ export default function Products() {
                       type="button"
                       variant="outline"
                       onClick={() => setIsDialogOpen(false)}
+                      className="rounded-xl"
                     >
                       Отмена
                     </Button>
                     <Button
                       type="submit"
                       disabled={createMutation.isPending || updateMutation.isPending}
+                      className="rounded-xl font-bold"
                       data-testid="button-save-product"
                     >
                       {editingProduct ? "Обновить" : "Создать"}
@@ -449,15 +461,15 @@ export default function Products() {
       </div>
 
       {/* Search */}
-      <Card>
-        <CardContent className="pt-6">
+      <Card className="rounded-2xl border border-card-border bg-card shadow-sm">
+        <CardContent className="p-4">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-muted-foreground/80" />
             <Input
               placeholder="Поиск товаров по названию, артикулу или категории..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
+              className="pl-9 rounded-xl bg-background/50 border-border/40 focus-visible:bg-background transition-all"
               data-testid="input-search-products"
             />
           </div>
@@ -465,37 +477,42 @@ export default function Products() {
       </Card>
 
       {/* Products Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Package className="h-5 w-5" />
-            Товары ({filteredProducts?.length || 0})
+      <Card className="rounded-2xl border border-card-border bg-card shadow-sm overflow-hidden">
+        <CardHeader className="border-b border-border/40 pb-4">
+          <CardTitle className="text-lg font-bold tracking-tight flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/10">
+              <Package className="h-4.5 w-4.5" />
+            </div>
+            Все товары ({filteredProducts?.length || 0})
           </CardTitle>
         </CardHeader>
-        <CardContent className="p-0 sm:p-6">
-          <ScrollArea className="h-[500px]">
+        <CardContent className="p-0">
+          <ScrollArea className="h-[550px]">
             <div className="overflow-x-auto">
             {isLoading ? (
-              <div className="space-y-4">
+              <div className="space-y-4 p-4">
                 {[1, 2, 3, 4, 5].map((i) => (
                   <div key={i} className="flex items-center gap-4">
-                    <Skeleton className="h-12 w-12 rounded" />
+                    <Skeleton className="h-12 w-12 rounded-xl" />
                     <div className="flex-1 space-y-2">
-                      <Skeleton className="h-4 w-48" />
-                      <Skeleton className="h-3 w-24" />
+                      <Skeleton className="h-4 w-48 rounded-full" />
+                      <Skeleton className="h-3 w-24 rounded-full" />
                     </div>
                   </div>
                 ))}
               </div>
             ) : filteredProducts?.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <Package className="h-16 w-16 text-muted-foreground opacity-30" />
-                <p className="mt-4 text-sm text-muted-foreground">
-                  Товары не найдены
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary mb-3.5">
+                  <Package className="h-6 w-6" />
+                </div>
+                <h3 className="font-bold text-sm">Каталог пуст</h3>
+                <p className="mt-1 text-xs text-muted-foreground max-w-[240px]">
+                  Добавьте товары, чтобы AI-агент мог использовать информацию о ценах и наличии при ответах.
                 </p>
                 <Button
                   variant="outline"
-                  className="mt-4"
+                  className="mt-4 rounded-xl font-semibold border-border/40 hover:bg-card/80"
                   onClick={handleOpenCreate}
                 >
                   Добавить первый товар
@@ -504,51 +521,54 @@ export default function Products() {
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Товар</TableHead>
-                    <TableHead>Артикул</TableHead>
-                    <TableHead>Категория</TableHead>
-                    <TableHead>Цена</TableHead>
-                    <TableHead>Наличие</TableHead>
-                    <TableHead className="w-[50px]"></TableHead>
+                  <TableRow className="hover:bg-transparent border-b border-border/40">
+                    <TableHead className="py-4.5 font-bold text-foreground">Товар</TableHead>
+                    <TableHead className="py-4.5 font-bold text-foreground">Артикул</TableHead>
+                    <TableHead className="py-4.5 font-bold text-foreground">Категория</TableHead>
+                    <TableHead className="py-4.5 font-bold text-foreground">Цена</TableHead>
+                    <TableHead className="py-4.5 font-bold text-foreground">Наличие</TableHead>
+                    <TableHead className="py-4.5 w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredProducts?.map((product) => (
-                    <TableRow key={product.id} data-testid={`product-row-${product.id}`}>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{product.name}</div>
+                    <TableRow key={product.id} className="hover:bg-muted/20 border-b border-border/30 last:border-0" data-testid={`product-row-${product.id}`}>
+                      <TableCell className="py-4">
+                        <div className="space-y-1">
+                          <div className="font-bold text-sm text-foreground">{product.name}</div>
                           {product.description && (
-                            <div className="max-w-[200px] truncate text-xs text-muted-foreground">
+                            <div className="max-w-[280px] truncate text-xs text-muted-foreground font-medium">
                               {product.description}
                             </div>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="font-mono text-sm">
-                        {product.sku || "-"}
+                      <TableCell className="font-mono text-xs font-semibold py-4 text-muted-foreground">
+                        {product.sku || "—"}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="py-4">
                         {product.category ? (
-                          <Badge variant="outline">{product.category}</Badge>
+                          <Badge variant="secondary" className="rounded-lg font-bold text-[10px] px-2.5 py-0.5 bg-primary/5 text-primary border border-primary/5">
+                            {product.category}
+                          </Badge>
                         ) : (
-                          "-"
+                          "—"
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="font-bold text-sm text-foreground py-4">
                         {product.price != null
-                          ? `${product.price.toFixed(2)} ${product.currency || "RUB"}`
-                          : "-"}
+                          ? `${product.price.toLocaleString("ru-RU", { minimumFractionDigits: 2 })} ${product.currency || "RUB"}`
+                          : "—"}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="py-4">
                         <Badge
                           variant={product.inStock ? "default" : "secondary"}
-                          className={
+                          className={cn(
+                            "rounded-full font-extrabold text-[10px] px-2.5 py-0.5",
                             product.inStock
-                              ? "bg-status-online/10 text-status-online"
-                              : ""
-                          }
+                              ? "bg-success/15 text-success border border-success/20 hover:bg-success/15"
+                              : "bg-muted text-muted-foreground"
+                          )}
                         >
                           {product.inStock
                             ? product.stockQuantity
@@ -557,27 +577,29 @@ export default function Products() {
                             : "Нет в наличии"}
                         </Badge>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="py-4">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
                               variant="ghost"
                               size="icon"
+                              className="h-8 w-8 rounded-lg hover:bg-muted"
                               data-testid={`product-menu-${product.id}`}
                             >
-                              <MoreHorizontal className="h-4 w-4" />
+                              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
+                          <DropdownMenuContent align="end" className="rounded-xl">
                             <DropdownMenuItem
                               onClick={() => handleOpenEdit(product)}
                               data-testid={`product-edit-${product.id}`}
+                              className="font-medium"
                             >
                               <Edit2 className="mr-2 h-4 w-4" />
                               Редактировать
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              className="text-destructive"
+                              className="text-destructive font-semibold"
                               onClick={() => deleteMutation.mutate(product.id)}
                               data-testid={`product-delete-${product.id}`}
                             >
@@ -597,5 +619,6 @@ export default function Products() {
         </CardContent>
       </Card>
     </div>
+  );
   );
 }

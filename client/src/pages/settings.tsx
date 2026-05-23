@@ -4483,15 +4483,15 @@ function WebhookUrlCard({
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
+    <Card className="rounded-2xl border border-card-border bg-card shadow-sm hover:shadow-md transition-all duration-300">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-bold text-foreground">{title}</CardTitle>
+        <CardDescription className="text-xs text-muted-foreground font-medium">{description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex items-center gap-2">
-          <div className="flex-1 min-w-0 rounded-md border bg-muted px-3 py-2">
-            <code className="text-sm font-mono break-all select-all text-foreground">
+          <div className="flex-1 min-w-0 rounded-xl border border-border/40 bg-muted/30 px-3.5 py-2.5">
+            <code className="text-xs font-mono break-all select-all text-foreground font-bold">
               {url}
             </code>
           </div>
@@ -4499,29 +4499,29 @@ function WebhookUrlCard({
             type="button"
             variant="outline"
             size="icon"
-            className="shrink-0"
+            className="shrink-0 h-10 w-10 rounded-xl border-border/40 hover:bg-muted"
             onClick={handleCopy}
             title="Скопировать"
           >
             {copied ? (
-              <Check className="h-4 w-4 text-green-500" />
+              <Check className="h-4 w-4 text-success" />
             ) : (
-              <Copy className="h-4 w-4" />
+              <Copy className="h-4 w-4 text-muted-foreground hover:text-foreground" />
             )}
           </Button>
           <Button
             type="button"
             variant="outline"
             size="icon"
-            className="shrink-0"
+            className="shrink-0 h-10 w-10 rounded-xl border-border/40 hover:bg-muted"
             onClick={() => window.open(url, "_blank")}
             title="Открыть в браузере"
           >
-            <ExternalLink className="h-4 w-4" />
+            <ExternalLink className="h-4 w-4 text-muted-foreground hover:text-foreground" />
           </Button>
         </div>
         {hint && (
-          <p className="text-xs text-muted-foreground">{hint}</p>
+          <p className="text-xs text-muted-foreground font-medium leading-relaxed mt-1">{hint}</p>
         )}
       </CardContent>
     </Card>
@@ -5071,48 +5071,79 @@ export default function Settings() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6 p-3 sm:p-6">
+    <div className="space-y-6 p-4 sm:p-8 max-w-7xl mx-auto">
       <PaymentSuccessDialog
         open={showPaymentSuccess}
         onOpenChange={setShowPaymentSuccess}
       />
 
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-semibold">Настройки</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Настройка поведения и параметров NexusChat
+      <div className="border-b border-border/40 pb-5">
+        <div className="inline-flex items-center gap-1.5 text-xs text-primary font-semibold tracking-wider uppercase">
+          Параметры системы
+        </div>
+        <h1 className="text-3xl font-extrabold tracking-tight">Настройки</h1>
+        <p className="text-sm text-muted-foreground font-medium">
+          Настройка поведения, правил автоматизации и каналов связи для вашего AI-агента.
         </p>
       </div>
 
       <Tabs defaultValue="company" className="space-y-6">
-        <TabsList className="flex-wrap h-auto gap-1 p-1">
-          <TabsTrigger value="company" data-testid="tab-company" className="flex items-center gap-1.5 px-2 sm:px-3">
-            <Building2 className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">Компания</span>
+        <TabsList className="inline-flex h-auto p-1 bg-muted/65 border border-border/30 rounded-xl gap-1 flex-wrap">
+          <TabsTrigger
+            value="company"
+            data-testid="tab-company"
+            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+          >
+            <Building2 className="h-4 w-4 shrink-0 mr-1.5" />
+            <span>Компания</span>
           </TabsTrigger>
-          <TabsTrigger value="ai-agent" data-testid="tab-ai-agent" className="flex items-center gap-1.5 px-2 sm:px-3">
-            <Bot className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">Поведение AI</span>
+          <TabsTrigger
+            value="ai-agent"
+            data-testid="tab-ai-agent"
+            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+          >
+            <Bot className="h-4 w-4 shrink-0 mr-1.5" />
+            <span>Поведение AI</span>
           </TabsTrigger>
-          <TabsTrigger value="automation" data-testid="tab-automation" className="flex items-center gap-1.5 px-2 sm:px-3">
-            <Zap className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">Автоматизация</span>
+          <TabsTrigger
+            value="automation"
+            data-testid="tab-automation"
+            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+          >
+            <Zap className="h-4 w-4 shrink-0 mr-1.5" />
+            <span>Автоматизация</span>
           </TabsTrigger>
-          <TabsTrigger value="ai-training" data-testid="tab-ai-training" className="flex items-center gap-1.5 px-2 sm:px-3">
-            <MessageSquare className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">Обучение</span>
+          <TabsTrigger
+            value="ai-training"
+            data-testid="tab-ai-training"
+            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+          >
+            <MessageSquare className="h-4 w-4 shrink-0 mr-1.5" />
+            <span>Обучение</span>
           </TabsTrigger>
-          <TabsTrigger value="templates-payment" data-testid="tab-templates-payment" className="flex items-center gap-1.5 px-2 sm:px-3">
-            <FileText className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">Шаблоны</span>
+          <TabsTrigger
+            value="templates-payment"
+            data-testid="tab-templates-payment"
+            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+          >
+            <FileText className="h-4 w-4 shrink-0 mr-1.5" />
+            <span>Шаблоны</span>
           </TabsTrigger>
-          <TabsTrigger value="channels" data-testid="tab-channels" className="flex items-center gap-1.5 px-2 sm:px-3">
-            <Link2 className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">Каналы</span>
+          <TabsTrigger
+            value="channels"
+            data-testid="tab-channels"
+            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+          >
+            <Link2 className="h-4 w-4 shrink-0 mr-1.5" />
+            <span>Каналы</span>
           </TabsTrigger>
-          <TabsTrigger value="lead-intake" data-testid="tab-lead-intake" className="flex items-center gap-1.5 px-2 sm:px-3">
-            <Inbox className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">Приём заявок</span>
+          <TabsTrigger
+            value="lead-intake"
+            data-testid="tab-lead-intake"
+            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+          >
+            <Inbox className="h-4 w-4 shrink-0 mr-1.5" />
+            <span>Приём заявок</span>
           </TabsTrigger>
         </TabsList>
 
@@ -5258,10 +5289,10 @@ export default function Settings() {
                                     field.onChange(next);
                                   }}
                                   className={cn(
-                                    "w-10 h-10 rounded-md border text-sm font-medium transition-colors",
+                                    "w-10 h-10 rounded-xl border text-sm font-bold transition-all duration-200",
                                     checked
-                                      ? "bg-primary text-primary-foreground border-primary"
-                                      : "bg-background text-muted-foreground hover:bg-muted"
+                                      ? "bg-primary text-primary-foreground border-primary shadow-md shadow-primary/10"
+                                      : "bg-background text-muted-foreground hover:bg-muted border-border/40 hover:border-border"
                                   )}
                                 >
                                   {label}
