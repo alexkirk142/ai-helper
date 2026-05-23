@@ -40,6 +40,7 @@ import { formatDistanceToNow, format } from "date-fns";
 import { ru } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 interface Lead {
   id: string;
@@ -231,13 +232,7 @@ function LeadDetailDialog({ lead, onClose, onUpdated }: { lead: Lead; onClose: (
 
   const mutation = useMutation({
     mutationFn: async (data: { status: string; notes: string }) => {
-      const res = await fetch(`/api/crm/leads/${lead.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error("Failed to update lead");
+      const res = await apiRequest("PATCH", `/api/crm/leads/${lead.id}`, data);
       return res.json();
     },
     onSuccess: () => {
