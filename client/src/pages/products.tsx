@@ -620,5 +620,4 @@ export default function Products() {
       </Card>
     </div>
   );
-  );
 }
