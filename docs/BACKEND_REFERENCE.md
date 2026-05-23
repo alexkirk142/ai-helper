@@ -429,11 +429,29 @@ request
 
 | Метод | Путь |
 |-------|------|
+| GET | `/api/dashboard/metrics` — возвращает `DashboardMetrics` |
 | GET | `/api/analytics/csat` |
 | GET | `/api/analytics/conversions` |
 | GET | `/api/analytics/intents` |
 | GET | `/api/analytics/lost-deals` |
 | POST | `/api/csat` |
+
+**`DashboardMetrics` — поля и источник данных:**
+
+| Поле | Тип | Вычисление |
+|------|-----|-----------|
+| `totalConversations` | `number` | `COUNT(*)` из `conversations` тенанта |
+| `activeConversations` | `number` | `COUNT(*) WHERE status='active'` |
+| `escalatedConversations` | `number` | `COUNT(*) WHERE status='escalated'` |
+| `resolvedToday` | `number` | resolved WHERE `updated_at >= CURRENT_DATE` |
+| `resolvedYesterday` | `number` | resolved WHERE `updated_at >= CURRENT_DATE-1 AND < CURRENT_DATE` |
+| `conversationsThisWeek` | `number` | `created_at > NOW()-7d` |
+| `conversationsLastWeek` | `number` | `created_at` в диапазоне 8–14 дней назад (для тренда) |
+| `avgResponseTime` | `number \| null` | Среднее (сек) от customer-сообщения до первого ответа ассистента, последние 30 дней, аутлайеры >1 ч исключены, LIMIT 500 пар |
+| `aiAccuracy` | `number` (0–1) | `approved / (approved + rejected)` из `ai_suggestions` |
+| `pendingSuggestions` | `number` | `ai_suggestions WHERE status='pending'` |
+| `productsCount` | `number` | `COUNT(*)` из `products` |
+| `knowledgeDocsCount` | `number` | `COUNT(*)` из `knowledge_docs` |
 
 ### Billing (`routes/billing.routes.ts`)
 

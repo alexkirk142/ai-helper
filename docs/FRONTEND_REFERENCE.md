@@ -289,10 +289,14 @@ function AdminGuard({ children }) {
 
 ### Dashboard (`pages/dashboard.tsx`)
 
-- Обзор метрик: активные диалоги, ожидают оператора, эскалированы
-- Последние эскалации
-- CSAT-тренд
-- `MetricsCard` компоненты с трендом (+/-)
+- Обзор 8 метрик через `GET /api/dashboard/metrics` (`DashboardMetrics`)
+- Последние эскалации + активные диалоги (последние 5)
+- Все тренды — реальные вычисленные данные, **нет захардкоженных значений**:
+  - «Всего разговоров» — недельный тренд `±X%` из `conversationsThisWeek` vs `conversationsLastWeek`
+  - «Решено сегодня» — сравнение с `resolvedYesterday` (`±N вчера`)
+  - «Среднее время ответа» — форматируется через `formatSeconds()` (`Xм Yс`), пометка «за 30 дней»
+  - «Точность AI» — реальный % + цвет тренда: ≥80% up, ≥50% neutral, <50% down
+- Вспомогательные функции в файле: `weekTrend(thisWeek, lastWeek)`, `formatSeconds(seconds)`
 
 ### Conversations (`pages/conversations.tsx`)
 
