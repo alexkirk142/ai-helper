@@ -770,7 +770,7 @@ export function ChatInterface({
       />
 
       {/* Messages */}
-      <div className="relative flex-1 min-h-0 overflow-hidden">
+      <div className="relative flex-1 min-h-0 overflow-hidden bg-slate-50 dark:bg-transparent">
         <ScrollArea 
           className="h-full p-4" 
           ref={scrollAreaRef}
@@ -802,10 +802,10 @@ export function ChatInterface({
                   className={cn(
                     "max-w-[70%] px-4 py-3 shadow-sm transition-all duration-200 border",
                     message.role === "customer"
-                      ? "bg-muted/70 text-foreground rounded-2xl rounded-tl-none border-border/40"
+                      ? "bg-white dark:bg-muted/70 text-foreground rounded-2xl rounded-tl-none border border-slate-200 dark:border-border/40 shadow-sm"
                       : message.role === "assistant"
                       ? "bg-primary text-primary-foreground rounded-2xl rounded-tr-none border-primary/15 shadow-md shadow-primary/5"
-                      : "bg-accent text-accent-foreground rounded-2xl rounded-tr-none border-border/50"
+                      : "bg-slate-700 dark:bg-accent text-white dark:text-accent-foreground rounded-2xl rounded-tr-none border-slate-600 dark:border-border/50"
                   )}
                 >
                   {message.content && (
@@ -901,8 +901,8 @@ export function ChatInterface({
 
       {/* AI Suggestion Panel */}
       {suggestion && suggestion.status === "pending" && (
-        <Card className="mx-3 mb-3 sm:mx-4 sm:mb-4 overflow-hidden border-primary/30 flex flex-col max-h-[45vh] sm:max-h-[55vh] rounded-2xl shadow-xl shadow-primary/[0.04] bg-gradient-to-b from-primary/[0.01] to-background/50">
-          <div className="bg-primary/[0.03] px-4 py-3 shrink-0 border-b border-primary/10">
+        <Card className="mx-3 mb-3 sm:mx-4 sm:mb-4 overflow-hidden border-primary/40 flex flex-col max-h-[45vh] sm:max-h-[55vh] rounded-2xl shadow-xl shadow-primary/[0.08] bg-gradient-to-b from-primary/10 to-primary/[0.03] dark:from-primary/[0.03] dark:to-background/50">
+          <div className="bg-primary/10 dark:bg-primary/[0.03] px-4 py-3 shrink-0 border-b border-primary/20 dark:border-primary/10">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -1046,7 +1046,7 @@ export function ChatInterface({
                     {usedSources.map((source, i) => (
                       <div
                         key={i}
-                        className="flex items-start gap-2.5 rounded-xl border border-border/40 bg-muted/30 p-2.5 text-xs transition-colors hover:bg-muted/50"
+                        className="flex items-start gap-2.5 rounded-xl border border-border/60 dark:border-border/40 bg-slate-100 dark:bg-muted/30 p-2.5 text-xs transition-colors hover:bg-slate-200 dark:hover:bg-muted/50"
                       >
                         {source.type === "product" ? (
                           <Package className="h-3.5 w-3.5 shrink-0 text-primary/75 mt-0.5" />
@@ -1063,7 +1063,7 @@ export function ChatInterface({
           </div>
 
           {/* Actions — always visible, not scrolled away */}
-          <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-3.5 border-t border-border/30 bg-background/30 backdrop-blur-sm">
+          <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-3.5 border-t border-border/50 bg-background/80 backdrop-blur-sm">
             {isEditing ? (
               <>
                 <Button
@@ -1137,7 +1137,7 @@ export function ChatInterface({
       )}
 
       {/* Manual Message Input */}
-      <div className="p-3 sm:p-4 shrink-0 bg-background/30 backdrop-blur-sm border-t border-border/30">
+      <div className="p-3 sm:p-4 shrink-0 bg-background border-t border-border/50">
         {/* Multi-file preview strip */}
         {selectedFiles.length > 0 && (
           <div className="mb-2.5 flex flex-wrap gap-2 rounded-xl border border-border/40 bg-muted/30 p-2.5 shadow-inner">
@@ -1182,7 +1182,7 @@ export function ChatInterface({
           </div>
         )}
 
-        <div className="flex items-end gap-2 bg-muted/40 border border-border/30 rounded-2xl p-2 focus-within:border-primary/30 focus-within:bg-background focus-within:shadow-lg focus-within:shadow-primary/[0.01] transition-all duration-200">
+        <div className="flex items-end gap-2 bg-slate-100 dark:bg-muted/40 border border-border/60 dark:border-border/30 rounded-2xl p-2 focus-within:border-primary/50 focus-within:bg-background focus-within:shadow-lg focus-within:shadow-primary/[0.03] transition-all duration-200">
           {/* Hidden file input — multiple allowed */}
           <input
             ref={fileInputRef}
