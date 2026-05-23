@@ -337,39 +337,37 @@ function AuthenticatedApp() {
   return (
     <SidebarProvider style={style as React.CSSProperties}>
       <PaymentSuccessDialog open={showGlobalSuccess} onOpenChange={setShowGlobalSuccess} />
-      <div className="flex h-screen w-full">
-        <AppSidebar />
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-3 sm:px-4">
-            <SidebarTrigger data-testid="button-sidebar-toggle" />
-            <div className="flex items-center gap-2 sm:gap-3">
-              <span className="hidden sm:block text-sm text-muted-foreground truncate max-w-[200px]">
-                {user?.email || user?.firstName || "Пользователь"}
-              </span>
-              <ThemeToggle />
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => logout()}
-                disabled={isLoggingOut}
-                data-testid="button-logout"
-                className="px-2 sm:px-3"
-              >
-                {isLoggingOut ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <>
-                    <LogOut className="h-4 w-4 sm:hidden" />
-                    <span className="hidden sm:inline">Выйти</span>
-                  </>
-                )}
-              </Button>
-            </div>
-          </header>
-          <main className="flex-1 overflow-auto">
-            <Router />
-          </main>
-        </div>
+      <AppSidebar />
+      <div className="flex flex-1 flex-col overflow-hidden min-h-screen">
+        <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-3 sm:px-4">
+          <SidebarTrigger data-testid="button-sidebar-toggle" />
+          <div className="flex items-center gap-2 sm:gap-3">
+            <span className="hidden sm:block text-sm text-muted-foreground truncate max-w-[200px]">
+              {user?.email || user?.firstName || "Пользователь"}
+            </span>
+            <ThemeToggle />
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => logout()}
+              disabled={isLoggingOut}
+              data-testid="button-logout"
+              className="px-2 sm:px-3"
+            >
+              {isLoggingOut ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <LogOut className="h-4 w-4 sm:hidden" />
+                  <span className="hidden sm:inline">Выйти</span>
+                </>
+              )}
+            </Button>
+          </div>
+        </header>
+        <main className="flex-1 overflow-auto">
+          <Router />
+        </main>
       </div>
     </SidebarProvider>
   );
