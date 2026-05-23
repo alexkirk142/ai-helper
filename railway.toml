@@ -3,6 +3,6 @@ builder = "NIXPACKS"
 nixpacksConfigPath = "nixpacks.toml"
 
 [deploy]
-startCommand = "npx drizzle-kit migrate && npm run start"
+startCommand = "sh scripts/start.sh"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
