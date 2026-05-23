@@ -69,7 +69,7 @@ const managementItems = [
     icon: BarChart3,
   },
   {
-    title: "Расширения",
+    title: "Подписки",
     url: "/extensions",
     icon: Puzzle,
   },

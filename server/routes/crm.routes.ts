@@ -82,4 +82,34 @@ router.delete("/api/crm/leads/:id", requireAuth, requirePermission("MANAGE_SETTI
   }
 });
 
+const createLeadSchema = z.object({
+  name: z.string().max(200).optional().nullable(),
+  phone: z.string().max(50).optional().nullable(),
+  email: z.string().max(200).optional().nullable(),
+  telegramUsername: z.string().max(100).optional().nullable(),
+  preferredChannel: z.string().max(50).default("auto").nullable(),
+  status: z.enum(["new", "contacted", "in_progress", "converted", "failed", "closed"]).default("new"),
+  quizName: z.string().max(200).optional().nullable(),
+  notes: z.string().max(5000).optional().nullable(),
+});
+
+// POST /api/crm/leads — create a lead manually
+router.post("/api/crm/leads", requireAuth, requirePermission("VIEW_CONVERSATIONS"), requireTenant, async (req: Request, res: Response) => {
+  try {
+    const parsed = createLeadSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
+    }
+    const newLead = await storage.createLead({
+      ...parsed.data,
+      source: "manual",
+      metadata: {},
+    }, req.tenantId!);
+    res.json(newLead);
+  } catch (error) {
+    console.error("Error creating CRM lead manually:", error);
+    res.status(500).json({ error: "Failed to create lead" });
+  }
+});
+
 export default router;

@@ -15,16 +15,25 @@ import {
   Clock,
   BarChart3,
   Globe,
-  BrainCircuit,
   BookOpen,
   GraduationCap,
 } from "lucide-react";
 import { SiTelegram } from "react-icons/si";
-import { useAiBillingStatus, useCreateAiCheckout, useCancelAiSubscription } from "@/hooks/use-billing";
+import {
+  useAiBillingStatus, useCreateAiCheckout, useCancelAiSubscription,
+  useBillingStatus, useCreateCheckout, useCancelSubscription,
+} from "@/hooks/use-billing";
 import { usePublicBillingConfig } from "@/components/subscription-paywall";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+
+const CHAT_FEATURES = [
+  { icon: MessageSquare, text: "Неограниченные разговоры с клиентами через все подключённые каналы" },
+  { icon: Zap, text: "Подключение каналов: Telegram Personal, WhatsApp Personal, MAX" },
+  { icon: Bot, text: "AI-предложения ответов с обучением на диалогах вашей команды" },
+  { icon: Shield, text: "Полная защита данных клиентов и GDPR compliance" },
+];
 
 const AI_FEATURES = [
   { icon: MessageSquare, text: "Предлагает готовый ответ на каждое сообщение клиента — оператор отправляет одним кликом" },
@@ -76,13 +85,30 @@ function ExpiredBadge() {
 
 export default function Extensions() {
   const { toast } = useToast();
+
+  // Chat subscription (channels)
+  const { data: chatBilling, isLoading: chatLoading, refetch: refetchChat } = useBillingStatus();
+  const createChatCheckout = useCreateCheckout();
+  const cancelChatSubscription = useCancelSubscription();
+  const [chatPurchaseLoading, setChatPurchaseLoading] = useState(false);
+
+  // AI Agent subscription
   const { data: billing, isLoading, refetch } = useAiBillingStatus();
   const createCheckout = useCreateAiCheckout();
   const cancelSubscription = useCancelAiSubscription();
   const [purchaseLoading, setPurchaseLoading] = useState(false);
+
   const { data: publicConfig } = usePublicBillingConfig();
   const aiPrice = publicConfig?.aiAgentPrice ?? 30;
+  const subPrice = publicConfig?.subscriptionPrice ?? 50;
 
+  // Chat subscription states
+  const isChatActive = chatBilling?.canAccess === true;
+  const isChatTrial = chatBilling?.isTrial && chatBilling?.canAccess;
+  const isChatExpired = !chatBilling?.canAccess && chatBilling?.hadTrial && (chatBilling?.status === "expired" || chatBilling?.status === "canceled");
+  const isChatPastDue = chatBilling?.status === "past_due";
+
+  // AI subscription states
   const isActive = billing?.canAccess === true;
   const isExpired = !billing?.canAccess && billing?.hasSubscription && billing?.status === "canceled";
   const isPastDue = billing?.status === "past_due";
@@ -99,14 +125,12 @@ export default function Extensions() {
       .then((r) => r.json())
       .then((data: any) => {
         if (data?.activated) {
-          // Prevent the global onboarding redirect from firing before the toast shows
           sessionStorage.setItem("ai_billing_success", "1");
           queryClient.invalidateQueries({ queryKey: ["/api/billing/ai/me"] });
           toast({
             title: "AI Ассистент активирован!",
             description: "Подписка активна. AI начнёт генерировать подсказки в разговорах.",
           });
-          // Allow onboarding redirect after the toast has been visible
           setTimeout(() => sessionStorage.removeItem("ai_billing_success"), 4000);
         } else {
           queryClient.invalidateQueries({ queryKey: ["/api/billing/ai/me"] });
@@ -114,6 +138,45 @@ export default function Extensions() {
       })
       .catch(() => {});
   }, []);
+
+  const handleChatPurchase = async () => {
+    setChatPurchaseLoading(true);
+    try {
+      const result = await createChatCheckout.mutateAsync();
+      if (result.url) {
+        window.open(result.url, "_blank");
+        toast({
+          title: "Переход к оплате",
+          description: "Откроется CryptoBot в Telegram для оплаты",
+        });
+        const interval = setInterval(async () => {
+          const { data } = await refetchChat();
+          if (data?.canAccess) {
+            clearInterval(interval);
+            setChatPurchaseLoading(false);
+            toast({
+              title: "Подписка на чаты активирована!",
+              description: "Теперь вы можете подключать каналы связи.",
+            });
+          }
+        }, 3000);
+        setTimeout(() => {
+          clearInterval(interval);
+          setChatPurchaseLoading(false);
+        }, 300000);
+      } else if (result.error) {
+        toast({ title: "Ошибка", description: result.error, variant: "destructive" });
+        setChatPurchaseLoading(false);
+      }
+    } catch (error: any) {
+      toast({
+        title: "Ошибка",
+        description: error?.message || "Не удалось создать сессию оплаты",
+        variant: "destructive",
+      });
+      setChatPurchaseLoading(false);
+    }
+  };
 
   const handlePurchase = async () => {
     setPurchaseLoading(true);
@@ -141,11 +204,7 @@ export default function Extensions() {
           setPurchaseLoading(false);
         }, 300000);
       } else if (result.error) {
-        toast({
-          title: "Ошибка",
-          description: result.error,
-          variant: "destructive",
-        });
+        toast({ title: "Ошибка", description: result.error, variant: "destructive" });
         setPurchaseLoading(false);
       }
     } catch (error: any) {
@@ -161,20 +220,174 @@ export default function Extensions() {
   return (
     <div className="container mx-auto max-w-4xl space-y-8 p-6">
       <div>
-        <h1 className="text-2xl font-bold">Расширения</h1>
+        <h1 className="text-2xl font-bold">Подписки и расширения</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Подключайте дополнительные возможности для вашего AI Sales Operator
+          Управляйте подписками и подключайте дополнительные возможности
         </p>
       </div>
 
       <Separator />
 
-      {/* Active Extensions Section */}
+      {/* Subscriptions Section */}
       <section className="space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Доступные расширения
+          Подписки
         </h2>
 
+        {/* Chat Subscription Card */}
+        <Card className={cn(
+          "border-2 transition-colors",
+          isChatActive ? "border-primary/30 bg-primary/5" : "border-border"
+        )}>
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                  <MessageSquare className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Подписка на чаты</CardTitle>
+                  <CardDescription className="text-xs">
+                    Подключайте каналы и ведите разговоры с клиентами
+                  </CardDescription>
+                </div>
+              </div>
+              <div className="shrink-0">
+                {chatLoading ? (
+                  <Badge variant="outline">
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    Загрузка...
+                  </Badge>
+                ) : isChatTrial ? (
+                  <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">
+                    <Clock className="mr-1 h-3 w-3" />
+                    Пробный период
+                  </Badge>
+                ) : isChatActive ? (
+                  <ActiveBadge />
+                ) : isChatPastDue ? (
+                  <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20">
+                    <Clock className="mr-1 h-3 w-3" />
+                    Требует оплаты
+                  </Badge>
+                ) : isChatExpired ? (
+                  <ExpiredBadge />
+                ) : (
+                  <InactiveBadge />
+                )}
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="space-y-4">
+            <ul className="space-y-2">
+              {CHAT_FEATURES.map((feature, idx) => (
+                <li key={idx} className="flex items-start gap-2 text-sm">
+                  <div className={cn(
+                    "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
+                    isChatActive ? "bg-primary/10" : "bg-muted"
+                  )}>
+                    {isChatActive ? (
+                      <Check className="h-3 w-3 text-primary" />
+                    ) : (
+                      <Lock className="h-3 w-3 text-muted-foreground" />
+                    )}
+                  </div>
+                  <span className={cn(isChatActive ? "" : "text-muted-foreground")}>
+                    {feature.text}
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            <Separator />
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-2xl font-bold">
+                  {subPrice} USDT
+                  <span className="ml-1 text-sm font-normal text-muted-foreground">/месяц</span>
+                </div>
+                {isChatTrial && chatBilling?.trialEndsAt && (
+                  <p className="text-xs text-blue-600">
+                    Пробный период до{" "}
+                    {new Date(chatBilling.trialEndsAt).toLocaleDateString("ru-RU", {
+                      day: "numeric",
+                      month: "long",
+                    })}
+                  </p>
+                )}
+                {isChatActive && !isChatTrial && chatBilling?.currentPeriodEnd && (
+                  <p className="text-xs text-muted-foreground">
+                    Активна до{" "}
+                    {new Date(chatBilling.currentPeriodEnd).toLocaleDateString("ru-RU", {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    })}
+                  </p>
+                )}
+                {isChatPastDue && (
+                  <p className="text-xs text-orange-600">Требуется продление подписки</p>
+                )}
+              </div>
+
+              {isChatActive && !isChatTrial ? (
+                <div className="flex flex-col gap-2 self-start">
+                  <Badge className="bg-green-500/10 text-green-600 border-green-500/20 px-4 py-2 text-sm">
+                    <Check className="mr-2 h-4 w-4" />
+                    Подписка активна
+                  </Badge>
+                  {chatBilling?.cancelAtPeriodEnd ? (
+                    <p className="text-xs text-muted-foreground text-center">Отмена в конце периода</p>
+                  ) : (
+                    <button
+                      onClick={() => cancelChatSubscription.mutate()}
+                      disabled={cancelChatSubscription.isPending}
+                      className="text-xs text-muted-foreground underline hover:text-destructive"
+                    >
+                      Отменить подписку
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <Button
+                  onClick={handleChatPurchase}
+                  disabled={chatPurchaseLoading || createChatCheckout.isPending}
+                  size="lg"
+                  className="self-start"
+                >
+                  {chatPurchaseLoading || createChatCheckout.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Подготовка...
+                    </>
+                  ) : (
+                    <>
+                      <SiTelegram className="mr-2 h-4 w-4" />
+                      {isChatExpired || isChatPastDue ? "Продлить подписку" : `Активировать — ${subPrice} USDT/мес`}
+                      <ExternalLink className="ml-2 h-3 w-3" />
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+
+            {!isChatActive && !chatLoading && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Badge variant="outline" className="text-xs">USDT</Badge>
+                <Badge variant="outline" className="text-xs">TON</Badge>
+                <Badge variant="outline" className="text-xs">BTC</Badge>
+                <Badge variant="outline" className="text-xs">ETH</Badge>
+                <span className="self-center text-xs text-muted-foreground">
+                  — безопасная оплата через CryptoBot
+                </span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* AI Agent Card */}
         <Card className={cn(
           "border-2 transition-colors",
           isActive ? "border-primary/30 bg-primary/5" : "border-border"

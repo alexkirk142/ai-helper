@@ -99,7 +99,7 @@ client/
     │   ├── onboarding.tsx       # 6-шаговый wizard онбординга
     │   ├── analytics.tsx        # CSAT, конверсии, интенты, lost-deals (recharts)
     │   ├── billing.tsx          # Подписка: CryptoBot checkout, 50 USDT/мес
-    │   ├── extensions.tsx       # Подписка AI Agent + Coming Soon расширения
+    │   ├── extensions.tsx       # Подписки (чаты + AI Agent) + Coming Soon расширения
     │   ├── auth.tsx             # Login/Signup/VerifyEmail/Forgot/Reset (один файл, 5 компонентов)
     │   ├── not-found.tsx        # 404
     │   ├── security-status.tsx  # Панель безопасности [adminOnly]
@@ -378,10 +378,13 @@ function AdminGuard({ children }) {
 - Отмена подписки
 - `useBillingStatus` (staleTime: 30s, refetchInterval: 60s)
 
-### Extensions (`pages/extensions.tsx`)
+### Extensions / Подписки (`pages/extensions.tsx`)
 
-- **AI Agent подписка** (отдельно от channels): возможности, цена
-- `useAiBillingStatus`, `useCreateAiCheckout`, `useCancelAiSubscription`
+- Заголовок страницы: "Подписки и расширения"; пункт сайдбара переименован в "Подписки"
+- **Подписка на чаты** (channels): возможности, цена (`subscriptionPrice`), статусы trial/active/expired
+  - `useBillingStatus`, `useCreateCheckout`, `useCancelSubscription`
+- **AI Ассистент** (ai_agent): возможности, цена (`aiAgentPrice`), управление подпиской
+  - `useAiBillingStatus`, `useCreateAiCheckout`, `useCancelAiSubscription`
 - "Coming Soon" расширения: Веб-виджет, Расширенная аналитика
 
 ### Auth (`pages/auth.tsx`)
@@ -910,6 +913,7 @@ return (
 | Продукт | Endpoint | Страница | Hook |
 |---------|---------|---------|------|
 | Channels (мессенджеры) | `/api/billing/*` | `/billing` | `useBillingStatus` |
+| Чаты (channels) | `/api/billing/*` | `/extensions` | `useBillingStatus` |
 | AI Agent | `/api/billing/ai/*` | `/extensions` | `useAiBillingStatus` |
 
 **Логика доступа:**
