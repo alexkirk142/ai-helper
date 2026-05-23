@@ -8,11 +8,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Shield, Loader2, ArrowLeft, Users, Clock, CreditCard, 
-  TrendingUp, Calendar, DollarSign, Settings2, Save, Ban, Bot, MessageSquare, Gift
+  TrendingUp, Calendar, DollarSign, Settings2, Save, Ban, Bot, MessageSquare, Gift, ToggleLeft
 } from "lucide-react";
 import {
   AlertDialog,
@@ -26,11 +27,15 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
+type BillingProductMode = "active" | "maintenance" | "coming_soon";
+
 interface PricesData {
   subscriptionPrice: number;
   aiAgentPrice: number;
   trialHours: number;
   extraAccountPrice: number;
+  channelsMode: BillingProductMode;
+  aiAgentMode: BillingProductMode;
 }
 
 interface SubscriptionRow {
@@ -102,6 +107,8 @@ export default function AdminBilling() {
   const [aiAgentPrice, setAiAgentPrice]           = useState("");
   const [trialHours, setTrialHours]               = useState("");
   const [extraAccountPrice, setExtraAccountPrice] = useState("");
+  const [channelsMode, setChannelsMode]           = useState<BillingProductMode>("active");
+  const [aiAgentMode, setAiAgentMode]             = useState<BillingProductMode>("active");
 
   useEffect(() => {
     if (prices) {
@@ -109,6 +116,8 @@ export default function AdminBilling() {
       setAiAgentPrice(String(prices.aiAgentPrice));
       setTrialHours(String(prices.trialHours));
       setExtraAccountPrice(String(prices.extraAccountPrice));
+      setChannelsMode(prices.channelsMode ?? "active");
+      setAiAgentMode(prices.aiAgentMode ?? "active");
     }
   }, [prices]);
 
@@ -172,7 +181,7 @@ export default function AdminBilling() {
 
   const savepricesMutation = useMutation({
     mutationFn: async () => {
-      const body: Record<string, number> = {};
+      const body: Record<string, number | string> = {};
       const sp = parseFloat(subscriptionPrice);
       const ap = parseFloat(aiAgentPrice);
       const th = parseInt(trialHours, 10);
@@ -181,6 +190,8 @@ export default function AdminBilling() {
       if (!isNaN(ap) && ap > 0) body.aiAgentPrice = ap;
       if (!isNaN(th) && th > 0) body.trialHours = th;
       if (!isNaN(ea) && ea > 0) body.extraAccountPrice = ea;
+      body.channelsMode = channelsMode;
+      body.aiAgentMode  = aiAgentMode;
       const res = await apiRequest("PUT", "/api/admin/billing/prices", body);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -396,6 +407,41 @@ export default function AdminBilling() {
                     <p className="text-xs text-muted-foreground">
                       Аккаунты 6+ сверх бесплатных 5
                     </p>
+                  </div>
+                </div>
+
+                <div className="border-t pt-4 space-y-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <ToggleLeft className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">Режим продаж подписок</span>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Подписка на чаты</Label>
+                      <Select value={channelsMode} onValueChange={(v) => setChannelsMode(v as BillingProductMode)}>
+                        <SelectTrigger data-testid="select-channels-mode">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="active">Активна — покупка доступна</SelectItem>
+                          <SelectItem value="maintenance">Тех. работы — покупка отключена</SelectItem>
+                          <SelectItem value="coming_soon">В разработке — покупка отключена</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>AI Ассистент</Label>
+                      <Select value={aiAgentMode} onValueChange={(v) => setAiAgentMode(v as BillingProductMode)}>
+                        <SelectTrigger data-testid="select-ai-agent-mode">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="active">Активна — покупка доступна</SelectItem>
+                          <SelectItem value="maintenance">Тех. работы — покупка отключена</SelectItem>
+                          <SelectItem value="coming_soon">В разработке — покупка отключена</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 </div>
 

@@ -177,23 +177,31 @@ router.get(
   requireAuth,
   requirePlatformAdmin(),
   async (_req, res) => {
-    const { getSubscriptionPriceUsdt, getAiSubscriptionPriceUsdt, getTrialPeriodHours, getExtraAccountPriceUsdt } =
-      await import("../services/cryptobot-billing");
-    const [subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice] = await Promise.all([
+    const {
+      getSubscriptionPriceUsdt, getAiSubscriptionPriceUsdt, getTrialPeriodHours,
+      getExtraAccountPriceUsdt, getChannelsMode, getAiAgentMode,
+    } = await import("../services/cryptobot-billing");
+    const [subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice, channelsMode, aiAgentMode] = await Promise.all([
       getSubscriptionPriceUsdt(),
       getAiSubscriptionPriceUsdt(),
       getTrialPeriodHours(),
       getExtraAccountPriceUsdt(),
+      getChannelsMode(),
+      getAiAgentMode(),
     ]);
-    res.json({ subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice });
+    res.json({ subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice, channelsMode, aiAgentMode });
   }
 );
+
+const BILLING_MODES = ["active", "maintenance", "coming_soon"] as const;
 
 const pricesSchema = z.object({
   subscriptionPrice:  z.number().positive().optional(),
   aiAgentPrice:       z.number().positive().optional(),
   trialHours:         z.number().int().positive().optional(),
   extraAccountPrice:  z.number().positive().optional(),
+  channelsMode:       z.enum(BILLING_MODES).optional(),
+  aiAgentMode:        z.enum(BILLING_MODES).optional(),
 });
 
 router.put(
@@ -205,7 +213,7 @@ router.put(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid price data", details: parsed.error.errors });
     }
-    const { subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice } = parsed.data;
+    const { subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice, channelsMode, aiAgentMode } = parsed.data;
 
     const adminId = (req as any).user?.id;
 
@@ -214,6 +222,8 @@ router.put(
     if (aiAgentPrice      !== undefined) priceEntries.push({ keyName: "PRICE_AI_AGENT_USDT",             value: String(aiAgentPrice) });
     if (trialHours        !== undefined) priceEntries.push({ keyName: "PRICE_TRIAL_HOURS",               value: String(trialHours) });
     if (extraAccountPrice !== undefined) priceEntries.push({ keyName: "PRICE_EXTRA_MAX_ACCOUNT_USDT",    value: String(extraAccountPrice) });
+    if (channelsMode      !== undefined) priceEntries.push({ keyName: "BILLING_CHANNELS_MODE",           value: channelsMode });
+    if (aiAgentMode       !== undefined) priceEntries.push({ keyName: "BILLING_AI_AGENT_MODE",           value: aiAgentMode });
 
     for (const entry of priceEntries) {
       const { ciphertext, meta, last4 } = encryptSecret(entry.value);

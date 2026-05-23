@@ -29,19 +29,23 @@ import { SiTelegram } from "react-icons/si";
 import { useCreateCheckout, useBillingStatus } from "@/hooks/use-billing";
 import { useToast } from "@/hooks/use-toast";
 
+export type BillingProductMode = "active" | "maintenance" | "coming_soon";
+
 export interface PublicBillingConfig {
   notifyBotUsername: string | null;
   subscriptionPrice: number;
   aiAgentPrice: number;
   trialHours: number;
   extraAccountPrice: number;
+  channelsMode: BillingProductMode;
+  aiAgentMode: BillingProductMode;
 }
 
 export function usePublicBillingConfig() {
   return useQuery<PublicBillingConfig>({
     queryKey: ["/api/billing/public-config"],
     staleTime: 5 * 60 * 1000,
-    placeholderData: { notifyBotUsername: null, subscriptionPrice: 50, aiAgentPrice: 30, trialHours: 72, extraAccountPrice: 10 },
+    placeholderData: { notifyBotUsername: null, subscriptionPrice: 50, aiAgentPrice: 30, trialHours: 72, extraAccountPrice: 10, channelsMode: "active" as BillingProductMode, aiAgentMode: "active" as BillingProductMode },
   });
 }
 

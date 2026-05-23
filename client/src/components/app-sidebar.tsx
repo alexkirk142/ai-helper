@@ -1,6 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { useAiBillingStatus } from "@/hooks/use-billing";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   LayoutDashboard,
@@ -85,6 +86,7 @@ export function AppSidebar() {
   const [location] = useLocation();
   const { user } = useAuth();
   const isPlatformStaff = user?.isPlatformAdmin || user?.isPlatformOwner;
+  const { data: aiBilling } = useAiBillingStatus();
 
   const { data: channelCounts } = useQuery<{ all: number }>({
     queryKey: ["/api/conversations/channel-counts"],
@@ -329,10 +331,18 @@ export function AppSidebar() {
         ) : (
           <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/30 border border-sidebar-border/30 p-3.5 shadow-sm">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-success"></span>
+              <span className={cn(
+                "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
+                aiBilling?.canAccess ? "bg-success" : "bg-muted-foreground"
+              )}></span>
+              <span className={cn(
+                "relative inline-flex rounded-full h-2 w-2",
+                aiBilling?.canAccess ? "bg-success" : "bg-muted-foreground"
+              )}></span>
             </span>
-            <span className="text-xs font-semibold text-sidebar-foreground/80">AI-агент активен</span>
+            <span className="text-xs font-semibold text-sidebar-foreground/80">
+              {aiBilling?.canAccess ? "AI-агент активен" : "AI-агент не активен"}
+            </span>
           </div>
         )}
       </SidebarFooter>

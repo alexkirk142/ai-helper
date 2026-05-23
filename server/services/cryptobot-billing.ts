@@ -54,6 +54,20 @@ export async function getTrialPeriodHours(): Promise<number> {
   return TRIAL_PERIOD_HOURS;
 }
 
+export type BillingProductMode = "active" | "maintenance" | "coming_soon";
+
+export async function getChannelsMode(): Promise<BillingProductMode> {
+  const val = await getSecret({ scope: "global", keyName: "BILLING_CHANNELS_MODE" });
+  if (val === "maintenance" || val === "coming_soon") return val;
+  return "active";
+}
+
+export async function getAiAgentMode(): Promise<BillingProductMode> {
+  const val = await getSecret({ scope: "global", keyName: "BILLING_AI_AGENT_MODE" });
+  if (val === "maintenance" || val === "coming_soon") return val;
+  return "active";
+}
+
 const PLAN_CONFIG = {
   name: "AI Sales Operator Pro",
   planType: "channels" as PlanFeatureType,

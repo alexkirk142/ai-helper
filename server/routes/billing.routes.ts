@@ -435,15 +435,19 @@ router.post("/api/billing/extra-accounts/verify-payment", requireAuth, async (re
 router.get("/api/billing/public-config", async (_req: Request, res: Response) => {
   try {
     const { getSecret } = await import("../services/secret-resolver");
-    const { getSubscriptionPriceUsdt, getAiSubscriptionPriceUsdt, getTrialPeriodHours, getExtraAccountPriceUsdt } =
-      await import("../services/cryptobot-billing");
+    const {
+      getSubscriptionPriceUsdt, getAiSubscriptionPriceUsdt, getTrialPeriodHours,
+      getExtraAccountPriceUsdt, getChannelsMode, getAiAgentMode,
+    } = await import("../services/cryptobot-billing");
 
-    const [token, subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice] = await Promise.all([
+    const [token, subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice, channelsMode, aiAgentMode] = await Promise.all([
       getSecret({ scope: "global", keyName: "TELEGRAM_ESCALATION_BOT_TOKEN" }),
       getSubscriptionPriceUsdt(),
       getAiSubscriptionPriceUsdt(),
       getTrialPeriodHours(),
       getExtraAccountPriceUsdt(),
+      getChannelsMode(),
+      getAiAgentMode(),
     ]);
 
     let notifyBotUsername: string | null = null;
@@ -455,9 +459,9 @@ router.get("/api/billing/public-config", async (_req: Request, res: Response) =>
       } catch {/* ignore Telegram errors */}
     }
 
-    res.json({ notifyBotUsername, subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice });
+    res.json({ notifyBotUsername, subscriptionPrice, aiAgentPrice, trialHours, extraAccountPrice, channelsMode, aiAgentMode });
   } catch {
-    res.json({ notifyBotUsername: null, subscriptionPrice: 50, aiAgentPrice: 30, trialHours: 72, extraAccountPrice: 10 });
+    res.json({ notifyBotUsername: null, subscriptionPrice: 50, aiAgentPrice: 30, trialHours: 72, extraAccountPrice: 10, channelsMode: "active", aiAgentMode: "active" });
   }
 });
 

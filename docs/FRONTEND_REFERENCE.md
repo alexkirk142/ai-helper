@@ -407,7 +407,7 @@ function AdminGuard({ children }) {
 | Страница | Файл | Описание |
 |---------|------|----------|
 | SecurityStatus | `security-status.tsx` | Security readiness: RBAC, PII, webhook, rate-limiting |
-| AdminBilling | `admin-billing.tsx` | Метрики биллинга, все подписки, цены (subscriptionPrice, aiAgentPrice, trialHours, **extraAccountPrice**), гранты, trial hours |
+| AdminBilling | `admin-billing.tsx` | Метрики биллинга, все подписки, цены (subscriptionPrice, aiAgentPrice, trialHours, **extraAccountPrice**), гранты, trial hours. Режимы продаж: **channelsMode** / **aiAgentMode** (active/maintenance/coming_soon) |
 | AdminSecrets | `admin-secrets.tsx` | API-ключи интеграций: OpenAI, Telegram, Yandex и др. |
 | AdminUsers | `admin-users.tsx` | Пользователи платформы: enable/disable |
 | AdminProxies | `admin-proxies.tsx` | Прокси-пул: добавление, тест, удаление |

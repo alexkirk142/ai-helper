@@ -17,6 +17,8 @@ import {
   Globe,
   BookOpen,
   GraduationCap,
+  Wrench,
+  Code2,
 } from "lucide-react";
 import { SiTelegram } from "react-icons/si";
 import {
@@ -82,6 +84,24 @@ function ExpiredBadge() {
   );
 }
 
+function MaintenanceBadge() {
+  return (
+    <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20">
+      <Wrench className="mr-1 h-3 w-3" />
+      Тех. работы
+    </Badge>
+  );
+}
+
+function ComingSoonBadge() {
+  return (
+    <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">
+      <Code2 className="mr-1 h-3 w-3" />
+      В разработке
+    </Badge>
+  );
+}
+
 export default function Extensions() {
   const { toast } = useToast();
 
@@ -100,6 +120,8 @@ export default function Extensions() {
   const { data: publicConfig } = usePublicBillingConfig();
   const aiPrice = publicConfig?.aiAgentPrice ?? 30;
   const subPrice = publicConfig?.subscriptionPrice ?? 50;
+  const channelsMode = publicConfig?.channelsMode ?? "active";
+  const aiAgentMode = publicConfig?.aiAgentMode ?? "active";
 
   // Chat subscription states
   const isChatActive = chatBilling?.canAccess === true;
@@ -251,7 +273,9 @@ export default function Extensions() {
                   </CardDescription>
                 </div>
               </div>
-              <div className="shrink-0">
+              <div className="shrink-0 flex flex-wrap gap-1.5 justify-end">
+                {channelsMode === "maintenance" && <MaintenanceBadge />}
+                {channelsMode === "coming_soon" && <ComingSoonBadge />}
                 {chatLoading ? (
                   <Badge variant="outline">
                     <Loader2 className="mr-1 h-3 w-3 animate-spin" />
@@ -349,6 +373,16 @@ export default function Extensions() {
                     </button>
                   )}
                 </div>
+              ) : channelsMode === "maintenance" ? (
+                <Button size="lg" className="self-start" disabled>
+                  <Wrench className="mr-2 h-4 w-4" />
+                  Временно недоступно
+                </Button>
+              ) : channelsMode === "coming_soon" ? (
+                <Button size="lg" className="self-start" disabled variant="outline">
+                  <Code2 className="mr-2 h-4 w-4" />
+                  Скоро
+                </Button>
               ) : (
                 <Button
                   onClick={handleChatPurchase}
@@ -372,7 +406,7 @@ export default function Extensions() {
               )}
             </div>
 
-            {!isChatActive && !chatLoading && (
+            {!isChatActive && !chatLoading && channelsMode === "active" && (
               <div className="flex flex-wrap gap-2 pt-1">
                 <Badge variant="outline" className="text-xs">USDT</Badge>
                 <Badge variant="outline" className="text-xs">TON</Badge>
@@ -382,6 +416,11 @@ export default function Extensions() {
                   — безопасная оплата через CryptoBot
                 </span>
               </div>
+            )}
+            {!isChatActive && channelsMode === "maintenance" && (
+              <p className="text-xs text-orange-600">
+                Оформление новых подписок временно приостановлено. Мы уже работаем над решением.
+              </p>
             )}
           </CardContent>
         </Card>
@@ -404,7 +443,9 @@ export default function Extensions() {
                   </CardDescription>
                 </div>
               </div>
-              <div className="shrink-0">
+              <div className="shrink-0 flex flex-wrap gap-1.5 justify-end">
+                {aiAgentMode === "maintenance" && <MaintenanceBadge />}
+                {aiAgentMode === "coming_soon" && <ComingSoonBadge />}
                 {isLoading ? (
                   <Badge variant="outline">
                     <Loader2 className="mr-1 h-3 w-3 animate-spin" />
@@ -490,6 +531,16 @@ export default function Extensions() {
                     </button>
                   )}
                 </div>
+              ) : aiAgentMode === "maintenance" ? (
+                <Button size="lg" className="self-start" disabled>
+                  <Wrench className="mr-2 h-4 w-4" />
+                  Временно недоступно
+                </Button>
+              ) : aiAgentMode === "coming_soon" ? (
+                <Button size="lg" className="self-start" disabled variant="outline">
+                  <Code2 className="mr-2 h-4 w-4" />
+                  Скоро
+                </Button>
               ) : (
                 <Button
                   onClick={handlePurchase}
@@ -513,7 +564,7 @@ export default function Extensions() {
               )}
             </div>
 
-            {!isActive && !isLoading && (
+            {!isActive && !isLoading && aiAgentMode === "active" && (
               <div className="flex flex-wrap gap-2 pt-1">
                 <Badge variant="outline" className="text-xs">USDT</Badge>
                 <Badge variant="outline" className="text-xs">TON</Badge>
@@ -523,6 +574,11 @@ export default function Extensions() {
                   — безопасная оплата через CryptoBot
                 </span>
               </div>
+            )}
+            {!isActive && aiAgentMode === "maintenance" && (
+              <p className="text-xs text-orange-600">
+                Оформление новых подписок временно приостановлено. Мы уже работаем над решением.
+              </p>
             )}
           </CardContent>
         </Card>
