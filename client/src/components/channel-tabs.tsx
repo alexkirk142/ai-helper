@@ -29,10 +29,15 @@ interface ChannelTabsProps {
   unreadCounts?: ChannelCounts;
 }
 
-function UnreadBadge({ count }: { count: number }) {
+function UnreadBadge({ count, isActive }: { count: number; isActive: boolean }) {
   if (count <= 0) return null;
   return (
-    <span className="ml-1 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground">
+    <span className={cn(
+      "ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1.5 text-[9px] font-bold leading-none shadow-sm transition-all",
+      isActive
+        ? "bg-primary text-primary-foreground"
+        : "bg-destructive/15 text-destructive border border-destructive/25"
+    )}>
       {count > 99 ? "99+" : count}
     </span>
   );
@@ -50,28 +55,30 @@ export function ChannelTabs({ activeFilter, onFilterChange, counts, unreadCounts
   if (visibleFilters.length <= 1) return null;
 
   return (
-    <div className="flex gap-0.5 border-b px-2 pt-1 shrink-0">
-      {visibleFilters.map((filter) => {
-        const isActive = activeFilter === filter;
-        const unread = filter === "all" ? badge.all : (badge[filter] ?? 0);
-        return (
-          <button
-            key={filter}
-            onClick={() => onFilterChange(filter)}
-            className={cn(
-              "flex items-center gap-0.5 rounded-t px-2.5 py-1.5 text-xs font-medium transition-colors",
-              isActive
-                ? "border-b-2 border-primary text-primary"
-                : "text-muted-foreground hover:text-foreground",
-              filter === "marquiz" && !isActive && "text-orange-500/70 hover:text-orange-500",
-              filter === "marquiz" && isActive && "border-orange-500 text-orange-500",
-            )}
-          >
-            {CHANNEL_LABELS[filter]}
-            <UnreadBadge count={unread} />
-          </button>
-        );
-      })}
+    <div className="px-3 pt-3 pb-2 shrink-0">
+      <div className="flex p-1 bg-muted/65 border border-border/30 rounded-xl">
+        {visibleFilters.map((filter) => {
+          const isActive = activeFilter === filter;
+          const unread = filter === "all" ? badge.all : (badge[filter] ?? 0);
+          return (
+            <button
+              key={filter}
+              onClick={() => onFilterChange(filter)}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1 rounded-lg py-1.5 px-2.5 text-[11px] font-bold tracking-tight transition-all duration-200",
+                isActive
+                  ? "bg-card text-foreground shadow-sm border border-border/30"
+                  : "text-muted-foreground/90 hover:text-foreground hover:bg-card/40",
+                filter === "marquiz" && !isActive && "text-orange-500/80 hover:text-orange-500",
+                filter === "marquiz" && isActive && "bg-orange-500/5 text-orange-500 border-orange-500/20",
+              )}
+            >
+              <span>{CHANNEL_LABELS[filter]}</span>
+              <UnreadBadge count={unread} isActive={isActive} />
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

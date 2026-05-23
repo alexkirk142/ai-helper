@@ -83,22 +83,22 @@
 
 | Переменная | Light | Dark | Tailwind |
 |-----------|-------|------|---------|
-| `--sidebar` | 240 4% 96% | 240 10% 4.9% | `bg-sidebar` |
-| `--sidebar-foreground` | 240 5% 26% | 240 5% 84% | `text-sidebar-foreground` |
-| `--sidebar-border` | 240 6% 90% | 240 3.7% 12.9% | `border-sidebar-border` |
-| `--sidebar-primary` | 250 84% 54% | 250 84% 60% | `bg-sidebar-primary` |
-| `--sidebar-accent` | 240 4% 90% | 240 3.7% 12.9% | `bg-sidebar-accent` |
+| `--sidebar` | 210 9% 13% | 210 9% 11% | `bg-sidebar` |
+| `--sidebar-foreground` | 210 10% 88% | 210 10% 88% | `text-sidebar-foreground` |
+| `--sidebar-border` | 210 9% 10% | 210 9% 9% | `border-sidebar-border` |
+| `--sidebar-primary` | 230 100% 65% | 230 100% 65% | `bg-sidebar-primary` |
+| `--sidebar-accent` | 210 9% 18% | 210 9% 16% | `bg-sidebar-accent` |
 
 #### Акцентные
 
 | Переменная | Light | Dark | Tailwind | Назначение |
 |-----------|-------|------|---------|-----------|
-| `--primary` | **250 84% 54%** | **250 84% 60%** | `bg-primary`, `text-primary` | Основной акцент (индиго-фиолетовый) |
+| `--primary` | **230 100% 65%** | **230 100% 65%** | `bg-primary`, `text-primary` | Основной акцент (Dodger Blue #4C6BFF) |
 | `--primary-foreground` | 0 0% 100% | 0 0% 100% | `text-primary-foreground` | Текст на primary |
-| `--secondary` | 240 4% 96% | 240 3.7% 15.9% | `bg-secondary` | Второстепенный |
-| `--muted` | 240 4% 96% | 240 3.7% 15.9% | `bg-muted` | Приглушённый фон |
-| `--muted-foreground` | 240 4% 46% | 240 5% 64.9% | `text-muted-foreground` | Вспомогательный текст |
-| `--accent` | 240 4% 95% | 240 3.7% 12.9% | `bg-accent` | Hover-состояния |
+| `--secondary` | 220 13% 95% | 210 9% 15% | `bg-secondary` | Второстепенный |
+| `--muted` | 220 13% 95% | 210 9% 15% | `bg-muted` | Приглушённый фон |
+| `--muted-foreground` | 220 13% 45% | 210 10% 65% | `text-muted-foreground` | Вспомогательный текст |
+| `--accent` | 220 13% 93% | 210 9% 15% | `bg-accent` | Hover-состояния |
 | `--destructive` | 346.8 84.1% 49.8% | 346.8 84.1% 60.2% | `bg-destructive` | Опасные действия (красно-розовый) |
 
 #### Popover

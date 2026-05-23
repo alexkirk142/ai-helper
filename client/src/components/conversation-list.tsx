@@ -212,12 +212,12 @@ export function ConversationList({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="border-b p-3 flex flex-col gap-2 shrink-0">
+      <div className="p-3 pb-2 flex flex-col gap-2 shrink-0">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Поиск по имени, номеру, сообщениям..."
-            className="pl-9 pr-8"
+            placeholder="Поиск по имени, номеру..."
+            className="pl-9 pr-8 rounded-xl bg-background/40 border-border/40 focus-visible:bg-background transition-all"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             data-testid="input-search-conversations"
@@ -227,8 +227,8 @@ export function ConversationList({
           )}
         </div>
         {isServerSearch && !searchLoading && searchResults && (
-          <p className="text-xs text-muted-foreground px-1">
-            Найдено: {searchResults.length} {searchResults.length === 1 ? "диалог" : "диалогов"} · по всем сообщениям
+          <p className="text-[10px] font-semibold text-muted-foreground px-1">
+            Найдено: {searchResults.length} {searchResults.length === 1 ? "диалог" : "диалогов"} · поиск по сообщениям
           </p>
         )}
         <div className="flex gap-2">
@@ -236,7 +236,7 @@ export function ConversationList({
             <Button
               variant="default"
               size="sm"
-              className="flex-1 gap-2"
+              className="flex-1 gap-2 rounded-xl text-xs font-semibold shadow-md shadow-primary/10"
               onClick={onNewDialog}
               data-testid="button-new-dialog"
             >
@@ -248,7 +248,7 @@ export function ConversationList({
             <Button
               variant="outline"
               size="sm"
-              className={onNewDialog ? "gap-1.5 px-3" : "flex-1 gap-2"}
+              className={cn("rounded-xl text-xs font-medium hover:bg-card/80", onNewDialog ? "gap-1.5 px-3" : "flex-1 gap-2")}
               onClick={onMarkAllRead}
               disabled={isMarkingAllRead}
               title="Отметить все как прочитанные"
@@ -256,7 +256,7 @@ export function ConversationList({
             >
               {isMarkingAllRead
                 ? <Loader2 className="h-4 w-4 animate-spin" />
-                : <CheckCheck className="h-4 w-4" />}
+                : <CheckCheck className="h-4 w-4 text-primary" />}
               {!onNewDialog && "Прочитать все"}
             </Button>
           )}

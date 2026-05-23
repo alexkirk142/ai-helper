@@ -1137,10 +1137,10 @@ export function ChatInterface({
       )}
 
       {/* Manual Message Input */}
-      <div className="border-t p-3 sm:p-4 shrink-0">
+      <div className="p-3 sm:p-4 shrink-0 bg-background/30 backdrop-blur-sm border-t border-border/30">
         {/* Multi-file preview strip */}
         {selectedFiles.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2 rounded-lg border bg-muted/50 p-2">
+          <div className="mb-2.5 flex flex-wrap gap-2 rounded-xl border border-border/40 bg-muted/30 p-2.5 shadow-inner">
             {selectedFiles.map((file, idx) => {
               const key = fileKey(file);
               const preview = filePreviews[key];
@@ -1150,19 +1150,19 @@ export function ChatInterface({
                     <img
                       src={preview}
                       alt={file.name}
-                      className="h-16 w-16 rounded object-cover"
+                      className="h-14 w-16 rounded-lg object-cover border border-border/30"
                     />
                   ) : (
-                    <div className="flex h-16 w-16 flex-col items-center justify-center rounded bg-muted text-center px-1">
+                    <div className="flex h-14 w-16 flex-col items-center justify-center rounded-lg bg-muted text-center px-1 border border-border/30">
                       <Paperclip className="h-4 w-4 text-muted-foreground" />
-                      <span className="mt-0.5 text-[10px] leading-tight text-muted-foreground line-clamp-2 break-all">
+                      <span className="mt-0.5 text-[9px] leading-tight text-muted-foreground line-clamp-1 break-all font-semibold">
                         {file.name}
                       </span>
                     </div>
                   )}
                   <button
                     type="button"
-                    className="absolute -top-1.5 -right-1.5 hidden group-hover:flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-destructive-foreground"
+                    className="absolute -top-1.5 -right-1.5 hidden group-hover:flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow-sm"
                     onClick={() => removeFile(idx)}
                     title="Удалить"
                   >
@@ -1174,7 +1174,7 @@ export function ChatInterface({
             {/* Clear all */}
             <button
               type="button"
-              className="self-start ml-auto text-xs text-muted-foreground hover:text-foreground underline"
+              className="self-center ml-auto text-xs font-bold text-muted-foreground hover:text-foreground underline transition-colors"
               onClick={clearFiles}
             >
               Очистить
@@ -1182,7 +1182,7 @@ export function ChatInterface({
           </div>
         )}
 
-        <div className="flex gap-2">
+        <div className="flex items-end gap-2 bg-muted/40 border border-border/30 rounded-2xl p-2 focus-within:border-primary/30 focus-within:bg-background focus-within:shadow-lg focus-within:shadow-primary/[0.01] transition-all duration-200">
           {/* Hidden file input — multiple allowed */}
           <input
             ref={fileInputRef}
@@ -1196,25 +1196,25 @@ export function ChatInterface({
           <Button
             size="icon"
             variant="ghost"
-            className="shrink-0 relative"
+            className="shrink-0 h-9 w-9 rounded-xl hover:bg-background relative text-muted-foreground hover:text-foreground transition-all"
             onClick={() => fileInputRef.current?.click()}
             title="Прикрепить файл(ы)"
             data-testid="button-attach-file"
           >
-            <Paperclip className="h-4 w-4" />
+            <Paperclip className="h-4.5 w-4.5" />
             {selectedFiles.length > 1 && (
-              <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold">
+              <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[9px] text-primary-foreground font-extrabold shadow-sm">
                 {selectedFiles.length}
               </span>
             )}
           </Button>
           <Textarea
             ref={textareaRef}
-            placeholder="Введите сообщение вручную..."
+            placeholder="Напишите сообщение..."
             value={manualMessage}
             onChange={(e) => setManualMessage(e.target.value)}
-            className="min-h-[44px] max-h-[300px] resize-none overflow-y-auto"
-            style={{ minHeight: "44px" }}
+            className="flex-1 bg-transparent border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[38px] max-h-[250px] py-2 px-1 resize-none overflow-y-auto text-sm placeholder:text-muted-foreground/85 font-medium"
+            style={{ minHeight: "38px" }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -1228,14 +1228,17 @@ export function ChatInterface({
             size="icon"
             onClick={handleSendManual}
             disabled={!manualMessage.trim() && selectedFiles.length === 0}
+            className="shrink-0 h-9 w-9 rounded-xl bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:scale-105 active:scale-95 transition-all"
             data-testid="button-send-manual"
           >
             <Send className="h-4 w-4" />
           </Button>
         </div>
         {selectedFiles.length === 0 && (
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            💡 Вставьте фото из буфера обмена (Ctrl+V) или нажмите <Paperclip className="inline h-3 w-3" /> для выбора нескольких файлов
+          <p className="mt-2 text-[10px] text-muted-foreground/80 font-medium px-1 flex items-center gap-1">
+            <span>💡 Вставьте фото (Ctrl+V) или нажмите</span>
+            <Paperclip className="inline h-3 w-3" />
+            <span>для выбора нескольких файлов.</span>
           </p>
         )}
       </div>

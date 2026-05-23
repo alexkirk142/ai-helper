@@ -1,6 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -117,7 +118,7 @@ export function AppSidebar() {
 
   return (
     <Sidebar className="border-r border-sidebar-border bg-sidebar">
-      <SidebarHeader className="p-5 border-b border-sidebar-border/50">
+      <SidebarHeader className="p-5 pb-2">
         <Link href={headerHref} className="flex items-center gap-3 group">
           <div className="relative flex items-center justify-center p-1.5 rounded-xl bg-gradient-to-br from-violet-500/10 to-blue-500/10 border border-primary/10 group-hover:scale-105 transition-transform">
             <BrandLogoIcon size={30} />
@@ -131,6 +132,32 @@ export function AppSidebar() {
             </span>
           </div>
         </Link>
+
+        {/* Rent Flow inspired Profile Card */}
+        <div className="mt-5 flex items-center justify-between p-3 rounded-2xl bg-sidebar-accent/20 border border-sidebar-border/30">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Avatar className="h-9 w-9 border border-sidebar-border/40 shadow-sm shrink-0">
+              {user?.profileImageUrl ? (
+                <AvatarImage src={user.profileImageUrl} />
+              ) : null}
+              <AvatarFallback className="text-xs font-bold bg-sidebar-accent text-sidebar-foreground">
+                {user?.firstName?.slice(0, 2).toUpperCase() || user?.email?.slice(0, 2).toUpperCase() || "ОП"}
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex flex-col min-w-0">
+              <span className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider leading-none">С возвращением!</span>
+              <span className="text-xs font-bold text-sidebar-foreground truncate mt-0.5 leading-tight">
+                {user?.firstName || user?.username || "Оператор"}
+              </span>
+              <span className="text-[9px] text-muted-foreground/50 font-semibold capitalize mt-0.5 leading-none">
+                {new Date().toLocaleDateString("ru-RU", { weekday: 'long', month: 'short', day: 'numeric' })}
+              </span>
+            </div>
+          </div>
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-sidebar-accent/50 text-muted-foreground hover:text-sidebar-foreground cursor-pointer transition-colors shrink-0">
+            <span className="font-bold text-base leading-none mb-2">...</span>
+          </div>
+        </div>
       </SidebarHeader>
 
       {isPlatformStaff ? (
