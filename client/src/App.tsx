@@ -129,77 +129,117 @@ function Router() {
 
 function LandingPage() {
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="container mx-auto flex h-16 items-center justify-between gap-4 px-4">
-          <div className="flex items-center gap-2">
-            <BrandLogoIcon size={28} />
-            <span className="text-lg font-semibold">{BRAND_NAME}</span>
+    <div className="relative min-h-screen bg-background overflow-x-hidden">
+      {/* Background glowing decorations */}
+      <div className="absolute top-0 left-1/4 -z-10 h-[600px] w-[600px] rounded-full bg-primary/5 blur-[120px]" />
+      <div className="absolute top-1/3 right-1/4 -z-10 h-[500px] w-[500px] rounded-full bg-violet-500/5 blur-[100px]" />
+      <div className="absolute bottom-10 left-10 -z-10 h-[400px] w-[400px] rounded-full bg-blue-500/5 blur-[80px]" />
+
+      <header className="sticky top-0 z-50 border-b border-border/40 bg-background/80 backdrop-blur-md">
+        <div className="container mx-auto flex h-16 items-center justify-between gap-4 px-4 sm:px-6">
+          <div className="flex items-center gap-2.5">
+            <div className="relative flex items-center justify-center p-1 rounded-xl bg-gradient-to-br from-violet-500/10 to-blue-500/10 border border-primary/10">
+              <BrandLogoIcon size={30} />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text">
+                {BRAND_NAME}
+              </span>
+              <span className="hidden sm:inline text-[10px] text-muted-foreground font-medium -mt-1 tracking-wider uppercase">
+                Умный ассистент
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <ThemeToggle />
-            <Button variant="outline" asChild data-testid="button-login-email">
+            <Button variant="ghost" size="sm" asChild data-testid="button-login-email" className="font-medium">
               <a href="/login">Войти</a>
             </Button>
-            <Button asChild data-testid="button-signup">
+            <Button size="sm" asChild data-testid="button-signup" className="shadow-lg shadow-primary/20 hover:shadow-primary/35 transition-all">
               <a href="/signup">Регистрация</a>
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-16">
-        <div className="mx-auto max-w-3xl text-center">
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
-            Автоматизация продаж с ИИ
+      <main className="container mx-auto px-4 py-20 sm:py-28 relative">
+        <div className="mx-auto max-w-4xl text-center">
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-3.5 py-1.5 text-xs font-semibold text-primary tracking-wide mb-8">
+            <span className="flex h-2 w-2 rounded-full bg-primary animate-pulse" />
+            Умная автоматизация продаж 2.0
+          </div>
+          <h1 className="text-4xl font-extrabold tracking-tight sm:text-6xl md:text-7xl leading-tight">
+            Автоматизация продаж с{" "}
+            <span className="bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 dark:from-violet-400 dark:via-indigo-400 dark:to-blue-400 bg-clip-text text-transparent drop-shadow-sm">
+              ИИ-интеллектом
+            </span>
           </h1>
-          <p className="mt-6 text-lg text-muted-foreground">
-            Умный оператор для обработки клиентских обращений через Telegram, WhatsApp и другие мессенджеры. 
-            ИИ генерирует ответы, а вы контролируете качество.
+          <p className="mt-8 text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed font-normal">
+            Умный оператор для автоматической обработки клиентских обращений в Telegram, WhatsApp и других каналах. 
+            ИИ мгновенно генерирует ответы, а вы контролируете качество в одно касание.
           </p>
-          <div className="mt-10">
-            <Button size="lg" asChild data-testid="button-get-started">
-              <a href="/signup">Начать работу</a>
+          <div className="mt-12 flex flex-col sm:flex-row items-center justify-center gap-4">
+            <Button size="lg" asChild data-testid="button-get-started" className="h-12 px-8 text-base font-semibold shadow-xl shadow-primary/25 hover:shadow-primary/40 transition-all rounded-xl w-full sm:w-auto">
+              <a href="/signup">Начать работу бесплатно</a>
+            </Button>
+            <Button size="lg" variant="outline" asChild className="h-12 px-8 text-base font-medium rounded-xl w-full sm:w-auto hover:bg-accent/60">
+              <a href="/login">Демонстрация</a>
             </Button>
           </div>
         </div>
 
-        <div className="mx-auto mt-20 grid max-w-4xl gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          <Card>
-            <CardHeader>
-              <MessageSquare className="h-8 w-8 text-primary" />
-              <CardTitle className="mt-4">Мультиканальность</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>
-                Поддержка Telegram, WhatsApp, MAX и других мессенджеров в едином интерфейсе
-              </CardDescription>
-            </CardContent>
-          </Card>
+        {/* Feature section */}
+        <div className="mx-auto mt-28 max-w-5xl">
+          <div className="text-center mb-12">
+            <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">Всё для эффективных продаж</h2>
+            <p className="text-sm text-muted-foreground mt-2">Единый инструмент для кратного роста конверсий вашего бизнеса</p>
+          </div>
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            <Card className="group relative overflow-hidden hover:shadow-2xl hover:shadow-primary/5 hover:border-primary/30 transition-all duration-300 rounded-2xl bg-card border border-card-border">
+              <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-violet-500 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <CardHeader className="space-y-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-500/10 text-violet-600 dark:text-violet-400 group-hover:scale-110 transition-transform">
+                  <MessageSquare className="h-6 w-6" />
+                </div>
+                <CardTitle className="text-xl font-bold tracking-tight">Мультиканальность</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CardDescription className="text-sm text-muted-foreground leading-relaxed">
+                  Поддержка Telegram, WhatsApp, MAX и других популярных мессенджеров в едином удобном рабочем пространстве.
+                </CardDescription>
+              </CardContent>
+            </Card>
 
-          <Card>
-            <CardHeader>
-              <Brain className="h-8 w-8 text-primary" />
-              <CardTitle className="mt-4">ИИ-подсказки</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>
-                Автоматическая генерация ответов на основе базы знаний и каталога товаров
-              </CardDescription>
-            </CardContent>
-          </Card>
+            <Card className="group relative overflow-hidden hover:shadow-2xl hover:shadow-primary/5 hover:border-primary/30 transition-all duration-300 rounded-2xl bg-card border border-card-border">
+              <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-indigo-500 to-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <CardHeader className="space-y-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform">
+                  <Brain className="h-6 w-6" />
+                </div>
+                <CardTitle className="text-xl font-bold tracking-tight">ИИ-подсказки</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CardDescription className="text-sm text-muted-foreground leading-relaxed">
+                  Автоматическая генерация умных ответов на основе вашей базы знаний и каталога товаров без ошибок и задержек.
+                </CardDescription>
+              </CardContent>
+            </Card>
 
-          <Card>
-            <CardHeader>
-              <Shield className="h-8 w-8 text-primary" />
-              <CardTitle className="mt-4">Контроль качества</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>
-                Одобряйте, редактируйте или отклоняйте ответы ИИ перед отправкой клиенту
-              </CardDescription>
-            </CardContent>
-          </Card>
+            <Card className="group relative overflow-hidden hover:shadow-2xl hover:shadow-primary/5 hover:border-primary/30 transition-all duration-300 rounded-2xl bg-card border border-card-border">
+              <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-blue-500 to-cyan-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <CardHeader className="space-y-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 group-hover:scale-110 transition-transform">
+                  <Shield className="h-6 w-6" />
+                </div>
+                <CardTitle className="text-xl font-bold tracking-tight">Контроль качества</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CardDescription className="text-sm text-muted-foreground leading-relaxed">
+                  Будьте уверены в каждом слове. Одобряйте, редактируйте или отклоняйте варианты ответов ИИ перед отправкой.
+                </CardDescription>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </main>
     </div>

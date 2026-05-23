@@ -125,9 +125,11 @@ export class MaxGreenApiAdapter {
   }
 
   /**
-   * Checks whether a phone number is registered in MAX (WhatsApp).
+   * Checks whether a phone number is registered in MAX.
    * Returns true if the number exists, false if not.
-   * Uses GREEN-API checkWhatsapp endpoint.
+   * Calls the GREEN-API /checkWhatsapp endpoint (this is GREEN-API's internal endpoint name —
+   * GREEN-API runs on top of WhatsApp protocol, hence the naming; in this project the adapter
+   * is used exclusively for MAX Personal, not for WhatsApp).
    */
   async checkWhatsapp(
     idInstance: string,

@@ -3,6 +3,13 @@ import { proxies, channels } from "@shared/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import type { Proxy } from "@shared/schema";
 
+// Key helpers — keep assignment namespaced so Telegram and WhatsApp
+// accounts never collide in the shared assignedAccountId column.
+export const proxyAccountKey = {
+  telegram: (accountId: string) => `tg:${accountId}`,
+  whatsapp: (tenantId: string) => `wa:${tenantId}`,
+};
+
 export interface ProxyConfig {
   host: string;
   port: number;
@@ -159,5 +166,83 @@ export const proxyService = {
       auth = `${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password)}@`;
     }
     return `${proxy.protocol}://${auth}${proxy.host}:${proxy.port}`;
+  },
+
+  // ── Account-level proxy assignment (Telegram accounts, WhatsApp sessions) ──
+  // Uses assignedAccountId (no FK) instead of assignedChannelId so it works
+  // with tables other than channels (telegram_sessions, whatsapp_auth_sessions).
+
+  async assignProxyToAccount(accountKey: string, tenantId: string): Promise<Proxy | null> {
+    const existing = await db
+      .select()
+      .from(proxies)
+      .where(eq(proxies.assignedAccountId, accountKey))
+      .limit(1);
+
+    if (existing.length > 0) {
+      return existing[0];
+    }
+
+    const available = await this.getAvailableProxy();
+    if (!available) {
+      console.log(`[ProxyService] No available proxies for account ${accountKey}`);
+      return null;
+    }
+
+    const [updated] = await db
+      .update(proxies)
+      .set({
+        assignedTenantId: tenantId,
+        assignedAccountId: accountKey,
+        status: "assigned",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(proxies.id, available.id),
+          eq(proxies.status, "available")
+        )
+      )
+      .returning();
+
+    if (!updated) {
+      // Race condition — another process grabbed the proxy first; retry once
+      return this.assignProxyToAccount(accountKey, tenantId);
+    }
+
+    console.log(`[ProxyService] Assigned proxy ${updated.host}:${updated.port} to account ${accountKey}`);
+    return updated;
+  },
+
+  async releaseProxyFromAccount(accountKey: string): Promise<void> {
+    await db
+      .update(proxies)
+      .set({
+        assignedTenantId: null,
+        assignedAccountId: null,
+        status: "available",
+        updatedAt: new Date(),
+      })
+      .where(eq(proxies.assignedAccountId, accountKey));
+
+    console.log(`[ProxyService] Released proxy from account ${accountKey}`);
+  },
+
+  async getProxyForAccount(accountKey: string): Promise<ProxyConfig | null> {
+    const [proxy] = await db
+      .select()
+      .from(proxies)
+      .where(eq(proxies.assignedAccountId, accountKey))
+      .limit(1);
+
+    if (!proxy) return null;
+
+    return {
+      host: proxy.host,
+      port: proxy.port,
+      protocol: proxy.protocol as ProxyConfig["protocol"],
+      username: proxy.username,
+      password: proxy.password,
+    };
   },
 };

@@ -308,29 +308,37 @@ export function ConversationList({
                 <div
                   key={conversation.id}
                   className={cn(
-                    "group relative flex w-full max-w-full gap-3 rounded-md p-3 text-left transition-colors hover-elevate cursor-pointer",
-                    selectedId === conversation.id && "bg-accent",
+                    "group relative flex w-full max-w-full gap-3 rounded-xl p-3 text-left transition-all duration-200 hover:bg-muted/40 cursor-pointer border border-transparent mb-1",
+                    selectedId === conversation.id ? "bg-primary/[0.04] border-primary/10 shadow-sm" : "hover:border-border/30",
                   )}
                   data-testid={`conversation-item-${conversation.id}`}
                   onClick={() => onSelect(conversation.id)}
                 >
+                  {/* Active left indicator bar */}
+                  {selectedId === conversation.id && (
+                    <div className="absolute left-0 top-3 bottom-3 w-1.5 rounded-r-full bg-primary shadow-[1px_0_8px_rgba(var(--primary),0.4)]" />
+                  )}
+
                   <div className="relative">
-                    <Avatar className="h-10 w-10">
-                      <AvatarFallback className="text-xs">
+                    <Avatar className="h-10 w-10 border border-border/30 shadow-sm">
+                      <AvatarFallback className="text-xs font-bold bg-muted text-muted-foreground">
                         {conversation.customer?.name?.slice(0, 2).toUpperCase() || "КЛ"}
                       </AvatarFallback>
                     </Avatar>
                     <span
                       className={cn(
-                        "absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-background",
+                        "absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-background shadow-sm",
                         statusColors[conversation.status],
                       )}
                     />
                   </div>
 
-                  <div className="flex-1 min-w-0 overflow-hidden">
+                  <div className="flex-1 min-w-0 overflow-hidden space-y-0.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-medium">
+                      <span className={cn(
+                        "truncate text-sm font-bold text-foreground",
+                        selectedId === conversation.id ? "text-primary font-extrabold" : ""
+                      )}>
                         {displayQuery ? (
                           <Highlight
                             text={conversation.customer?.name || "Неизвестный клиент"}
@@ -340,7 +348,7 @@ export function ConversationList({
                           conversation.customer?.name || "Неизвестный клиент"
                         )}
                       </span>
-                      <span className="shrink-0 text-xs text-muted-foreground">
+                      <span className="shrink-0 text-[10px] font-semibold text-muted-foreground/80">
                         {conversation.lastMessageAt &&
                           formatDistanceToNow(new Date(conversation.lastMessageAt), {
                             addSuffix: false,
@@ -349,7 +357,7 @@ export function ConversationList({
                       </span>
                     </div>
 
-                    <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                    <div className="truncate text-xs text-muted-foreground/90 font-medium">
                       {snippetText ? (
                         displayQuery ? (
                           <Highlight text={snippetText} query={displayQuery} />
@@ -362,28 +370,30 @@ export function ConversationList({
                     </div>
 
                     {showMatchedSnippet && (
-                      <div className="mt-0.5 text-xs text-muted-foreground/60 truncate">
+                      <div className="text-[10px] text-muted-foreground/60 font-medium truncate">
                         в старом сообщении
                       </div>
                     )}
 
-                    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
                       {conversation.channel?.type && (
                         <ChannelIcon type={conversation.channel.type} className="h-3.5 w-3.5" />
                       )}
-                      <Badge variant="outline" className="text-xs">
+                      <Badge variant="outline" className="text-[10px] font-bold border-border/50 bg-background/50 px-2 py-0">
                         {modeLabels[conversation.mode] || conversation.mode}
                       </Badge>
                       {isMarquizLead && (
                         <Badge
                           variant="outline"
-                          className="text-xs border-orange-400 text-orange-500"
+                          className="text-[10px] font-bold border-orange-400 text-orange-500 bg-orange-500/[0.04]"
                         >
                           Заявка
                         </Badge>
                       )}
                       {(conversation.unreadCount ?? 0) > 0 && (
-                        <Badge className="text-xs">{conversation.unreadCount}</Badge>
+                        <Badge className="ml-auto rounded-full h-5 min-w-[20px] bg-primary text-primary-foreground font-extrabold text-[10px] flex items-center justify-center px-1.5 shadow-md shadow-primary/20 hover:bg-primary">
+                          {conversation.unreadCount}
+                        </Badge>
                       )}
                     </div>
                   </div>

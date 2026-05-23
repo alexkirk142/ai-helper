@@ -1348,6 +1348,9 @@ export const proxies = pgTable("proxies", {
   status: text("status").notNull().$type<ProxyStatus>().default("available"),
   assignedTenantId: varchar("assigned_tenant_id").references(() => tenants.id),
   assignedChannelId: varchar("assigned_channel_id").references(() => channels.id),
+  // Generic account-level assignment (no FK — used for Telegram accounts and WhatsApp sessions).
+  // Format: "tg:<accountId>" for Telegram, "wa:<tenantId>" for WhatsApp Personal.
+  assignedAccountId: text("assigned_account_id"),
   lastCheckedAt: timestamp("last_checked_at"),
   lastErrorMessage: text("last_error_message"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -1356,6 +1359,7 @@ export const proxies = pgTable("proxies", {
   index("proxies_status_idx").on(table.status),
   index("proxies_tenant_idx").on(table.assignedTenantId),
   index("proxies_channel_idx").on(table.assignedChannelId),
+  index("proxies_account_idx").on(table.assignedAccountId),
 ]);
 
 export type Proxy = typeof proxies.$inferSelect;

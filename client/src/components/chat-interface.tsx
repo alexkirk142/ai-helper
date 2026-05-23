@@ -800,12 +800,12 @@ export function ChatInterface({
                 </Avatar>
                 <div
                   className={cn(
-                    "max-w-[70%] rounded-2xl px-4 py-2.5",
+                    "max-w-[70%] px-4 py-3 shadow-sm transition-all duration-200 border",
                     message.role === "customer"
-                      ? "bg-muted"
+                      ? "bg-muted/70 text-foreground rounded-2xl rounded-tl-none border-border/40"
                       : message.role === "assistant"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-accent"
+                      ? "bg-primary text-primary-foreground rounded-2xl rounded-tr-none border-primary/15 shadow-md shadow-primary/5"
+                      : "bg-accent text-accent-foreground rounded-2xl rounded-tr-none border-border/50"
                   )}
                 >
                   {message.content && (
@@ -901,28 +901,36 @@ export function ChatInterface({
 
       {/* AI Suggestion Panel */}
       {suggestion && suggestion.status === "pending" && (
-        <Card className="mx-3 mb-3 sm:mx-4 sm:mb-4 overflow-hidden border-primary/20 flex flex-col max-h-[45vh] sm:max-h-[55vh]">
-          <div className="bg-primary/5 px-4 py-2 shrink-0">
+        <Card className="mx-3 mb-3 sm:mx-4 sm:mb-4 overflow-hidden border-primary/30 flex flex-col max-h-[45vh] sm:max-h-[55vh] rounded-2xl shadow-xl shadow-primary/[0.04] bg-gradient-to-b from-primary/[0.01] to-background/50">
+          <div className="bg-primary/[0.03] px-4 py-3 shrink-0 border-b border-primary/10">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
-                <Bot className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium">Предложение AI</span>
+                <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Bot className="h-3.5 w-3.5" />
+                </div>
+                <span className="text-sm font-bold tracking-tight">Предложение AI</span>
                 {/* Phase 1: Decision Badge */}
-                {suggestion.decision && decisionLabels[suggestion.decision] && (
+                {suggestion.decision && (
                   <Badge
                     variant="secondary"
                     className={cn(
-                      "text-xs",
-                      decisionLabels[suggestion.decision].color,
-                      decisionLabels[suggestion.decision].bgColor
+                      "text-[10px] font-bold rounded-full px-2.5 py-0.5",
+                      suggestion.decision === "AUTO_SEND" && "bg-success/15 text-success border border-success/20",
+                      suggestion.decision === "NEED_APPROVAL" && "bg-warning/15 text-warning border border-warning/20",
+                      suggestion.decision === "ESCALATE" && "bg-destructive/15 text-destructive border border-destructive/20"
                     )}
                     data-testid={`badge-decision-${suggestion.decision}`}
                   >
                     {(() => {
-                      const DecisionIcon = decisionLabels[suggestion.decision].icon;
+                      const decisionIcons: Record<string, typeof Zap> = {
+                        AUTO_SEND: Zap,
+                        NEED_APPROVAL: Eye,
+                        ESCALATE: UserCheck,
+                      };
+                      const DecisionIcon = decisionIcons[suggestion.decision] || Zap;
                       return <DecisionIcon className="h-3 w-3 mr-1" />;
                     })()}
-                    {decisionLabels[suggestion.decision].label}
+                    {suggestion.decision === "AUTO_SEND" ? "Автоотправка" : suggestion.decision === "NEED_APPROVAL" ? "Требует проверки" : "Эскалация"}
                   </Badge>
                 )}
               </div>
@@ -930,31 +938,44 @@ export function ChatInterface({
                 {suggestion.intent && intentLabels[suggestion.intent] && (
                   <Badge
                     variant="secondary"
-                    className={cn("text-xs", intentLabels[suggestion.intent].color)}
+                    className={cn(
+                      "text-[10px] font-bold rounded-full px-2.5 py-0.5",
+                      suggestion.intent === "price" && "bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20",
+                      suggestion.intent === "availability" && "bg-success/15 text-success border border-success/20",
+                      suggestion.intent === "shipping" && "bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20",
+                      suggestion.intent === "return" && "bg-warning/15 text-warning border border-warning/20",
+                      suggestion.intent === "discount" && "bg-pink-500/15 text-pink-600 dark:text-pink-400 border border-pink-500/20",
+                      suggestion.intent === "complaint" && "bg-destructive/15 text-destructive border border-destructive/20",
+                      suggestion.intent === "other" && "bg-gray-500/15 text-gray-600 dark:text-gray-400 border border-gray-500/20"
+                    )}
                   >
-                    {intentLabels[suggestion.intent].label}
+                    {intentLabels[suggestion.intent]?.label || suggestion.intent}
                   </Badge>
                 )}
                 {/* Phase 1: Confidence with breakdown tooltip */}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Badge variant="outline" className="text-xs font-mono cursor-help" data-testid="badge-confidence">
+                    <Badge variant="outline" className="text-[10px] font-bold tracking-tight rounded-full px-2.5 py-0.5 font-mono cursor-help border-primary/20 bg-background/50 text-primary" data-testid="badge-confidence">
                       {Math.round((suggestion.confidence || 0) * 100)}% уверенность
                     </Badge>
                   </TooltipTrigger>
-                  <TooltipContent className="text-xs">
-                    <div className="space-y-1">
-                      <div className="flex justify-between gap-4">
+                  <TooltipContent className="text-xs rounded-xl border-border bg-card p-3 shadow-md">
+                    <div className="space-y-1.5 min-w-[140px]">
+                      <div className="flex justify-between gap-4 font-semibold border-b pb-1 mb-1 border-border/40">
+                        <span>Анализ AI</span>
+                        <span>Оценка</span>
+                      </div>
+                      <div className="flex justify-between gap-4 text-muted-foreground">
                         <span>Схожесть:</span>
-                        <span className="font-mono">{Math.round((suggestion.similarityScore || 0) * 100)}%</span>
+                        <span className="font-mono font-bold text-foreground">{Math.round((suggestion.similarityScore || 0) * 100)}%</span>
                       </div>
-                      <div className="flex justify-between gap-4">
+                      <div className="flex justify-between gap-4 text-muted-foreground">
                         <span>Интент:</span>
-                        <span className="font-mono">{Math.round((suggestion.intentScore || 0) * 100)}%</span>
+                        <span className="font-mono font-bold text-foreground">{Math.round((suggestion.intentScore || 0) * 100)}%</span>
                       </div>
-                      <div className="flex justify-between gap-4">
+                      <div className="flex justify-between gap-4 text-muted-foreground">
                         <span>Самопроверка:</span>
-                        <span className="font-mono">{Math.round((suggestion.selfCheckScore || 0) * 100)}%</span>
+                        <span className="font-mono font-bold text-foreground">{Math.round((suggestion.selfCheckScore || 0) * 100)}%</span>
                       </div>
                     </div>
                   </TooltipContent>
@@ -965,10 +986,10 @@ export function ChatInterface({
           
           {/* Phase 1.1: Autosend blocked warning */}
           {suggestion.decision === "AUTO_SEND" && suggestion.autosendEligible === false && (
-            <div className="px-4 py-2 bg-amber-500/10 border-t border-amber-500/20 shrink-0">
+            <div className="px-4 py-2 bg-warning/10 border-b border-warning/15 shrink-0">
               <div className="flex items-start gap-2">
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
-                <div className="text-xs text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-warning" />
+                <div className="text-xs text-warning-foreground font-medium">
                   {suggestion.autosendBlockReason === "FLAG_OFF" && "Рекомендуется автоответ, но автоотправка отключена глобально"}
                   {suggestion.autosendBlockReason === "SETTING_OFF" && "Рекомендуется автоответ, но автоотправка отключена в настройках"}
                   {suggestion.autosendBlockReason === "INTENT_NOT_ALLOWED" && `Рекомендуется автоответ, но интент "${suggestion.intent}" не разрешён для автоотправки`}
@@ -980,10 +1001,10 @@ export function ChatInterface({
           
           {/* Phase 1: Explanations */}
           {explanations.length > 0 && (
-            <div className="px-4 py-2 bg-muted/50 border-t border-border/50 shrink-0">
+            <div className="px-4 py-2 bg-muted/40 border-b border-border/30 shrink-0">
               <div className="flex items-start gap-2">
                 <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-muted-foreground" />
-                <div className="text-xs text-muted-foreground space-y-0.5">
+                <div className="text-xs text-muted-foreground/90 space-y-0.5 font-medium">
                   {explanations.slice(0, 3).map((exp, i) => (
                     <div key={i}>{exp}</div>
                   ))}
@@ -993,16 +1014,16 @@ export function ChatInterface({
           )}
           
           {/* Scrollable content: text + sources */}
-          <div className="flex-1 overflow-y-auto min-h-0 p-4 pb-0">
+          <div className="flex-1 overflow-y-auto min-h-0 p-4 pb-2">
             {isEditing ? (
               <Textarea
                 value={editedSuggestion}
                 onChange={(e) => setEditedSuggestion(e.target.value)}
-                className="min-h-[80px] max-h-[160px] resize-none"
+                className="min-h-[80px] max-h-[160px] resize-none rounded-xl"
                 data-testid="textarea-edit-suggestion"
               />
             ) : (
-              <p className="text-sm whitespace-pre-wrap">{suggestion.suggestedReply}</p>
+              <p className="text-sm whitespace-pre-wrap leading-relaxed text-foreground font-medium">{suggestion.suggestedReply}</p>
             )}
 
             {/* Used Sources */}
@@ -1010,13 +1031,13 @@ export function ChatInterface({
               <div className="mt-3">
                 <button
                   onClick={() => setShowSources(!showSources)}
-                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground font-semibold"
                   data-testid="button-toggle-sources"
                 >
                   {showSources ? (
-                    <ChevronUp className="h-3 w-3" />
+                    <ChevronUp className="h-3.5 w-3.5" />
                   ) : (
-                    <ChevronDown className="h-3 w-3" />
+                    <ChevronDown className="h-3.5 w-3.5" />
                   )}
                   Использовано источников: {usedSources.length}
                 </button>
@@ -1025,14 +1046,14 @@ export function ChatInterface({
                     {usedSources.map((source, i) => (
                       <div
                         key={i}
-                        className="flex items-start gap-2 rounded-md bg-muted p-2 text-xs"
+                        className="flex items-start gap-2.5 rounded-xl border border-border/40 bg-muted/30 p-2.5 text-xs transition-colors hover:bg-muted/50"
                       >
                         {source.type === "product" ? (
-                          <Package className="h-3 w-3 shrink-0 text-muted-foreground" />
+                          <Package className="h-3.5 w-3.5 shrink-0 text-primary/75 mt-0.5" />
                         ) : (
-                          <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
+                          <FileText className="h-3.5 w-3.5 shrink-0 text-primary/75 mt-0.5" />
                         )}
-                        <span className="text-muted-foreground">{source.quote}</span>
+                        <span className="text-muted-foreground/90 leading-normal font-medium">{source.quote}</span>
                       </div>
                     ))}
                   </div>
@@ -1042,16 +1063,17 @@ export function ChatInterface({
           </div>
 
           {/* Actions — always visible, not scrolled away */}
-          <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-3 border-t">
+          <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-3.5 border-t border-border/30 bg-background/30 backdrop-blur-sm">
             {isEditing ? (
               <>
                 <Button
                   size="sm"
                   onClick={handleApproveEdit}
                   data-testid="button-save-edit"
+                  className="rounded-xl shadow-lg shadow-primary/15 hover:shadow-primary/25 transition-all font-semibold"
                 >
-                  <Check className="h-4 w-4 sm:mr-1" />
-                  <span className="hidden sm:inline">Сохранить</span>
+                  <Check className="h-4 w-4 mr-1.5" />
+                  <span>Сохранить</span>
                 </Button>
                 <Button
                   size="sm"
@@ -1061,9 +1083,10 @@ export function ChatInterface({
                     setEditedSuggestion(suggestion.suggestedReply);
                   }}
                   data-testid="button-cancel-edit"
+                  className="rounded-xl font-medium"
                 >
-                  <X className="h-4 w-4 sm:mr-1" />
-                  <span className="hidden sm:inline">Отмена</span>
+                  <X className="h-4 w-4 mr-1.5" />
+                  <span>Отмена</span>
                 </Button>
               </>
             ) : (
@@ -1072,36 +1095,40 @@ export function ChatInterface({
                   size="sm"
                   onClick={() => onApprove(suggestion.id)}
                   data-testid="button-approve-suggestion"
+                  className="rounded-xl shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all font-bold px-4"
                 >
-                  <Check className="h-4 w-4 sm:mr-1" />
-                  <span className="hidden sm:inline">Одобрить</span>
+                  <Check className="h-4 w-4 mr-1.5" />
+                  <span>Одобрить</span>
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => setIsEditing(true)}
                   data-testid="button-edit-suggestion"
+                  className="rounded-xl font-semibold hover:bg-accent/60"
                 >
-                  <Edit2 className="h-4 w-4 sm:mr-1" />
-                  <span className="hidden sm:inline">Редактировать</span>
+                  <Edit2 className="h-4 w-4 mr-1.5" />
+                  <span>Редактировать</span>
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => onReject(suggestion.id)}
                   data-testid="button-reject-suggestion"
+                  className="rounded-xl font-semibold hover:bg-accent/60"
                 >
-                  <X className="h-4 w-4 sm:mr-1" />
-                  <span className="hidden sm:inline">Отклонить</span>
+                  <X className="h-4 w-4 mr-1.5" />
+                  <span>Отклонить</span>
                 </Button>
                 <Button
                   size="sm"
                   variant="destructive"
                   onClick={() => onEscalate(suggestion.id)}
                   data-testid="button-escalate"
+                  className="rounded-xl shadow-lg shadow-destructive/10 hover:shadow-destructive/20 font-semibold px-3.5"
                 >
-                  <AlertTriangle className="h-4 w-4 sm:mr-1" />
-                  <span className="hidden sm:inline">Эскалировать</span>
+                  <AlertTriangle className="h-4 w-4 mr-1.5" />
+                  <span>Эскалировать</span>
                 </Button>
               </>
             )}

@@ -159,7 +159,8 @@ server/
 │   ├── whatsapp-auth-state.ts       # usePostgresAuthState — Baileys AuthenticationState поверх БД
 │   ├── whatsapp-adapter.ts          # WhatsApp Business API адаптер
 │   ├── max-personal-adapter.ts      # GREEN-API адаптер (multi-account по accountId)
-│   ├── max-green-api-adapter.ts     # HTTP-клиент к GREEN-API (sendMessage, checkWhatsapp, setWebhook)
+│   ├── max-green-api-adapter.ts     # HTTP-клиент к GREEN-API для MAX Personal (sendMessage, checkMaxPhone, setWebhook). Примечание: метод называется checkWhatsapp — это имя GREEN-API эндпоинта, т.к. GREEN-API работает поверх WhatsApp-протокола; в проекте используется исключительно для MAX Personal
+│   ├── proxy-service.ts             # Управление прокси-пулом: assignProxyToChannel / assignProxyToAccount (авто-назначение из пула), releaseProxy*, getProxyFor*, buildProxyUrl. Используется Telegram Personal (gramjs proxy option) и WhatsApp Personal (Baileys agent option)
 │   ├── max-gateway-client.ts        # Клиент MAX Gateway (checkPhone, sendMessage, SSE stream)
 │   ├── max-gateway-sse-manager.ts   # SSE менеджер — подписка на /instances/{id}/events, обработка `deleted`
 │   ├── max-adapter.ts               # MAX Bot API адаптер
@@ -211,7 +212,7 @@ server/
 │   ├── readiness-score-service.ts   # 7 проверок готовности тенанта
 │   ├── smoke-test-service.ts        # Smoke-тест: round-trip AI suggestion
 │   ├── security-readiness.ts        # Проверки безопасности конфигурации
-│   ├── proxy-service.ts             # Управление proxy-пулом
+│   ├── proxy-service.ts             # (дублирующая ссылка — см. выше в services/)
 │   ├── update-service.ts            # Файлы системных обновлений
 │   ├── admin-action-service.ts      # Логирование admin-действий + идемпотентность
 │   ├── email-provider.ts            # Отправка email (SMTP абстракция)
@@ -1085,7 +1086,7 @@ const data = await storage.getSomething(user.tenantId);
 |---------|----------|
 | `integration_secrets` | AES-256-GCM зашифрованные API-ключи |
 | `update_history` | История файлов системных обновлений |
-| `proxies` | Пул proxy (socks5/http/https) |
+| `proxies` | Пул прокси-серверов (socks5/socks4/http/https). Поля: `assignedChannelId` (FK → channels, для legacy Telegram и WA), `assignedAccountId` (text, без FK — для Telegram-аккаунтов `tg:<accountId>` и WhatsApp `wa:<tenantId>`). Авто-назначение при коннекте. |
 
 ### Vehicle & Price Lookup
 

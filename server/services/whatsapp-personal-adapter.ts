@@ -16,8 +16,47 @@ import { sanitizeForLog } from "../utils/sanitizer";
 import { storage } from "../storage";
 import { handleIncomingReadReceipt } from "./read-receipt-handler";
 import { usePostgresAuthState } from "./whatsapp-auth-state";
+import { proxyService, proxyAccountKey } from "./proxy-service";
 import pino from "pino";
 import QRCode from "qrcode";
+import type { Agent } from "http";
+
+/**
+ * Returns an HTTP/SOCKS agent for the tenant's assigned proxy, or undefined
+ * if no proxy is configured. Auto-assigns a proxy from the pool on first call.
+ */
+async function getProxyAgent(tenantId: string): Promise<Agent | undefined> {
+  try {
+    const accountKey = proxyAccountKey.whatsapp(tenantId);
+    const proxy = await proxyService.assignProxyToAccount(accountKey, tenantId);
+    if (!proxy) return undefined;
+
+    const proxyUrl = proxyService.buildProxyUrl({
+      host: proxy.host,
+      port: proxy.port,
+      protocol: proxy.protocol as any,
+      username: proxy.username,
+      password: proxy.password,
+    });
+
+    if (proxy.protocol === "socks5" || proxy.protocol === "socks4") {
+      const { SocksProxyAgent } = await import("socks-proxy-agent");
+      console.log(`[WhatsAppPersonal] Using socks proxy ${proxy.host}:${proxy.port} for tenant ${tenantId}`);
+      return new SocksProxyAgent(proxyUrl) as unknown as Agent;
+    }
+
+    if (proxy.protocol === "http" || proxy.protocol === "https") {
+      const { HttpsProxyAgent } = await import("https-proxy-agent");
+      console.log(`[WhatsAppPersonal] Using http proxy ${proxy.host}:${proxy.port} for tenant ${tenantId}`);
+      return new HttpsProxyAgent(proxyUrl) as unknown as Agent;
+    }
+
+    return undefined;
+  } catch (err: any) {
+    console.warn(`[WhatsAppPersonal] Could not load proxy for tenant ${tenantId}: ${err.message}`);
+    return undefined;
+  }
+}
 
 // Default accountId used for backward compatibility (single account per tenant)
 const DEFAULT_ACCOUNT_ID = "default";
@@ -760,6 +799,7 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
       authSessions.set(tenantId, session);
 
       const logger = pino({ level: "silent" });
+      const proxyAgent = await getProxyAgent(tenantId);
 
       const socket = makeWASocket({
         version,
@@ -772,6 +812,7 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
         keepAliveIntervalMs: 30000,
         emitOwnEvents: true,
         markOnlineOnConnect: true,
+        ...(proxyAgent ? { agent: proxyAgent } : {}),
       });
 
       session.socket = socket;
@@ -929,6 +970,7 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
       authSessions.set(tenantId, session);
 
       const logger = pino({ level: "silent" });
+      const proxyAgent = await getProxyAgent(tenantId);
 
       // Pairing code requires a standard WhatsApp-recognized browser fingerprint.
       // Custom strings are rejected by WA servers — must use Browsers helper.
@@ -942,6 +984,7 @@ export class WhatsAppPersonalAdapter implements ChannelAdapter {
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: undefined,
         keepAliveIntervalMs: 30000,
+        ...(proxyAgent ? { agent: proxyAgent } : {}),
         emitOwnEvents: true,
         markOnlineOnConnect: true,
       });

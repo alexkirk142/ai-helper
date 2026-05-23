@@ -1,5 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -115,13 +116,17 @@ export function AppSidebar() {
   const headerHref = isPlatformStaff ? "/owner" : "/";
 
   return (
-    <Sidebar>
-      <SidebarHeader className="p-4">
-        <Link href={headerHref} className="flex items-center gap-2">
-          <BrandLogoIcon size={32} />
+    <Sidebar className="border-r border-sidebar-border bg-sidebar">
+      <SidebarHeader className="p-5 border-b border-sidebar-border/50">
+        <Link href={headerHref} className="flex items-center gap-3 group">
+          <div className="relative flex items-center justify-center p-1.5 rounded-xl bg-gradient-to-br from-violet-500/10 to-blue-500/10 border border-primary/10 group-hover:scale-105 transition-transform">
+            <BrandLogoIcon size={30} />
+          </div>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold">{BRAND_NAME}</span>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-sm font-bold tracking-tight bg-gradient-to-r from-sidebar-foreground to-sidebar-foreground/80 bg-clip-text">
+              {BRAND_NAME}
+            </span>
+            <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider -mt-0.5">
               {isPlatformStaff ? "Owner Console" : BRAND_TAGLINE}
             </span>
           </div>
@@ -130,51 +135,78 @@ export function AppSidebar() {
 
       {isPlatformStaff ? (
         /* ── Owner / Admin sidebar ── */
-        <SidebarContent>
+        <SidebarContent className="px-3 py-4">
           <SidebarGroup>
-            <SidebarGroupLabel>Платформа</SidebarGroupLabel>
+            <SidebarGroupLabel className="px-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">
+              Платформа
+            </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
-                {ownerItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={location.startsWith(item.url)}
-                      data-testid={item.testId}
-                    >
-                      <Link href={item.url}>
-                        <item.icon className="h-4 w-4" />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+              <SidebarMenu className="space-y-1">
+                {ownerItems.map((item) => {
+                  const isActive = location.startsWith(item.url);
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive}
+                        data-testid={item.testId}
+                        className={cn(
+                          "transition-all duration-200 rounded-xl px-3 py-2.5 hover:bg-sidebar-accent/50 text-sidebar-foreground/85 hover:text-sidebar-foreground",
+                          isActive && "bg-primary text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary hover:text-primary-foreground font-semibold"
+                        )}
+                      >
+                        <Link href={item.url}>
+                          <item.icon className="h-4 w-4 mr-2" />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
       ) : (
         /* ── Regular user sidebar ── */
-        <SidebarContent>
+        <SidebarContent className="px-3 py-4 space-y-4">
           <SidebarGroup>
-            <SidebarGroupLabel>Основное</SidebarGroupLabel>
+            <SidebarGroupLabel className="px-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">
+              Основное
+            </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="space-y-1">
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={location === "/"} data-testid="nav-dashboard">
+                  <SidebarMenuButton 
+                    asChild 
+                    isActive={location === "/"} 
+                    data-testid="nav-dashboard"
+                    className={cn(
+                      "transition-all duration-200 rounded-xl px-3 py-2.5 text-sidebar-foreground/85 hover:text-sidebar-foreground hover:bg-sidebar-accent/50",
+                      location === "/" && "bg-primary text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary hover:text-primary-foreground font-semibold"
+                    )}
+                  >
                     <Link href="/">
-                      <LayoutDashboard className="h-4 w-4" />
+                      <LayoutDashboard className="h-4 w-4 mr-2" />
                       <span>Панель управления</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={location === "/conversations"} data-testid="nav-conversations">
+                  <SidebarMenuButton 
+                    asChild 
+                    isActive={location === "/conversations"} 
+                    data-testid="nav-conversations"
+                    className={cn(
+                      "transition-all duration-200 rounded-xl px-3 py-2.5 text-sidebar-foreground/85 hover:text-sidebar-foreground hover:bg-sidebar-accent/50",
+                      location === "/conversations" && "bg-primary text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary hover:text-primary-foreground font-semibold"
+                    )}
+                  >
                     <Link href="/conversations">
-                      <MessageSquare className="h-4 w-4" />
+                      <MessageSquare className="h-4 w-4 mr-2" />
                       <span>Разговоры</span>
                       {unreadCount > 0 && (
-                        <Badge variant="secondary" className="ml-auto text-xs">
+                        <Badge className="ml-auto rounded-full bg-primary/10 text-primary border border-primary/10 hover:bg-primary/10 font-bold px-2.5 py-0.5 text-[10px]">
                           {unreadCount > 99 ? "99+" : unreadCount}
                         </Badge>
                       )}
@@ -182,12 +214,20 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={location === "/escalations"} data-testid="nav-escalations">
+                  <SidebarMenuButton 
+                    asChild 
+                    isActive={location === "/escalations"} 
+                    data-testid="nav-escalations"
+                    className={cn(
+                      "transition-all duration-200 rounded-xl px-3 py-2.5 text-sidebar-foreground/85 hover:text-sidebar-foreground hover:bg-sidebar-accent/50",
+                      location === "/escalations" && "bg-primary text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary hover:text-primary-foreground font-semibold"
+                    )}
+                  >
                     <Link href="/escalations">
-                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTriangle className="h-4 w-4 mr-2" />
                       <span>Эскалации</span>
                       {pendingEscalationsCount > 0 && (
-                        <Badge variant="secondary" className="ml-auto text-xs">
+                        <Badge className="ml-auto rounded-full bg-warning/15 text-warning border border-warning/25 hover:bg-warning/15 font-bold px-2.5 py-0.5 text-[10px]">
                           {pendingEscalationsCount}
                         </Badge>
                       )}
@@ -195,12 +235,20 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={location === "/failed-leads"} data-testid="nav-failed-leads">
+                  <SidebarMenuButton 
+                    asChild 
+                    isActive={location === "/failed-leads"} 
+                    data-testid="nav-failed-leads"
+                    className={cn(
+                      "transition-all duration-200 rounded-xl px-3 py-2.5 text-sidebar-foreground/85 hover:text-sidebar-foreground hover:bg-sidebar-accent/50",
+                      location === "/failed-leads" && "bg-primary text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary hover:text-primary-foreground font-semibold"
+                    )}
+                  >
                     <Link href="/failed-leads">
-                      <XCircle className="h-4 w-4" />
+                      <XCircle className="h-4 w-4 mr-2" />
                       <span>Неудачные заявки</span>
                       {failedLeadsCount > 0 && (
-                        <Badge variant="destructive" className="ml-auto text-xs">
+                        <Badge className="ml-auto rounded-full bg-destructive/15 text-destructive border border-destructive/25 hover:bg-destructive/15 font-bold px-2.5 py-0.5 text-[10px]">
                           {failedLeadsCount}
                         </Badge>
                       )}
@@ -211,39 +259,54 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
           <SidebarGroup>
-            <SidebarGroupLabel>Управление</SidebarGroupLabel>
+            <SidebarGroupLabel className="px-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">
+              Управление
+            </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
-                {managementItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={location === item.url}
-                      data-testid={`nav-${item.url.replace("/", "")}`}
-                    >
-                      <Link href={item.url}>
-                        <item.icon className="h-4 w-4" />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+              <SidebarMenu className="space-y-1">
+                {managementItems.map((item) => {
+                  const isActive = location === item.url;
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive}
+                        data-testid={`nav-${item.url.replace("/", "")}`}
+                        className={cn(
+                          "transition-all duration-200 rounded-xl px-3 py-2.5 text-sidebar-foreground/85 hover:text-sidebar-foreground hover:bg-sidebar-accent/50",
+                          isActive && "bg-primary text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary hover:text-primary-foreground font-semibold"
+                        )}
+                      >
+                        <Link href={item.url}>
+                          <item.icon className="h-4 w-4 mr-2" />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
       )}
 
-      <SidebarFooter className="p-4">
+      <SidebarFooter className="p-4 border-t border-sidebar-border/50">
         {isPlatformStaff ? (
-          <div className="flex items-center gap-2 rounded-md bg-muted p-3">
-            <div className="h-2 w-2 rounded-full bg-green-500" />
-            <span className="text-xs text-muted-foreground">Платформа активна</span>
+          <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/30 border border-sidebar-border/30 p-3.5 shadow-sm">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-success"></span>
+            </span>
+            <span className="text-xs font-semibold text-sidebar-foreground/80">Платформа активна</span>
           </div>
         ) : (
-          <div className="flex items-center gap-2 rounded-md bg-muted p-3">
-            <div className="h-2 w-2 rounded-full bg-status-online" />
-            <span className="text-xs text-muted-foreground">AI-агент активен</span>
+          <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/30 border border-sidebar-border/30 p-3.5 shadow-sm">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-success"></span>
+            </span>
+            <span className="text-xs font-semibold text-sidebar-foreground/80">AI-агент активен</span>
           </div>
         )}
       </SidebarFooter>

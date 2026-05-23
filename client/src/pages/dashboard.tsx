@@ -19,6 +19,28 @@ import { formatDistanceToNow } from "date-fns";
 import { ru } from "date-fns/locale";
 import { Link } from "wouter";
 
+import { useQuery } from "@tanstack/react-query";
+import { MetricsCard } from "@/components/metrics-card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import {
+  MessageSquare,
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  TrendingUp,
+  Bot,
+  Package,
+  Book,
+} from "lucide-react";
+import type { DashboardMetrics, EscalationEvent, ConversationWithCustomer } from "@shared/schema";
+import { formatDistanceToNow } from "date-fns";
+import { ru } from "date-fns/locale";
+import { Link } from "wouter";
+
 export default function Dashboard() {
   const { data: metrics, isLoading: metricsLoading } = useQuery<DashboardMetrics>({
     queryKey: ["/api/dashboard/metrics"],
@@ -33,11 +55,14 @@ export default function Dashboard() {
   });
 
   return (
-    <div className="space-y-4 sm:space-y-6 p-3 sm:p-6">
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-semibold">Панель управления</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Обзор работы NexusChat
+    <div className="space-y-6 p-4 sm:p-8 max-w-7xl mx-auto">
+      <div className="flex flex-col gap-1.5 border-b border-border/40 pb-5">
+        <div className="inline-flex items-center gap-1.5 text-xs text-primary font-semibold tracking-wider uppercase">
+          NexusChat CRM
+        </div>
+        <h1 className="text-3xl font-extrabold tracking-tight">Панель управления</h1>
+        <p className="text-sm text-muted-foreground font-medium">
+          Оперативный мониторинг диалогов, работы ассистента и показателей эффективности.
         </p>
       </div>
 
@@ -46,14 +71,14 @@ export default function Dashboard() {
         {metricsLoading ? (
           <>
             {[1, 2, 3, 4].map((i) => (
-              <Card key={i}>
-                <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-                  <Skeleton className="h-4 w-24" />
-                  <Skeleton className="h-4 w-4" />
+              <Card key={i} className="rounded-2xl border border-card-border bg-card">
+                <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-3">
+                  <Skeleton className="h-4 w-24 rounded-full" />
+                  <Skeleton className="h-9 w-9 rounded-xl" />
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-0">
                   <Skeleton className="h-8 w-16" />
-                  <Skeleton className="mt-2 h-3 w-32" />
+                  <Skeleton className="mt-3 h-4 w-32 rounded-full" />
                 </CardContent>
               </Card>
             ))}
@@ -82,7 +107,7 @@ export default function Dashboard() {
               value={metrics?.escalatedConversations || 0}
               icon={<AlertTriangle className="h-4 w-4" />}
               trend={metrics?.escalatedConversations && metrics.escalatedConversations > 0 ? "down" : "neutral"}
-              trendValue={metrics?.escalatedConversations && metrics.escalatedConversations > 0 ? "" : ""}
+              trendValue={metrics?.escalatedConversations && metrics.escalatedConversations > 0 ? "Внимание" : ""}
               description="требуют внимания"
               data-testid="metric-escalated"
             />
@@ -104,14 +129,14 @@ export default function Dashboard() {
         {metricsLoading ? (
           <>
             {[1, 2, 3, 4].map((i) => (
-              <Card key={i}>
-                <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-                  <Skeleton className="h-4 w-24" />
-                  <Skeleton className="h-4 w-4" />
+              <Card key={i} className="rounded-2xl border border-card-border bg-card">
+                <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-3">
+                  <Skeleton className="h-4 w-24 rounded-full" />
+                  <Skeleton className="h-9 w-9 rounded-xl" />
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-0">
                   <Skeleton className="h-8 w-16" />
-                  <Skeleton className="mt-2 h-3 w-32" />
+                  <Skeleton className="mt-3 h-4 w-32 rounded-full" />
                 </CardContent>
               </Card>
             ))}
@@ -128,7 +153,7 @@ export default function Dashboard() {
               icon={<TrendingUp className="h-4 w-4" />}
               trend="up"
               trendValue="-15%"
-              description="быстрее среднего"
+              description="быстрее вчера"
               data-testid="metric-avg-response"
             />
             <MetricsCard
@@ -137,21 +162,21 @@ export default function Dashboard() {
               icon={<Bot className="h-4 w-4" />}
               trend="up"
               trendValue="+3%"
-              description="одобрено"
+              description="одобрено оператором"
               data-testid="metric-ai-accuracy"
             />
             <MetricsCard
               title="Товаров"
               value={metrics?.productsCount || 0}
               icon={<Package className="h-4 w-4" />}
-              description="в каталоге"
+              description="в каталоге товаров"
               data-testid="metric-products"
             />
             <MetricsCard
               title="База знаний"
               value={metrics?.knowledgeDocsCount || 0}
               icon={<Book className="h-4 w-4" />}
-              description="документов"
+              description="статей и регламентов"
               data-testid="metric-knowledge-base"
             />
           </>
@@ -159,73 +184,85 @@ export default function Dashboard() {
       </div>
 
       {/* Activity Section */}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-2 mt-4">
         {/* Recent Escalations */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-2">
-            <CardTitle className="text-lg">Недавние эскалации</CardTitle>
+        <Card className="rounded-2xl border border-card-border bg-card hover:shadow-xl hover:shadow-primary/[0.01] transition-all duration-300">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 border-b border-border/40 pb-4">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive/10 text-destructive border border-destructive/10">
+                <AlertTriangle className="h-4 w-4" />
+              </div>
+              <CardTitle className="text-lg font-bold tracking-tight">Недавние эскалации</CardTitle>
+            </div>
             <Link href="/escalations">
-              <Badge variant="outline" className="cursor-pointer">
-                Все
+              <Badge variant="outline" className="cursor-pointer font-semibold rounded-lg px-2.5 py-1 text-xs hover:bg-accent/60 transition-colors">
+                Все эскалации
               </Badge>
             </Link>
           </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[280px]">
+          <CardContent className="p-4 sm:p-6">
+            <ScrollArea className="h-[300px] pr-2">
               {escalationsLoading ? (
                 <div className="space-y-4">
                   {[1, 2, 3].map((i) => (
                     <div key={i} className="flex items-start gap-3">
-                      <Skeleton className="h-8 w-8 rounded-full" />
+                      <Skeleton className="h-9 w-9 rounded-full" />
                       <div className="flex-1 space-y-2">
-                        <Skeleton className="h-4 w-full" />
-                        <Skeleton className="h-3 w-24" />
+                        <Skeleton className="h-4 w-full rounded-full" />
+                        <Skeleton className="h-3 w-24 rounded-full" />
                       </div>
                     </div>
                   ))}
                 </div>
               ) : recentEscalations?.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center text-center">
-                  <CheckCircle className="h-12 w-12 text-status-online opacity-50" />
-                  <p className="mt-3 text-sm text-muted-foreground">
-                    Нет ожидающих эскалаций
+                <div className="flex h-[240px] flex-col items-center justify-center text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-success/10 text-success mb-3.5">
+                    <CheckCircle className="h-6 w-6" />
+                  </div>
+                  <h3 className="font-semibold text-sm">Всё в порядке!</h3>
+                  <p className="mt-1 text-xs text-muted-foreground max-w-[240px]">
+                    В данный момент нет обращений, требующих ручного вмешательства.
                   </p>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   {recentEscalations?.slice(0, 5).map((escalation) => (
                     <div
                       key={escalation.id}
-                      className="flex items-start gap-3 rounded-md p-2 hover-elevate"
+                      className="flex items-start gap-3.5 rounded-xl border border-border/30 p-3 hover:bg-muted/35 hover:border-primary/10 transition-all duration-200"
                       data-testid={`escalation-item-${escalation.id}`}
                     >
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-destructive/10">
-                        <AlertTriangle className="h-4 w-4 text-destructive" />
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-destructive/10 border border-destructive/15">
+                        <AlertTriangle className="h-4.5 w-4.5 text-destructive animate-pulse" />
                       </div>
-                      <div className="flex-1 overflow-hidden">
-                        <p className="truncate text-sm font-medium">
-                          {escalation.reason}
-                        </p>
+                      <div className="flex-1 overflow-hidden space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="truncate text-sm font-bold text-foreground">
+                            {escalation.reason}
+                          </p>
+                          <span className="text-[10px] text-muted-foreground font-semibold shrink-0">
+                            {formatDistanceToNow(new Date(escalation.createdAt), {
+                              addSuffix: true,
+                              locale: ru,
+                            })}
+                          </span>
+                        </div>
                         <p className="truncate text-xs text-muted-foreground">
                           {escalation.summary}
                         </p>
-                        <span className="text-xs text-muted-foreground">
-                          {formatDistanceToNow(new Date(escalation.createdAt), {
-                            addSuffix: true,
-                            locale: ru,
-                          })}
-                        </span>
+                        <div className="pt-0.5">
+                          <Badge
+                            className={cn(
+                              "text-[10px] font-bold rounded-full px-2.5 py-0.5",
+                              escalation.status === "pending"
+                                ? "bg-warning/15 text-warning border border-warning/20 hover:bg-warning/15"
+                                : "bg-success/15 text-success border border-success/20 hover:bg-success/15"
+                            )}
+                          >
+                            {escalation.status === "pending" ? "Ожидает" : escalation.status === "resolved" ? "Решено" : escalation.status}
+                          </Badge>
+                        </div>
                       </div>
-                      <Badge
-                        variant={
-                          escalation.status === "pending"
-                            ? "destructive"
-                            : "secondary"
-                        }
-                        className="shrink-0 text-xs"
-                      >
-                        {escalation.status === "pending" ? "Ожидает" : escalation.status === "resolved" ? "Решено" : escalation.status}
-                      </Badge>
                     </div>
                   ))}
                 </div>
@@ -235,34 +272,42 @@ export default function Dashboard() {
         </Card>
 
         {/* Active Conversations */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-2">
-            <CardTitle className="text-lg">Активные разговоры</CardTitle>
+        <Card className="rounded-2xl border border-card-border bg-card hover:shadow-xl hover:shadow-primary/[0.01] transition-all duration-300">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 border-b border-border/40 pb-4">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/10">
+                <MessageSquare className="h-4 w-4" />
+              </div>
+              <CardTitle className="text-lg font-bold tracking-tight">Активные диалоги</CardTitle>
+            </div>
             <Link href="/conversations">
-              <Badge variant="outline" className="cursor-pointer">
-                Все
+              <Badge variant="outline" className="cursor-pointer font-semibold rounded-lg px-2.5 py-1 text-xs hover:bg-accent/60 transition-colors">
+                Все диалоги
               </Badge>
             </Link>
           </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[280px]">
+          <CardContent className="p-4 sm:p-6">
+            <ScrollArea className="h-[300px] pr-2">
               {conversationsLoading ? (
                 <div className="space-y-4">
                   {[1, 2, 3].map((i) => (
                     <div key={i} className="flex items-start gap-3">
                       <Skeleton className="h-10 w-10 rounded-full" />
                       <div className="flex-1 space-y-2">
-                        <Skeleton className="h-4 w-32" />
-                        <Skeleton className="h-3 w-full" />
+                        <Skeleton className="h-4 w-32 rounded-full" />
+                        <Skeleton className="h-3 w-full rounded-full" />
                       </div>
                     </div>
                   ))}
                 </div>
               ) : activeConversations?.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center text-center">
-                  <MessageSquare className="h-12 w-12 text-muted-foreground opacity-50" />
-                  <p className="mt-3 text-sm text-muted-foreground">
-                    Нет активных разговоров
+                <div className="flex h-[240px] flex-col items-center justify-center text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary mb-3.5">
+                    <MessageSquare className="h-6 w-6" />
+                  </div>
+                  <h3 className="font-semibold text-sm">Тишина в эфире</h3>
+                  <p className="mt-1 text-xs text-muted-foreground max-w-[240px]">
+                    В данный момент у вас нет активных переписок с клиентами.
                   </p>
                 </div>
               ) : (
@@ -271,31 +316,35 @@ export default function Dashboard() {
                     <Link
                       key={conv.id}
                       href={`/conversations?id=${conv.id}`}
-                      className="block"
+                      className="block group"
                     >
                       <div
-                        className="flex items-center gap-3 rounded-md p-2 hover-elevate"
+                        className="flex items-center gap-3.5 rounded-xl border border-border/30 p-3 hover:bg-muted/35 hover:border-primary/10 transition-all duration-200"
                         data-testid={`active-conv-${conv.id}`}
                       >
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 border border-primary/15 group-hover:scale-105 transition-transform">
                           <MessageSquare className="h-5 w-5 text-primary" />
                         </div>
-                        <div className="flex-1 overflow-hidden">
-                          <p className="truncate text-sm font-medium">
-                            {conv.customer?.name || "Неизвестный"}
-                          </p>
+                        <div className="flex-1 overflow-hidden space-y-0.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="truncate text-sm font-bold text-foreground">
+                              {conv.customer?.name || "Неизвестный клиент"}
+                            </p>
+                            <Badge variant="outline" className="text-[10px] font-semibold border-border/50 bg-background/50 px-2 py-0">
+                              {conv.mode === "learning" ? "Обучение" : conv.mode === "semi_auto" ? "Полуавто" : "Авто"}
+                            </Badge>
+                          </div>
                           <p className="truncate text-xs text-muted-foreground">
-                            {conv.lastMessage?.content || "Нет сообщений"}
+                            {conv.lastMessage?.content || "Сообщений пока нет"}
                           </p>
                         </div>
-                        <div className="flex flex-col items-end gap-1">
-                          <Badge variant="outline" className="text-xs">
-                            {conv.mode === "learning" ? "Обучение" : conv.mode === "semi_auto" ? "Полуавто" : "Авто"}
-                          </Badge>
-                          {conv.unreadCount && conv.unreadCount > 0 && (
-                            <Badge className="text-xs">{conv.unreadCount}</Badge>
-                          )}
-                        </div>
+                        {conv.unreadCount && conv.unreadCount > 0 && (
+                          <div className="flex shrink-0">
+                            <Badge className="rounded-full h-5 min-w-[20px] bg-primary text-primary-foreground font-extrabold text-[10px] flex items-center justify-center px-1.5 shadow-md shadow-primary/25">
+                              {conv.unreadCount}
+                            </Badge>
+                          </div>
+                        )}
                       </div>
                     </Link>
                   ))}
@@ -305,6 +354,9 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
     </div>
   );
 }

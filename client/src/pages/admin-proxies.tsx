@@ -17,6 +17,13 @@ import type { Proxy } from "@shared/schema";
 interface MaskedProxy extends Omit<Proxy, 'password'> {
   password: string | null;
   hasPassword: boolean;
+  assignedAccountId?: string | null;
+}
+
+function formatAccountId(id: string): string {
+  if (id.startsWith("tg:")) return `TG: ${id.slice(3).slice(0, 12)}…`;
+  if (id.startsWith("wa:")) return `WA: ${id.slice(3).slice(0, 12)}…`;
+  return id.slice(0, 16) + "…";
 }
 
 interface ProxiesResponse {
@@ -323,8 +330,11 @@ export default function AdminProxies() {
                       <div className="text-xs text-muted-foreground flex items-center gap-2">
                         {proxy.country && <span>{proxy.country}</span>}
                         {proxy.label && <span>{proxy.label}</span>}
-                        {proxy.assignedTenantId && (
-                          <span>Tenant: {proxy.assignedTenantId.slice(0, 8)}...</span>
+                        {proxy.assignedAccountId && (
+                          <span className="font-mono">{formatAccountId(proxy.assignedAccountId)}</span>
+                        )}
+                        {!proxy.assignedAccountId && proxy.assignedTenantId && (
+                          <span>Tenant: {proxy.assignedTenantId.slice(0, 8)}…</span>
                         )}
                       </div>
                     </div>

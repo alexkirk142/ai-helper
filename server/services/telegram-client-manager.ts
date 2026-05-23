@@ -11,6 +11,7 @@ import { getSecret } from "./secret-resolver";
 import { messageBus } from "./message-bus";
 import { featureFlagService } from "./feature-flags";
 import { handleIncomingReadReceipt } from "./read-receipt-handler";
+import { proxyService, proxyAccountKey } from "./proxy-service";
 import type { ParsedAttachment } from "./channel-adapter.types";
 
 interface ActiveConnection {
@@ -343,6 +344,35 @@ class TelegramClientManager {
         return false;
       }
 
+      // Load proxy for this account (auto-assigns from pool if none assigned yet).
+      // Each Telegram account gets its own dedicated proxy IP to avoid IP-level FLOOD_WAIT
+      // when multiple accounts connect simultaneously after a server restart.
+      let proxyOptions: Record<string, unknown> = {};
+      try {
+        const accountKey = proxyAccountKey.telegram(accountId);
+        const proxy = await proxyService.assignProxyToAccount(accountKey, tenantId);
+        if (proxy) {
+          if (proxy.protocol === "socks5" || proxy.protocol === "socks4") {
+            proxyOptions = {
+              proxy: {
+                socksType: proxy.protocol === "socks5" ? 5 : 4,
+                ip: proxy.host,
+                port: proxy.port,
+                ...(proxy.username ? { username: proxy.username } : {}),
+                ...(proxy.password ? { password: proxy.password } : {}),
+              },
+            };
+            console.log(`[TelegramClientManager] Using ${proxy.protocol} proxy ${proxy.host}:${proxy.port} for ${connectionKey}`);
+          } else {
+            console.log(`[TelegramClientManager] Proxy ${proxy.protocol} not supported by gramjs for ${connectionKey}, connecting without proxy`);
+          }
+        } else {
+          console.log(`[TelegramClientManager] No proxy available for ${connectionKey}, connecting without proxy`);
+        }
+      } catch (proxyErr: any) {
+        console.warn(`[TelegramClientManager] Proxy load error for ${connectionKey}: ${proxyErr.message}`);
+      }
+
       let client: TelegramClient | undefined;
       try {
         if (existingClient) {
@@ -367,6 +397,7 @@ class TelegramClientManager {
             // another isUserAuthorized() call, which resets Telegram's FLOOD_WAIT countdown and
             // makes it grow exponentially (60s → 120s → 240s → 30min → 90min → ...).
             floodSleepThreshold: 24 * 60 * 60,
+            ...proxyOptions,
           });
 
           console.log(`[TelegramClientManager] Connecting account ${connectionKey}...`);
@@ -541,6 +572,28 @@ class TelegramClientManager {
       return false;
     }
 
+    // Load proxy for legacy channel connection (1 proxy per channel).
+    let legacyProxyOptions: Record<string, unknown> = {};
+    try {
+      const proxy = await proxyService.assignProxyToChannel(channelId, tenantId);
+      if (proxy) {
+        if (proxy.protocol === "socks5" || proxy.protocol === "socks4") {
+          legacyProxyOptions = {
+            proxy: {
+              socksType: proxy.protocol === "socks5" ? 5 : 4,
+              ip: proxy.host,
+              port: proxy.port,
+              ...(proxy.username ? { username: proxy.username } : {}),
+              ...(proxy.password ? { password: proxy.password } : {}),
+            },
+          };
+          console.log(`[TelegramClientManager] Using ${proxy.protocol} proxy ${proxy.host}:${proxy.port} for ${connectionKey}`);
+        }
+      }
+    } catch (proxyErr: any) {
+      console.warn(`[TelegramClientManager] Proxy load error for ${connectionKey}: ${proxyErr.message}`);
+    }
+
     let client: TelegramClient | undefined;
     try {
       const { apiId, apiHash } = credentials;
@@ -549,6 +602,7 @@ class TelegramClientManager {
         connectionRetries: 0,
         autoReconnect: false,
         floodSleepThreshold: 24 * 60 * 60,
+        ...legacyProxyOptions,
       });
 
       console.log(`[TelegramClientManager] Connecting client for ${connectionKey}...`);
@@ -2191,25 +2245,40 @@ class TelegramClientManager {
     });
     this.reconnectTimers.clear();
 
-    for (const [key, connection] of Array.from(this.connections.entries())) {
-      try {
-        // Persist any in-memory session rotation before disconnecting so the
-        // next restart reads a fresh key and avoids AUTH_KEY_INVALID.
-        if (!connection.accountId.startsWith("legacy_") && connection.client) {
-          try {
-            const savedSession = connection.client.session.save() as unknown as string;
-            if (savedSession && savedSession !== connection.sessionString) {
-              await storage.updateTelegramAccount(connection.accountId, { sessionString: savedSession });
-              console.log(`[TelegramClientManager] Persisted rotated session for ${key} before shutdown`);
+    // Disconnect all accounts in parallel with a per-account timeout.
+    // Sequential disconnects would block if one account's TCP socket hangs —
+    // with N accounts the total shutdown could exceed kill_timeout and trigger
+    // a force-kill, leaving auth keys unreleased and causing AUTH_KEY_DUPLICATED
+    // on the next startup. Parallel + 5s timeout per account keeps total
+    // shutdown time bounded regardless of how many accounts are connected.
+    await Promise.allSettled(
+      Array.from(this.connections.entries()).map(async ([key, connection]) => {
+        try {
+          // Persist any in-memory session rotation before disconnecting so the
+          // next restart reads a fresh key and avoids AUTH_KEY_INVALID.
+          if (!connection.accountId.startsWith("legacy_") && connection.client) {
+            try {
+              const savedSession = connection.client.session.save() as unknown as string;
+              if (savedSession && savedSession !== connection.sessionString) {
+                await storage.updateTelegramAccount(connection.accountId, { sessionString: savedSession });
+                console.log(`[TelegramClientManager] Persisted rotated session for ${key} before shutdown`);
+              }
+            } catch (saveErr: any) {
+              console.warn(`[TelegramClientManager] Could not persist session for ${key} during shutdown: ${saveErr.message}`);
             }
-          } catch (saveErr: any) {
-            console.warn(`[TelegramClientManager] Could not persist session for ${key} during shutdown: ${saveErr.message}`);
           }
+          await Promise.race([
+            connection.client.disconnect(),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error("disconnect timed out after 5s")), 5000)
+            ),
+          ]);
+          console.log(`[TelegramClientManager] Disconnected: ${key}`);
+        } catch (err: any) {
+          console.warn(`[TelegramClientManager] Shutdown disconnect error for ${key}: ${err.message}`);
         }
-        await connection.client.disconnect();
-        console.log(`[TelegramClientManager] Disconnected: ${key}`);
-      } catch {}
-    }
+      })
+    );
     this.connections.clear();
     this.pendingOutbound.clear();
     this.isInitialized = false;

@@ -65,41 +65,41 @@
 
 | Переменная | Light (HSL) | Dark (HSL) | Tailwind класс |
 |-----------|------------|-----------|----------------|
-| `--background` | 210 5% 98% | 210 6% 8% | `bg-background` |
-| `--foreground` | 210 6% 12% | 210 6% 96% | `text-foreground` |
-| `--border` | 210 6% 90% | 210 8% 18% | `border-border` |
-| `--input` | 210 12% 75% | 210 12% 28% | `border-input` |
-| `--ring` | 210 78% 48% | 210 78% 52% | `ring-ring` |
+| `--background` | 240 5% 98% | 240 10% 3.9% | `bg-background` |
+| `--foreground` | 240 10% 4% | 0 0% 98% | `text-foreground` |
+| `--border` | 240 6% 90% | 240 3.7% 15.9% | `border-border` |
+| `--input` | 240 6% 90% | 240 3.7% 15.9% | `border-input` |
+| `--ring` | 250 84% 54% | 250 84% 60% | `ring-ring` |
 
 #### Карточки
 
 | Переменная | Light | Dark | Tailwind |
 |-----------|-------|------|---------|
-| `--card` | 210 5% 96% | 210 6% 10% | `bg-card` |
-| `--card-foreground` | 210 6% 12% | 210 6% 96% | `text-card-foreground` |
-| `--card-border` | 210 6% 92% | 210 8% 14% | `border-card-border` |
+| `--card` | 0 0% 100% | 240 10% 5.9% | `bg-card` |
+| `--card-foreground` | 240 10% 4% | 0 0% 98% | `text-card-foreground` |
+| `--card-border` | 240 6% 93% | 240 3.7% 12.9% | `border-card-border` |
 
 #### Сайдбар
 
 | Переменная | Light | Dark | Tailwind |
 |-----------|-------|------|---------|
-| `--sidebar` | 210 5% 94% | 210 6% 12% | `bg-sidebar` |
-| `--sidebar-foreground` | 210 6% 14% | 210 6% 94% | `text-sidebar-foreground` |
-| `--sidebar-border` | 210 6% 88% | 210 8% 16% | `border-sidebar-border` |
-| `--sidebar-primary` | 210 78% 48% | 210 78% 52% | `bg-sidebar-primary` |
-| `--sidebar-accent` | 210 8% 86% | 210 10% 18% | `bg-sidebar-accent` |
+| `--sidebar` | 240 4% 96% | 240 10% 4.9% | `bg-sidebar` |
+| `--sidebar-foreground` | 240 5% 26% | 240 5% 84% | `text-sidebar-foreground` |
+| `--sidebar-border` | 240 6% 90% | 240 3.7% 12.9% | `border-sidebar-border` |
+| `--sidebar-primary` | 250 84% 54% | 250 84% 60% | `bg-sidebar-primary` |
+| `--sidebar-accent` | 240 4% 90% | 240 3.7% 12.9% | `bg-sidebar-accent` |
 
 #### Акцентные
 
 | Переменная | Light | Dark | Tailwind | Назначение |
 |-----------|-------|------|---------|-----------|
-| `--primary` | **210 78% 48%** | **210 78% 52%** | `bg-primary`, `text-primary` | Основной акцент (синий) |
-| `--primary-foreground` | 210 78% 98% | 210 78% 98% | `text-primary-foreground` | Текст на primary |
-| `--secondary` | 210 10% 84% | 210 10% 20% | `bg-secondary` | Второстепенный |
-| `--muted` | 210 8% 88% | 210 10% 16% | `bg-muted` | Приглушённый фон |
-| `--muted-foreground` | 210 10% 28% | 210 10% 72% | `text-muted-foreground` | Вспомогательный текст |
-| `--accent` | 210 12% 90% | 210 12% 14% | `bg-accent` | Hover-состояния |
-| `--destructive` | 0 72% 45% | 0 68% 48% | `bg-destructive` | Опасные действия (красный) |
+| `--primary` | **250 84% 54%** | **250 84% 60%** | `bg-primary`, `text-primary` | Основной акцент (индиго-фиолетовый) |
+| `--primary-foreground` | 0 0% 100% | 0 0% 100% | `text-primary-foreground` | Текст на primary |
+| `--secondary` | 240 4% 96% | 240 3.7% 15.9% | `bg-secondary` | Второстепенный |
+| `--muted` | 240 4% 96% | 240 3.7% 15.9% | `bg-muted` | Приглушённый фон |
+| `--muted-foreground` | 240 4% 46% | 240 5% 64.9% | `text-muted-foreground` | Вспомогательный текст |
+| `--accent` | 240 4% 95% | 240 3.7% 12.9% | `bg-accent` | Hover-состояния |
+| `--destructive` | 346.8 84.1% 49.8% | 346.8 84.1% 60.2% | `bg-destructive` | Опасные действия (красно-розовый) |
 
 #### Popover
 
@@ -259,16 +259,16 @@ Inter загружается как системный шрифт — **не п�
 
 ## 5. Скругления (border-radius)
 
-Кастомные значения в `tailwind.config.ts`:
+Кастомные значения в `tailwind.config.ts` динамически вычисляются от базовой CSS переменной `--radius`:
 
 | Tailwind класс | Значение | Пиксели |
 |---------------|---------|---------|
-| `rounded-sm` | `.1875rem` | 3px |
-| `rounded-md` | `.375rem` | 6px |
-| `rounded-lg` | `.5625rem` | 9px |
+| `rounded-sm` | `calc(var(--radius) - 8px)` | 4px |
+| `rounded-md` | `calc(var(--radius) - 4px)` | 8px |
+| `rounded-lg` | `var(--radius)` | 12px |
 | `rounded-full` | 9999px | круг |
 
-CSS переменная: `--radius: .5rem` (8px) — используется shadcn/ui компонентами как `calc(var(--radius) - 2px)` и т.д.
+CSS переменная: `--radius: 0.75rem` (12px) — используется как базовый радиус для всех карточек, полей ввода и кнопок, обеспечивая мягкий и премиальный скруглённый дизайн в стиле современных CRM-систем (AppFlowly).
 
 **Чтобы изменить глобальное скругление** — изменить `--radius` в `index.css` И/ИЛИ значения в `tailwind.config.ts`.
 
