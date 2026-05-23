@@ -997,11 +997,16 @@ export type DashboardMetrics = {
   activeConversations: number;
   escalatedConversations: number;
   resolvedToday: number;
+  resolvedYesterday: number;
   avgResponseTime: number | null;
   aiAccuracy: number;
   pendingSuggestions: number;
   productsCount: number;
   knowledgeDocsCount: number;
+  /** Conversations created in the last 7 days */
+  conversationsThisWeek: number;
+  /** Conversations created 8–14 days ago (for week-over-week trend) */
+  conversationsLastWeek: number;
 };
 
 // ============ PHASE 2: Human Delay Types ============

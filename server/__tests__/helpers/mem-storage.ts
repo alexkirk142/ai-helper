@@ -1223,6 +1223,10 @@ export class MemStorage implements IStorage {
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
     const resolvedToday = convs.filter((c) => {
       if (c.status !== "resolved") return false;
@@ -1230,22 +1234,38 @@ export class MemStorage implements IStorage {
       return !Number.isNaN(u.getTime()) && u >= today;
     }).length;
 
+    const resolvedYesterday = convs.filter((c) => {
+      if (c.status !== "resolved") return false;
+      const u = new Date(c.updatedAt);
+      return !Number.isNaN(u.getTime()) && u >= yesterday && u < today;
+    }).length;
+
     const approvedSuggestions = suggestions.filter((s) => s.status === "approved").length;
-    const totalSuggestions = suggestions.length;
-    const aiAccuracy = totalSuggestions > 0 ? approvedSuggestions / totalSuggestions : 0;
+    const rejectedSuggestions = suggestions.filter((s) => s.status === "rejected").length;
+    const reviewedSuggestions = approvedSuggestions + rejectedSuggestions;
+    const aiAccuracy = reviewedSuggestions > 0 ? approvedSuggestions / reviewedSuggestions : 0;
 
     const pendingSuggestions = suggestions.filter((s) => s.status === "pending").length;
+
+    const conversationsThisWeek = convs.filter((c) => new Date(c.createdAt) > sevenDaysAgo).length;
+    const conversationsLastWeek = convs.filter((c) => {
+      const d = new Date(c.createdAt);
+      return d > fourteenDaysAgo && d <= sevenDaysAgo;
+    }).length;
 
     return {
       totalConversations: convs.length,
       activeConversations: convs.filter((c) => c.status === "active" || c.status === "waiting").length,
       escalatedConversations: convs.filter((c) => c.status === "escalated").length,
       resolvedToday,
+      resolvedYesterday,
       avgResponseTime: null,
       aiAccuracy,
       pendingSuggestions,
       productsCount: products.length,
       knowledgeDocsCount: docs.length,
+      conversationsThisWeek,
+      conversationsLastWeek,
     };
   }
 

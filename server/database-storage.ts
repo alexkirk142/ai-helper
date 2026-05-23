@@ -1344,16 +1344,28 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getDashboardMetrics(tenantId: string): Promise<DashboardMetrics> {
-    const [convCounts, pendingResult, productsResult, docsResult, resolvedTodayResult] = await Promise.all([
+    const [
+      convCounts,
+      pendingResult,
+      productsResult,
+      docsResult,
+      resolvedResult,
+      aiAccuracyResult,
+      avgResponseResult,
+    ] = await Promise.all([
+      // Total / active / escalated + weekly breakdown
       db
         .select({
           total: sql<number>`count(*)::int`,
           active: sql<number>`count(*) filter (where ${conversations.status} = 'active')::int`,
           escalated: sql<number>`count(*) filter (where ${conversations.status} = 'escalated')::int`,
+          thisWeek: sql<number>`count(*) filter (where ${conversations.createdAt} > now() - interval '7 days')::int`,
+          lastWeek: sql<number>`count(*) filter (where ${conversations.createdAt} > now() - interval '14 days' and ${conversations.createdAt} <= now() - interval '7 days')::int`,
         })
         .from(conversations)
         .where(eq(conversations.tenantId, tenantId)),
 
+      // Pending AI suggestions
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(aiSuggestions)
@@ -1363,38 +1375,85 @@ export class DatabaseStorage implements IStorage {
           eq(aiSuggestions.status, "pending")
         )),
 
+      // Products count
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(products)
         .where(eq(products.tenantId, tenantId)),
 
+      // Knowledge docs count
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(knowledgeDocs)
         .where(eq(knowledgeDocs.tenantId, tenantId)),
 
+      // Resolved today and yesterday
       db
-        .select({ count: count() })
+        .select({
+          today: sql<number>`count(*) filter (where ${conversations.updatedAt} >= current_date)::int`,
+          yesterday: sql<number>`count(*) filter (where ${conversations.updatedAt} >= current_date - interval '1 day' and ${conversations.updatedAt} < current_date)::int`,
+        })
         .from(conversations)
         .where(and(
           eq(conversations.tenantId, tenantId),
           eq(conversations.status, "resolved"),
-          gte(conversations.updatedAt, sql`CURRENT_DATE`),
+          gte(conversations.updatedAt, sql`current_date - interval '1 day'`),
         )),
+
+      // AI accuracy: approved / (approved + rejected)
+      db
+        .select({
+          approved: sql<number>`count(*) filter (where ${aiSuggestions.status} = 'approved')::int`,
+          total: sql<number>`count(*) filter (where ${aiSuggestions.status} in ('approved', 'rejected'))::int`,
+        })
+        .from(aiSuggestions)
+        .innerJoin(conversations, eq(aiSuggestions.conversationId, conversations.id))
+        .where(eq(conversations.tenantId, tenantId)),
+
+      // Average response time (seconds): customer message → next assistant reply, last 30 days
+      // Capped at 1 hour to exclude outliers (nights, weekends, etc.)
+      db.execute(sql`
+        SELECT ROUND(AVG(diff_seconds))::int AS avg_response
+        FROM (
+          SELECT EXTRACT(EPOCH FROM (
+            (SELECT MIN(m2.created_at)
+               FROM messages m2
+              WHERE m2.conversation_id = m1.conversation_id
+                AND m2.role = 'assistant'
+                AND m2.created_at > m1.created_at)
+            - m1.created_at
+          )) AS diff_seconds
+          FROM messages m1
+          JOIN conversations c ON m1.conversation_id = c.id
+          WHERE c.tenant_id = ${tenantId}
+            AND m1.role = 'customer'
+            AND m1.created_at > now() - interval '30 days'
+          LIMIT 500
+        ) sub
+        WHERE diff_seconds BETWEEN 0 AND 3600
+      `),
     ]);
 
     const conv = convCounts[0];
-    const resolvedToday = Number(resolvedTodayResult[0]?.count ?? 0);
+    const resolved = resolvedResult[0];
+    const aiRow = aiAccuracyResult[0];
+    const aiAccuracy = aiRow && aiRow.total > 0 ? aiRow.approved / aiRow.total : 0;
+    const avgRow = (avgResponseResult as any)?.rows?.[0] ?? (avgResponseResult as any)?.[0];
+    const avgResponseTime = avgRow?.avg_response != null ? Number(avgRow.avg_response) : null;
+
     return {
       totalConversations: conv?.total ?? 0,
       activeConversations: conv?.active ?? 0,
       escalatedConversations: conv?.escalated ?? 0,
-      resolvedToday,
-      avgResponseTime: null,
-      aiAccuracy: 0,
+      resolvedToday: resolved?.today ?? 0,
+      resolvedYesterday: resolved?.yesterday ?? 0,
+      avgResponseTime,
+      aiAccuracy,
       pendingSuggestions: pendingResult[0]?.count ?? 0,
       productsCount: productsResult[0]?.count ?? 0,
       knowledgeDocsCount: docsResult[0]?.count ?? 0,
+      conversationsThisWeek: conv?.thisWeek ?? 0,
+      conversationsLastWeek: conv?.lastWeek ?? 0,
     };
   }
 

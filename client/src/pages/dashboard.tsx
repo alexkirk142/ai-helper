@@ -20,6 +20,20 @@ import { formatDistanceToNow } from "date-fns";
 import { ru } from "date-fns/locale";
 import { Link } from "wouter";
 
+function weekTrend(thisWeek: number, lastWeek: number): { value: string; direction: "up" | "down" | "neutral" } | null {
+  if (lastWeek === 0) return thisWeek > 0 ? { value: `+${thisWeek}`, direction: "up" } : null;
+  const pct = Math.round(((thisWeek - lastWeek) / lastWeek) * 100);
+  if (pct === 0) return { value: "0%", direction: "neutral" };
+  return { value: `${pct > 0 ? "+" : ""}${pct}%`, direction: pct > 0 ? "up" : "down" };
+}
+
+function formatSeconds(seconds: number): string {
+  if (seconds < 60) return `${seconds}с`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return s > 0 ? `${m}м ${s}с` : `${m}м`;
+}
+
 export default function Dashboard() {
   const { data: metrics, isLoading: metricsLoading } = useQuery<DashboardMetrics>({
     queryKey: ["/api/dashboard/metrics"],
@@ -64,15 +78,20 @@ export default function Dashboard() {
           </>
         ) : (
           <>
-            <MetricsCard
-              title="Всего разговоров"
-              value={metrics?.totalConversations || 0}
-              icon={<MessageSquare className="h-4 w-4" />}
-              trend="up"
-              trendValue="+12%"
-              description="за неделю"
-              data-testid="metric-total-conversations"
-            />
+            {(() => {
+              const wt = metrics ? weekTrend(metrics.conversationsThisWeek, metrics.conversationsLastWeek) : null;
+              return (
+                <MetricsCard
+                  title="Всего разговоров"
+                  value={metrics?.totalConversations || 0}
+                  icon={<MessageSquare className="h-4 w-4" />}
+                  trend={wt?.direction ?? "neutral"}
+                  trendValue={wt?.value ?? ""}
+                  description="за неделю"
+                  data-testid="metric-total-conversations"
+                />
+              );
+            })()}
             <MetricsCard
               title="Активных сейчас"
               value={metrics?.activeConversations || 0}
@@ -90,15 +109,21 @@ export default function Dashboard() {
               description="требуют внимания"
               data-testid="metric-escalated"
             />
-            <MetricsCard
-              title="Решено сегодня"
-              value={metrics?.resolvedToday || 0}
-              icon={<CheckCircle className="h-4 w-4" />}
-              trend="up"
-              trendValue="+8"
-              description="разговоров"
-              data-testid="metric-resolved-today"
-            />
+            {(() => {
+              const diff = (metrics?.resolvedToday ?? 0) - (metrics?.resolvedYesterday ?? 0);
+              const hasDiff = metrics != null && (metrics.resolvedToday > 0 || metrics.resolvedYesterday > 0);
+              return (
+                <MetricsCard
+                  title="Решено сегодня"
+                  value={metrics?.resolvedToday || 0}
+                  icon={<CheckCircle className="h-4 w-4" />}
+                  trend={!hasDiff ? "neutral" : diff >= 0 ? "up" : "down"}
+                  trendValue={hasDiff && diff !== 0 ? `${diff > 0 ? "+" : ""}${diff} вчера` : ""}
+                  description="разговоров"
+                  data-testid="metric-resolved-today"
+                />
+              );
+            })()}
           </>
         )}
       </div>
@@ -124,26 +149,26 @@ export default function Dashboard() {
           <>
             <MetricsCard
               title="Среднее время ответа"
-              value={
-                metrics?.avgResponseTime == null
-                  ? "—"
-                  : `${metrics.avgResponseTime}с`
-              }
+              value={metrics?.avgResponseTime == null ? "—" : formatSeconds(metrics.avgResponseTime)}
               icon={<TrendingUp className="h-4 w-4" />}
-              trend="up"
-              trendValue="-15%"
-              description="быстрее вчера"
+              trend="neutral"
+              description="за последние 30 дней"
               data-testid="metric-avg-response"
             />
-            <MetricsCard
-              title="Точность AI"
-              value={`${Math.round((metrics?.aiAccuracy || 0) * 100)}%`}
-              icon={<Bot className="h-4 w-4" />}
-              trend="up"
-              trendValue="+3%"
-              description="одобрено оператором"
-              data-testid="metric-ai-accuracy"
-            />
+            {(() => {
+              const pct = Math.round((metrics?.aiAccuracy || 0) * 100);
+              const trend = pct >= 80 ? "up" : pct >= 50 ? "neutral" : "down";
+              return (
+                <MetricsCard
+                  title="Точность AI"
+                  value={`${pct}%`}
+                  icon={<Bot className="h-4 w-4" />}
+                  trend={metrics?.aiAccuracy ? trend : "neutral"}
+                  description="одобрено оператором"
+                  data-testid="metric-ai-accuracy"
+                />
+              );
+            })()}
             <MetricsCard
               title="Товаров"
               value={metrics?.productsCount || 0}
