@@ -5087,70 +5087,74 @@ export default function Settings() {
         </p>
       </div>
 
-      <Tabs defaultValue="company" className="space-y-6">
-        <TabsList className="inline-flex h-auto p-1 bg-muted/65 border border-border/30 rounded-xl gap-1 flex-wrap">
+      <Tabs defaultValue="company" className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-8 items-start">
+        <TabsList className="flex flex-col h-auto bg-card border border-card-border p-2 rounded-2xl gap-1 items-stretch text-left shadow-sm shrink-0">
+          <div className="px-3 py-2 text-[10px] font-bold text-muted-foreground/60 uppercase tracking-wider">
+            Разделы
+          </div>
           <TabsTrigger
             value="company"
             data-testid="tab-company"
-            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+            className="w-full justify-start rounded-xl py-3 px-3.5 h-11 text-xs sm:text-sm font-bold tracking-tight text-muted-foreground/85 hover:text-foreground hover:bg-muted/40 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg data-[state=active]:shadow-primary/10 transition-all duration-200 flex items-center gap-2.5 border border-transparent data-[state=active]:border-primary/20"
           >
-            <Building2 className="h-4 w-4 shrink-0 mr-1.5" />
+            <Building2 className="h-4.5 w-4.5 shrink-0" />
             <span>Компания</span>
           </TabsTrigger>
           <TabsTrigger
             value="ai-agent"
             data-testid="tab-ai-agent"
-            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+            className="w-full justify-start rounded-xl py-3 px-3.5 h-11 text-xs sm:text-sm font-bold tracking-tight text-muted-foreground/85 hover:text-foreground hover:bg-muted/40 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg data-[state=active]:shadow-primary/10 transition-all duration-200 flex items-center gap-2.5 border border-transparent data-[state=active]:border-primary/20"
           >
-            <Bot className="h-4 w-4 shrink-0 mr-1.5" />
+            <Bot className="h-4.5 w-4.5 shrink-0" />
             <span>Поведение AI</span>
           </TabsTrigger>
           <TabsTrigger
             value="automation"
             data-testid="tab-automation"
-            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+            className="w-full justify-start rounded-xl py-3 px-3.5 h-11 text-xs sm:text-sm font-bold tracking-tight text-muted-foreground/85 hover:text-foreground hover:bg-muted/40 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg data-[state=active]:shadow-primary/10 transition-all duration-200 flex items-center gap-2.5 border border-transparent data-[state=active]:border-primary/20"
           >
-            <Zap className="h-4 w-4 shrink-0 mr-1.5" />
+            <Zap className="h-4.5 w-4.5 shrink-0" />
             <span>Автоматизация</span>
           </TabsTrigger>
           <TabsTrigger
             value="ai-training"
             data-testid="tab-ai-training"
-            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+            className="w-full justify-start rounded-xl py-3 px-3.5 h-11 text-xs sm:text-sm font-bold tracking-tight text-muted-foreground/85 hover:text-foreground hover:bg-muted/40 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg data-[state=active]:shadow-primary/10 transition-all duration-200 flex items-center gap-2.5 border border-transparent data-[state=active]:border-primary/20"
           >
-            <MessageSquare className="h-4 w-4 shrink-0 mr-1.5" />
-            <span>Обучение</span>
+            <MessageSquare className="h-4.5 w-4.5 shrink-0" />
+            <span>Обучение AI</span>
           </TabsTrigger>
           <TabsTrigger
             value="templates-payment"
             data-testid="tab-templates-payment"
-            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+            className="w-full justify-start rounded-xl py-3 px-3.5 h-11 text-xs sm:text-sm font-bold tracking-tight text-muted-foreground/85 hover:text-foreground hover:bg-muted/40 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg data-[state=active]:shadow-primary/10 transition-all duration-200 flex items-center gap-2.5 border border-transparent data-[state=active]:border-primary/20"
           >
-            <FileText className="h-4 w-4 shrink-0 mr-1.5" />
-            <span>Шаблоны</span>
+            <FileText className="h-4.5 w-4.5 shrink-0" />
+            <span>Шаблоны и Оплата</span>
           </TabsTrigger>
           <TabsTrigger
             value="channels"
             data-testid="tab-channels"
-            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+            className="w-full justify-start rounded-xl py-3 px-3.5 h-11 text-xs sm:text-sm font-bold tracking-tight text-muted-foreground/85 hover:text-foreground hover:bg-muted/40 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg data-[state=active]:shadow-primary/10 transition-all duration-200 flex items-center gap-2.5 border border-transparent data-[state=active]:border-primary/20"
           >
-            <Link2 className="h-4 w-4 shrink-0 mr-1.5" />
-            <span>Каналы</span>
+            <Link2 className="h-4.5 w-4.5 shrink-0" />
+            <span>Каналы связи</span>
           </TabsTrigger>
           <TabsTrigger
             value="lead-intake"
             data-testid="tab-lead-intake"
-            className="rounded-lg py-1.5 px-3.5 text-xs font-bold tracking-tight data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/30 transition-all duration-200"
+            className="w-full justify-start rounded-xl py-3 px-3.5 h-11 text-xs sm:text-sm font-bold tracking-tight text-muted-foreground/85 hover:text-foreground hover:bg-muted/40 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg data-[state=active]:shadow-primary/10 transition-all duration-200 flex items-center gap-2.5 border border-transparent data-[state=active]:border-primary/20"
           >
-            <Inbox className="h-4 w-4 shrink-0 mr-1.5" />
+            <Inbox className="h-4.5 w-4.5 shrink-0" />
             <span>Приём заявок</span>
           </TabsTrigger>
         </TabsList>
 
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(handleSubmit)}>
-            {/* Tab 1: Компания */}
-            <TabsContent value="company">
+        <div className="flex-1 min-w-0 w-full">
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleSubmit)}>
+              {/* Tab 1: Компания */}
+              <TabsContent value="company" className="mt-0">
               <div className="space-y-6">
                 <Card>
                   <CardHeader>
@@ -5321,7 +5325,7 @@ export default function Settings() {
             </TabsContent>
 
             {/* Tab 2: AI Агент */}
-            <TabsContent value="ai-agent">
+            <TabsContent value="ai-agent" className="mt-0">
               {!hasAiAccess ? <AiSubscriptionRequired /> : <div className="space-y-6">
                 <CompanyAgentCard autoPartsEnabled={autoPartsEnabled} />
 
@@ -5497,7 +5501,7 @@ export default function Settings() {
             </TabsContent>
 
             {/* Tab 3: Автоматизация */}
-            <TabsContent value="automation">
+            <TabsContent value="automation" className="mt-0">
               <div className="space-y-6">
 
                 {/* Escalation bot chat ID */}
@@ -5547,7 +5551,7 @@ export default function Settings() {
             </TabsContent>
 
             {/* Tab 4: Обучение AI */}
-            <TabsContent value="ai-training">
+            <TabsContent value="ai-training" className="mt-0">
               {!hasAiAccess ? <AiSubscriptionRequired /> : <div className="space-y-6">
                 <p className="text-sm text-muted-foreground">
                   Эти настройки влияют на качество AI со временем — как агент обучается на реальных разговорах
@@ -5557,7 +5561,7 @@ export default function Settings() {
             </TabsContent>
 
             {/* Tab 5: Шаблоны и Оплата */}
-            <TabsContent value="templates-payment">
+            <TabsContent value="templates-payment" className="mt-0">
               <div className="space-y-8">
                 <TemplatesTab />
                 <Separator />
@@ -5566,14 +5570,14 @@ export default function Settings() {
             </TabsContent>
 
             {/* Tab 6: Каналы */}
-            <TabsContent value="channels">
+            <TabsContent value="channels" className="mt-0">
               <ChannelSettings />
             </TabsContent>
           </form>
         </Form>
 
         {/* Tab 7: Приём заявок — вне <Form>, не нужна форма */}
-        <TabsContent value="lead-intake">
+        <TabsContent value="lead-intake" className="mt-0">
           {tenant ? (
             <LeadIntakeTab tenantId={tenant.id} />
           ) : (
@@ -5583,6 +5587,7 @@ export default function Settings() {
             </div>
           )}
         </TabsContent>
+        </div>
       </Tabs>
     </div>
   );
