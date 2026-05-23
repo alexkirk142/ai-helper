@@ -4,27 +4,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  MessageSquare,
-  AlertTriangle,
-  CheckCircle,
-  Clock,
-  TrendingUp,
-  Bot,
-  Package,
-  Book,
-} from "lucide-react";
-import type { DashboardMetrics, EscalationEvent, ConversationWithCustomer } from "@shared/schema";
-import { formatDistanceToNow } from "date-fns";
-import { ru } from "date-fns/locale";
-import { Link } from "wouter";
-
-import { useQuery } from "@tanstack/react-query";
-import { MetricsCard } from "@/components/metrics-card";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
   MessageSquare,
