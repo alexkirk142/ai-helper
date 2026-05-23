@@ -338,7 +338,7 @@ function AuthenticatedApp() {
     <SidebarProvider style={style as React.CSSProperties}>
       <PaymentSuccessDialog open={showGlobalSuccess} onOpenChange={setShowGlobalSuccess} />
       <AppSidebar />
-      <div className="flex flex-1 flex-col overflow-hidden min-h-screen">
+      <div className="flex flex-1 flex-col overflow-hidden h-screen">
         <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-3 sm:px-4">
           <SidebarTrigger data-testid="button-sidebar-toggle" />
           <div className="flex items-center gap-2 sm:gap-3">
