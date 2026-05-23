@@ -31,7 +31,6 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 const CHAT_FEATURES = [
   { icon: MessageSquare, text: "Неограниченные разговоры с клиентами через все подключённые каналы" },
   { icon: Zap, text: "Подключение каналов: Telegram Personal, WhatsApp Personal, MAX" },
-  { icon: Bot, text: "AI-предложения ответов с обучением на диалогах вашей команды" },
   { icon: Shield, text: "Полная защита данных клиентов и GDPR compliance" },
 ];
 
