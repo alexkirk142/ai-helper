@@ -291,16 +291,11 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          Автоматические решения
-        </CardTitle>
-        <CardDescription>
-          Настройте, как AI принимает решения по каждому типу запроса
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
+    <CollapsibleCard
+      title="Автоматические решения"
+      description="Настройте, как AI принимает решения по каждому типу запроса"
+    >
+      <div className="space-y-6">
         {isDirty && (
           <div className="flex items-center gap-2 rounded-md bg-yellow-500/10 border border-yellow-500/20 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-400 mb-4">
             <AlertCircle className="h-3 w-3 flex-shrink-0" />
@@ -493,8 +488,8 @@ function DecisionEngineSettings({ autoPartsEnabled = false }: DecisionEngineSett
             Сохранить настройки автоматических решений
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </CollapsibleCard>
   );
 }
 
@@ -585,16 +580,11 @@ function HumanDelaySettings() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          Задержка перед ответом
-        </CardTitle>
-        <CardDescription>
-          AI будет отвечать с небольшой задержкой, как живой оператор
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
+    <CollapsibleCard
+      title="Задержка перед ответом"
+      description="AI будет отвечать с небольшой задержкой, как живой оператор"
+    >
+      <div className="space-y-6">
         {isDirty && (
           <div className="flex items-center gap-2 rounded-md bg-yellow-500/10 border border-yellow-500/20 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-400 mb-4">
             <AlertCircle className="h-3 w-3 flex-shrink-0" />
@@ -726,8 +716,8 @@ function HumanDelaySettings() {
             Сохранить настройки задержки
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </CollapsibleCard>
   );
 }
 
@@ -822,17 +812,17 @@ function TrainingPoliciesSettings({ autoPartsEnabled: _autoPartsEnabled = false 
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          Правила обучения AI
-          <Badge variant="outline" className="font-normal">Обучение</Badge>
-        </CardTitle>
-        <CardDescription>
-          Поведение AI по типам запросов и правила обучения теперь настраиваются в разделе «Настройки AI» → таблица интентов
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
+    <CollapsibleCard
+      title={
+        <div className="flex items-center gap-2">
+          <span>Правила обучения AI</span>
+          <Badge variant="outline" className="font-normal text-[10px] bg-primary/5 text-primary border-primary/10">Обучение</Badge>
+        </div>
+      }
+      description="Поведение AI по типам запросов и правила обучения теперь настраиваются в разделе «Настройки AI» → таблица интентов"
+      defaultOpen={true}
+    >
+      <div className="space-y-6">
         <div className="flex items-center justify-between rounded-lg border p-4">
           <div className="space-y-0.5">
             <Label className="text-base">AI запоминает ответы операторов</Label>
@@ -905,8 +895,8 @@ function TrainingPoliciesSettings({ autoPartsEnabled: _autoPartsEnabled = false 
             Сохранить политики
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </CollapsibleCard>
   );
 }
 
@@ -4047,14 +4037,11 @@ function CompanyAgentCard({ autoPartsEnabled = false }: CompanyAgentCardProps) {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>О компании</CardTitle>
-          <CardDescription>
-            Эти данные AI агент использует при общении с клиентами
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+      <CollapsibleCard
+        title="О компании"
+        description="Эти данные AI агент использует при общении с клиентами"
+        defaultOpen={true}
+      >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="company-name">Название компании</Label>
@@ -4138,18 +4125,13 @@ function CompanyAgentCard({ autoPartsEnabled = false }: CompanyAgentCardProps) {
               />
             </div>
           </div>
-        </CardContent>
-      </Card>
+      </CollapsibleCard>
 
       {autoPartsEnabled && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Диапазоны пробега</CardTitle>
-            <CardDescription>
-              Определяет как разбивать варианты на категории по пробегу при двухшаговом диалоге цен
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+        <CollapsibleCard
+          title="Диапазоны пробега"
+          description="Определяет как разбивать варианты на категории по пробегу при двухшаговом диалоге цен"
+        >
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="mileage-low">Низкий пробег (до, км)</Label>
@@ -4188,8 +4170,7 @@ function CompanyAgentCard({ autoPartsEnabled = false }: CompanyAgentCardProps) {
                 <p className="text-xs text-muted-foreground">Бюджетные варианты — дешевле</p>
               </div>
             </div>
-          </CardContent>
-        </Card>
+        </CollapsibleCard>
       )}
 
       <div className="flex justify-end">
@@ -4290,15 +4271,12 @@ function AIAgentSettingsCard() {
   return (
     <>
       <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Инструкция для агента</CardTitle>
-            <CardDescription>
-              Напишите своими словами как должен вести себя ваш агент: что говорить, какой тон держать, какие темы избегать.
-              Если оставить пустым — агент будет работать в стандартном режиме.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <CollapsibleCard
+          title="Инструкция для агента"
+          description="Напишите своими словами как должен вести себя ваш агент: что говорить, какой тон держать, какие темы избегать. Если оставить пустым — агент будет работать в стандартном режиме."
+          defaultOpen={true}
+        >
+          <div className="space-y-3">
             <Textarea
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
@@ -4341,17 +4319,14 @@ function AIAgentSettingsCard() {
                 Сохранить
               </Button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </CollapsibleCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Скрипты ответов</CardTitle>
-            <CardDescription>
-              Готовые ответы на типовые возражения клиентов
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+        <CollapsibleCard
+          title="Скрипты ответов"
+          description="Готовые ответы на типовые возражения клиентов"
+        >
+          <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="ai-objection-payment">
                 Ответ на «оплата при получении»
@@ -4389,17 +4364,14 @@ function AIAgentSettingsCard() {
                 data-testid="textarea-closing-script"
               />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </CollapsibleCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Дополнительные факты</CardTitle>
-            <CardDescription>
-              Любая дополнительная информация о компании для агента
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <CollapsibleCard
+          title="Дополнительные факты"
+          description="Любая дополнительная информация о компании для агента"
+        >
+          <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
               Любые факты о компании, которые агент будет использовать в ответах.
               Каждый факт с новой строки.
@@ -4416,8 +4388,8 @@ function AIAgentSettingsCard() {
               className="min-h-[120px]"
               data-testid="textarea-company-facts"
             />
-          </CardContent>
-        </Card>
+          </div>
+        </CollapsibleCard>
 
         <div className="flex justify-end">
           <Button
@@ -4524,6 +4496,57 @@ function WebhookUrlCard({
           <p className="text-xs text-muted-foreground font-medium leading-relaxed mt-1">{hint}</p>
         )}
       </CardContent>
+    </Card>
+  );
+}
+
+function CollapsibleCard({
+  title,
+  description,
+  children,
+  defaultOpen = false,
+  className,
+}: {
+  title: React.ReactNode;
+  description?: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  className?: string;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  return (
+    <Card className={cn("overflow-hidden transition-all duration-300", className)}>
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between p-6 text-left hover:bg-muted/10 transition-colors focus-visible:outline-none"
+          >
+            <div className="space-y-1 pr-4">
+              <CardTitle className="text-base font-bold text-foreground">{title}</CardTitle>
+              {description && (
+                <CardDescription className="text-xs text-muted-foreground font-medium leading-relaxed">
+                  {description}
+                </CardDescription>
+              )}
+            </div>
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/40 bg-background text-muted-foreground transition-all duration-200 hover:text-foreground">
+              <ChevronDown
+                className={cn(
+                  "h-4 w-4 transition-transform duration-300",
+                  isOpen && "rotate-180 text-primary"
+                )}
+              />
+            </div>
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="transition-all duration-300">
+          <div className="border-t border-border/40 p-6">
+            {children}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </Card>
   );
 }
@@ -4640,15 +4663,12 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
       </p>
 
       {/* ── Шаблон авторассылки ───────────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Шаблон авторассылки</CardTitle>
-          <CardDescription>
-            Текст, который будет отправлен клиенту сразу после получения заявки.
-            Оставьте пустым — система сформирует сообщение автоматически из полей заявки.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
+      <CollapsibleCard
+        title="Шаблон авторассылки"
+        description="Текст, который будет отправлен клиенту сразу после получения заявки. Оставьте пустым — система сформирует сообщение автоматически из полей заявки."
+        defaultOpen={true}
+      >
+        <div className="space-y-3">
           <Textarea
             placeholder={"Здравствуйте, {{name}}! Получили вашу заявку «{{quiz}}». Свяжемся с вами в ближайшее время 👍"}
             value={autoResponseText}
@@ -4721,50 +4741,40 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
               Сохранить
             </Button>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </CollapsibleCard>
 
       {/* ── Повторные заявки ─────────────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Повторные заявки</CardTitle>
-          <CardDescription>
-            Если номер телефона уже есть в базе клиентов, авторассылку можно не отправлять —
-            менеджер свяжется вручную.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
-            <div className="space-y-0.5">
-              <p className="text-sm font-medium">
-                Не отправлять авторассылку существующим клиентам
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Если номер уже зарегистрирован в базе тенанта, заявка будет принята, но авторассылка не уйдёт.
-              </p>
-            </div>
-            <Switch
-              checked={skipExisting}
-              onCheckedChange={(val) => {
-                setSkipExisting(val);
-                saveSkipExistingMutation.mutate(val);
-              }}
-              disabled={saveSkipExistingMutation.isPending}
-            />
+      <CollapsibleCard
+        title="Повторные заявки"
+        description="Если номер телефона уже есть в базе клиентов, авторассылку можно не отправлять — менеджер свяжется вручную."
+      >
+        <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">
+              Не отправлять авторассылку существующим клиентам
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Если номер уже зарегистрирован в базе тенанта, заявка будет принята, но авторассылка не уйдёт.
+            </p>
           </div>
-        </CardContent>
-      </Card>
+          <Switch
+            checked={skipExisting}
+            onCheckedChange={(val) => {
+              setSkipExisting(val);
+              saveSkipExistingMutation.mutate(val);
+            }}
+            disabled={saveSkipExistingMutation.isPending}
+          />
+        </div>
+      </CollapsibleCard>
 
       {/* ── Приоритет каналов ────────────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Приоритет каналов для авторассылки</CardTitle>
-          <CardDescription>
-            При получении заявки система отправит сообщение через каналы в указанном порядке.
-            Первый успешный канал используется — остальные не задействуются.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
+      <CollapsibleCard
+        title="Приоритет каналов для авторассылки"
+        description="При получении заявки система отправит сообщение через каналы в указанном порядке. Первый успешный канал используется — остальные не задействуются."
+      >
+        <div className="space-y-3">
           <div className="space-y-2">
             {channelOrder.map((ch, idx) => {
               const opt = LEAD_CHANNEL_OPTIONS.find(o => o.value === ch);
@@ -4796,40 +4806,34 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
               Сохранить
             </Button>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </CollapsibleCard>
 
       {/* ── Фоллбэк на WhatsApp при неактивности в Telegram ─────────── */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Фоллбэк на WhatsApp при неактивности в Telegram</CardTitle>
-          <CardDescription>
-            Перед отправкой в Telegram система проверит, когда клиент последний раз был онлайн.
-            Если прошло более 24 часов — сообщение будет отправлено через WhatsApp Personal вместо Telegram.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
-            <div className="space-y-0.5">
-              <p className="text-sm font-medium">
-                Проверять last seen в Telegram перед авторассылкой
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Если клиент не заходил в Telegram более 24 часов, авторассылка уйдёт через WhatsApp Personal.
-                Требует подключённого WhatsApp Personal аккаунта.
-              </p>
-            </div>
-            <Switch
-              checked={lastSeenFallback}
-              onCheckedChange={(val) => {
-                setLastSeenFallback(val);
-                saveLastSeenFallbackMutation.mutate(val);
-              }}
-              disabled={saveLastSeenFallbackMutation.isPending}
-            />
+      <CollapsibleCard
+        title="Фоллбэк на WhatsApp при неактивности в Telegram"
+        description="Перед отправкой в Telegram система проверит, когда клиент последний раз был онлайн. Если прошло более 24 часов — сообщение будет отправлено через WhatsApp Personal вместо Telegram."
+      >
+        <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">
+              Проверять last seen в Telegram перед авторассылкой
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Если клиент не заходил в Telegram более 24 часов, авторассылка уйдёт через WhatsApp Personal.
+              Требует подключённого WhatsApp Personal аккаунта.
+            </p>
           </div>
-        </CardContent>
-      </Card>
+          <Switch
+            checked={lastSeenFallback}
+            onCheckedChange={(val) => {
+              setLastSeenFallback(val);
+              saveLastSeenFallbackMutation.mutate(val);
+            }}
+            disabled={saveLastSeenFallbackMutation.isPending}
+          />
+        </div>
+      </CollapsibleCard>
 
       <Separator />
 
@@ -4845,9 +4849,12 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
           url={universalWebhookUrl}
           hint='Обязательные поля: phone (телефон) или telegram (юзернейм). Поле name — имя клиента. Все остальные поля автоматически попадут в карточку заявки.'
         />
-        <Card className="bg-muted/40">
-          <CardContent className="pt-4 space-y-3">
-            <p className="text-sm font-medium">Как подключить к любому сайту</p>
+        <CollapsibleCard
+          title="Инструкция: Как подключить к любому сайту"
+          description="Пошаговое руководство по интеграции универсального вебхука с вашим сайтом (Tilda, WordPress, GetCourse и др.)"
+          className="bg-muted/10 border-dashed"
+        >
+          <div className="space-y-3">
             <ol className="text-sm text-muted-foreground space-y-1.5 list-decimal list-inside">
               <li>Скопируйте URL выше.</li>
               <li>В форме на сайте укажите метод <code className="bg-muted px-1 rounded text-xs">POST</code> и этот URL в качестве action / webhook.</li>
@@ -4857,13 +4864,13 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
             <div className="rounded-md bg-muted border p-3 text-xs font-mono leading-relaxed select-all">
               {`POST ${universalWebhookUrl}\nContent-Type: application/json\n\n{\n  "phone": "79991234567",\n  "name": "Иван",\n  "Что интересует": "Консультация"\n}`}
             </div>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground leading-relaxed">
               <strong>Tilda:</strong> Форма → Действие после отправки → Webhook → вставьте URL.<br />
               <strong>GetCourse:</strong> Процессы → Шаг «HTTP-запрос» → POST → вставьте URL.<br />
               <strong>WordPress (CF7 / Elementor):</strong> используйте плагин <em>CF7 Webhooks</em> или встроенный webhook в Elementor Forms.
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </CollapsibleCard>
       </div>
 
       <Separator />
@@ -4880,21 +4887,24 @@ function LeadIntakeTab({ tenantId }: { tenantId: string }) {
           url={marquizWebhookUrl}
           hint="Marquiz отправит данные заявки на этот URL сразу после прохождения квиза. Система автоматически определит канал (Telegram / MAX) и отправит клиенту сообщение."
         />
-        <Card className="bg-muted/40">
-          <CardContent className="pt-4 space-y-3">
-            <p className="text-sm font-medium">Как подключить Marquiz</p>
+        <CollapsibleCard
+          title="Инструкция: Как подключить Marquiz"
+          description="Пошаговое руководство по интеграции Marquiz-квиза с вашей CRM-системой"
+          className="bg-muted/10 border-dashed"
+        >
+          <div className="space-y-3">
             <ol className="text-sm text-muted-foreground space-y-1.5 list-decimal list-inside">
               <li>Откройте ваш квиз в Marquiz и перейдите в <strong>Настройки квиза</strong>.</li>
               <li>Раздел <strong>Интеграции → Webhook</strong> → вставьте URL выше.</li>
               <li>Убедитесь, что в квизе есть вопрос с телефоном или Telegram-ником клиента.</li>
               <li>Сохраните и протестируйте: пройдите квиз — заявка должна появиться в системе.</li>
             </ol>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground leading-relaxed">
               Система автоматически определит тип заявки (шины / двигатель / КПП / другое) и сформирует
               персонализированное первое сообщение клиенту.
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </CollapsibleCard>
       </div>
 
       <Separator />
@@ -5329,14 +5339,11 @@ export default function Settings() {
               {!hasAiAccess ? <AiSubscriptionRequired /> : <div className="space-y-6">
                 <CompanyAgentCard autoPartsEnabled={autoPartsEnabled} />
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Стиль общения</CardTitle>
-                    <CardDescription>
-                      Как AI должен общаться с клиентами
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
+                <CollapsibleCard
+                  title="Стиль общения"
+                  description="Как AI должен общаться с клиентами"
+                >
+                  <div className="space-y-4">
                     <FormField
                       control={form.control}
                       name="language"
@@ -5423,20 +5430,17 @@ export default function Settings() {
                         Сохранить стиль
                       </Button>
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </CollapsibleCard>
 
                 <AIAgentSettingsCard />
 
                 {/* Скидки */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Скидки</CardTitle>
-                    <CardDescription>
-                      Разрешить AI предлагать скидки клиентам
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
+                <CollapsibleCard
+                  title="Скидки"
+                  description="Разрешить AI предлагать скидки клиентам"
+                >
+                  <div className="space-y-4">
                     <FormField
                       control={form.control}
                       name="allowDiscounts"
@@ -5492,8 +5496,8 @@ export default function Settings() {
                         Сохранить
                       </Button>
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </CollapsibleCard>
 
                 <DecisionEngineSettings autoPartsEnabled={autoPartsEnabled} />
                 <HumanDelaySettings />
@@ -5505,15 +5509,11 @@ export default function Settings() {
               <div className="space-y-6">
 
                 {/* Escalation bot chat ID */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Бот эскалаций — выжимка диалога</CardTitle>
-                    <CardDescription>
-                      ID чата в Telegram, куда бот будет отправлять выжимку диалога по нажатию кнопки оператором.
-                      Добавьте бота эскалаций в нужный чат и вставьте сюда его chat_id.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
+                <CollapsibleCard
+                  title="Бот эскалаций — выжимка диалога"
+                  description="ID чата в Telegram, куда бот будет отправлять выжимку диалога по нажатию кнопки оператором. Добавьте бота эскалаций в нужный чат и вставьте сюда его chat_id."
+                >
+                  <div className="space-y-4">
                     <FormField
                       control={form.control}
                       name="escalationChatId"
@@ -5545,8 +5545,8 @@ export default function Settings() {
                         Сохранить
                       </Button>
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </CollapsibleCard>
               </div>
             </TabsContent>
 
