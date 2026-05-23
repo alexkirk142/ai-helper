@@ -43,6 +43,7 @@ import {
   type PaymentMethod, type InsertPaymentMethod,
   type TenantAgentSettings, type InsertTenantAgentSettings,
   type TransmissionIdentityCache, type InsertTransmissionIdentityCache,
+  type Lead, type InsertLead,
 } from "@shared/schema";
 
 /** Aggregated AI learning / RAG stats for a tenant (GET /api/ai/training-stats). */
@@ -127,6 +128,14 @@ export interface IStorage {
   upsertCustomerMemory(data: InsertCustomerMemory): Promise<CustomerMemory>;
   incrementFrequentTopic(tenantId: string, customerId: string, intent: string): Promise<CustomerMemory>;
   updateCustomerPreferences(tenantId: string, customerId: string, preferences: Record<string, unknown>): Promise<CustomerMemory>;
+
+  // CRM Leads
+  getLeads(tenantId: string, filters?: { status?: string; source?: string; search?: string; limit?: number; offset?: number }): Promise<{ leads: Lead[]; total: number }>;
+  getLead(id: string, tenantId: string): Promise<Lead | null>;
+  createLead(data: InsertLead, tenantId: string): Promise<Lead>;
+  updateLead(id: string, tenantId: string, data: Partial<InsertLead>): Promise<Lead | null>;
+  deleteLead(id: string, tenantId: string): Promise<void>;
+  getCrmStats(tenantId: string): Promise<Record<string, number>>;
 
   // Conversations
   getConversation(id: string, tenantId: string): Promise<Conversation | undefined>;

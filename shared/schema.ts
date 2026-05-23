@@ -630,6 +630,36 @@ export const lostDeals = pgTable("lost_deals", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+// ============ CRM Leads ============
+export const LEAD_STATUSES = ["new", "contacted", "in_progress", "converted", "failed", "closed"] as const;
+export type LeadStatus = typeof LEAD_STATUSES[number];
+
+export const LEAD_SOURCES = ["marquiz", "universal", "manual"] as const;
+export type LeadSource = typeof LEAD_SOURCES[number];
+
+export const leads = pgTable("leads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  status: text("status").notNull().default("new"), // new, contacted, in_progress, converted, failed, closed
+  source: text("source").notNull().default("marquiz"), // marquiz, universal, manual
+  name: text("name"),
+  phone: text("phone"),
+  email: text("email"),
+  telegramUsername: text("telegram_username"),
+  preferredChannel: text("preferred_channel"), // auto, telegram, max, whatsapp
+  quizName: text("quiz_name"),
+  failureReason: text("failure_reason"),
+  conversationId: varchar("conversation_id").references(() => conversations.id),
+  metadata: jsonb("metadata").default({}),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+  index("idx_leads_tenant_id").on(table.tenantId),
+  index("idx_leads_tenant_status").on(table.tenantId, table.status),
+  index("idx_leads_tenant_created_at").on(table.tenantId, table.createdAt),
+]);
+
 // ============ PHASE 0: Feature Flags ============
 export const featureFlags = pgTable("feature_flags", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -747,6 +777,8 @@ export type AiTrainingPolicy = typeof aiTrainingPolicies.$inferSelect;
 export type InsertAiTrainingPolicy = z.infer<typeof insertAiTrainingPolicySchema>;
 export type LearningQueueItem = typeof learningQueue.$inferSelect;
 export type InsertLearningQueueItem = z.infer<typeof insertLearningQueueSchema>;
+export type Lead = typeof leads.$inferSelect;
+export type InsertLead = typeof leads.$inferInsert;
 export type EscalationEvent = typeof escalationEvents.$inferSelect;
 export type InsertEscalationEvent = z.infer<typeof insertEscalationEventSchema>;
 export type ResponseTemplate = typeof responseTemplates.$inferSelect;

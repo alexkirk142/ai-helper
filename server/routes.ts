@@ -27,6 +27,7 @@ import featureFlagsRouter from "./routes/feature-flags.routes";
 import { responseTemplatesRouter } from "./routes/response-templates.routes";
 
 // Channel management & webhook route modules
+import crmRouter from "./routes/crm.routes";
 import channelManagementRouter from "./routes/channel-management.routes";
 import telegramBotRouter from "./routes/channels/telegram-bot.routes";
 import telegramPersonalRouter from "./routes/channels/telegram-personal.routes";
@@ -85,6 +86,7 @@ export async function registerRoutes(
   app.use(settingsRouter);
   app.use(featureFlagsRouter);
   app.use(responseTemplatesRouter);
+  app.use(crmRouter);
 
   // ============ CHANNEL MANAGEMENT ROUTES ============
   app.use(channelManagementRouter);

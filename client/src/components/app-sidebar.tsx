@@ -10,12 +10,11 @@ import {
   Settings,
   AlertTriangle,
   BarChart3,
-  XCircle,
+  Users,
   Puzzle,
   Activity,
   KeyRound,
   CreditCard,
-  Users,
   Server,
   RefreshCw,
   Send,
@@ -99,11 +98,11 @@ export function AppSidebar() {
     enabled: !isPlatformStaff,
   });
 
-  const { data: failedLeads } = useQuery<{ id: string }[]>({
-    queryKey: ["/api/failed-leads"],
+  const { data: crmStats } = useQuery<{ new: number; failed: number; total: number }>({
+    queryKey: ["/api/crm/stats"],
     queryFn: async () => {
-      const res = await fetch("/api/failed-leads", { credentials: "include" });
-      if (!res.ok) return [];
+      const res = await fetch("/api/crm/stats", { credentials: "include" });
+      if (!res.ok) return { new: 0, failed: 0, total: 0 };
       return res.json();
     },
     refetchInterval: 60000,
@@ -112,7 +111,7 @@ export function AppSidebar() {
 
   const unreadCount = channelCounts?.all || 0;
   const pendingEscalationsCount = escalations?.filter(e => e.status === "pending").length || 0;
-  const failedLeadsCount = failedLeads?.length || 0;
+  const newLeadsCount = (crmStats?.new || 0);
 
   const headerHref = isPlatformStaff ? "/owner" : "/";
 
@@ -264,19 +263,19 @@ export function AppSidebar() {
                 <SidebarMenuItem>
                   <SidebarMenuButton 
                     asChild 
-                    isActive={location === "/failed-leads"} 
+                    isActive={location === "/crm"} 
                     data-testid="nav-failed-leads"
                     className={cn(
                       "transition-all duration-200 rounded-xl px-3 py-2.5 text-sidebar-foreground/85 hover:text-sidebar-foreground hover:bg-sidebar-accent/50",
-                      location === "/failed-leads" && "bg-primary text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary hover:text-primary-foreground font-semibold"
+                      location === "/crm" && "bg-primary text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary hover:text-primary-foreground font-semibold"
                     )}
                   >
-                    <Link href="/failed-leads">
-                      <XCircle className="h-4 w-4 mr-2" />
-                      <span>Неудачные заявки</span>
-                      {failedLeadsCount > 0 && (
-                        <Badge className="ml-auto rounded-full bg-destructive/15 text-destructive border border-destructive/25 hover:bg-destructive/15 font-bold px-2.5 py-0.5 text-[10px]">
-                          {failedLeadsCount}
+                    <Link href="/crm">
+                      <Users className="h-4 w-4 mr-2" />
+                      <span>Заявки (CRM)</span>
+                      {newLeadsCount > 0 && (
+                        <Badge className="ml-auto rounded-full bg-blue-500/15 text-blue-600 border border-blue-500/25 hover:bg-blue-500/15 font-bold px-2.5 py-0.5 text-[10px]">
+                          {newLeadsCount}
                         </Badge>
                       )}
                     </Link>

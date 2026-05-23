@@ -164,6 +164,7 @@ app.use((req, res, next) => {
       const isSilentRoute =
         path === "/api/conversations" ||
         path === "/api/failed-leads" ||
+        /^\/api\/crm\//.test(path) ||
         /^\/api\/conversations\/[^/]+$/.test(path) ||
         /^\/api\/conversations\/[^/]+\/messages/.test(path) ||
         /^\/api\/customers\/[^/]+$/.test(path) ||

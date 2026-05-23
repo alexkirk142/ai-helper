@@ -12,7 +12,9 @@ import {
   tenantAgentSettings,
   transmissionIdentityCache,
   whatsappAuthSessions,
+  leads,
 } from "@shared/schema";
+import type { Lead, InsertLead } from "@shared/schema";
 import {
   type Tenant, type InsertTenant,
   type Channel, type InsertChannel,
@@ -663,6 +665,71 @@ export class DatabaseStorage implements IStorage {
       lastMessage: lastMsgMap.get(conv.id),
       channel: channel ?? undefined,
     }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // CRM Leads
+  // ---------------------------------------------------------------------------
+
+  async getLeads(tenantId: string, filters: { status?: string; source?: string; search?: string; limit?: number; offset?: number } = {}): Promise<{ leads: Lead[]; total: number }> {
+    const { status, source, search, limit = 50, offset = 0 } = filters;
+    const conditions = [eq(leads.tenantId, tenantId)];
+    if (status) conditions.push(eq(leads.status, status));
+    if (source) conditions.push(eq(leads.source, source));
+    if (search) {
+      conditions.push(
+        or(
+          ilike(leads.name, `%${search}%`),
+          ilike(leads.phone, `%${search}%`),
+          ilike(leads.telegramUsername, `%${search}%`),
+        )!,
+      );
+    }
+
+    const where = and(...conditions);
+    const [rows, countRows] = await Promise.all([
+      db.select().from(leads).where(where).orderBy(desc(leads.createdAt)).limit(limit).offset(offset),
+      db.select({ count: sql<number>`count(*)::int` }).from(leads).where(where),
+    ]);
+
+    return { leads: rows, total: countRows[0]?.count ?? 0 };
+  }
+
+  async getLead(id: string, tenantId: string): Promise<Lead | null> {
+    const rows = await db.select().from(leads).where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
+    return rows[0] ?? null;
+  }
+
+  async createLead(data: InsertLead, tenantId: string): Promise<Lead> {
+    const rows = await db.insert(leads).values({ ...data, tenantId }).returning();
+    return rows[0];
+  }
+
+  async updateLead(id: string, tenantId: string, data: Partial<InsertLead>): Promise<Lead | null> {
+    const rows = await db
+      .update(leads)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)))
+      .returning();
+    return rows[0] ?? null;
+  }
+
+  async deleteLead(id: string, tenantId: string): Promise<void> {
+    await db.delete(leads).where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
+  }
+
+  async getCrmStats(tenantId: string): Promise<Record<string, number>> {
+    const rows = await db
+      .select({ status: leads.status, count: sql<number>`count(*)::int` })
+      .from(leads)
+      .where(eq(leads.tenantId, tenantId))
+      .groupBy(leads.status);
+    const stats: Record<string, number> = { total: 0, new: 0, contacted: 0, in_progress: 0, converted: 0, failed: 0, closed: 0 };
+    for (const row of rows) {
+      stats[row.status] = row.count;
+      stats.total = (stats.total ?? 0) + row.count;
+    }
+    return stats;
   }
 
   async getActiveConversations(tenantId: string): Promise<ConversationWithCustomer[]> {

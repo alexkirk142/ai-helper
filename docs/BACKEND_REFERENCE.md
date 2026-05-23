@@ -19,7 +19,7 @@
 10. [Пайплайн входящих сообщений](#10-пайплайн-входящих-сообщений)
 11. [Пайплайн лидов (Marquiz / Universal)](#11-пайплайн-лидов-marquiz--universal)
 12. [Слой хранения (Storage)](#12-слой-хранения-storage)
-13. [База данных — схема (49 таблиц)](#13-база-данных--схема-49-таблиц)
+13. [База данных — схема (50 таблиц)](#13-база-данных--схема-50-таблиц)
 14. [RBAC — роли и разрешения](#14-rbac--роли-и-разрешения)
 15. [Безопасность](#15-безопасность)
 16. [Feature Flags](#16-feature-flags)
@@ -56,7 +56,7 @@
 └──────┬───────────┬──────────────┬──────────────┬────────────────┘
        │           │              │              │
   PostgreSQL    Redis          OpenAI       Внешние API
-  (49 таблиц)  (BullMQ +      (GPT-4o-mini  (Telegram MTProto,
+  (50 таблиц)  (BullMQ +      (GPT-4o-mini  (Telegram MTProto,
                rate-limit)     embeddings)   Baileys WA,
                                              GREEN-API MAX,
                                              Yandex Search,
@@ -78,7 +78,7 @@
 | Runtime | Node.js 20 + TypeScript 5.6.3 (ESM, `"type": "module"`) |
 | HTTP | Express 4.21.2 |
 | ORM | Drizzle ORM 0.39.3 + drizzle-kit 0.31.8 |
-| БД | PostgreSQL (49 таблиц) |
+| БД | PostgreSQL (50 таблиц) |
 | Кэш / Очереди | Redis + ioredis 5.9.0 + BullMQ 5.66.4 |
 | AI | OpenAI 6.15.0 — GPT-4o-mini (решения, идентификация) + text-embedding-3-large 3072 dim (RAG) |
 | Telegram | gramjs 2.26.22 (MTProto Personal) + Bot API |
@@ -137,6 +137,7 @@ server/
 │   ├── max-webhook.ts           # /webhooks/max (MAX Bot API)
 │   ├── max-personal-webhook.ts  # /webhooks/max-personal/:tenantId/:accountId (GREEN-API)
 │   ├── marquiz-webhook.ts       # /webhooks/marquiz/:tenantId (Marquiz квизы)
+│   ├── crm.routes.ts            # /api/crm/leads, /api/crm/stats (CRM CRUD)
 │   ├── marquiz-debug.ts         # /api/debug/marquiz (dev-отладка)
 │   ├── lead-webhook.ts          # /webhooks/lead/:tenantId (универсальный лид)
 │   ├── notify-bot-webhook.ts    # /webhooks/notify-bot (Telegram-бот рассылок)
@@ -591,6 +592,16 @@ request
 | `*` | `/webhooks/lead` | Универсальный лид `:tenantId` |
 | POST | `/webhooks/notify-bot` | Telegram-бот рассылок |
 
+### CRM (`routes/crm.routes.ts`) — CRM заявки
+
+| Метод | Путь | Описание |
+|-------|------|---------|
+| GET | `/api/crm/leads` | Список заявок; query: `status`, `source`, `search`, `limit`, `offset` |
+| GET | `/api/crm/stats` | Счётчики по статусам `{ total, new, contacted, in_progress, converted, failed, closed }` |
+| GET | `/api/crm/leads/:id` | Одна заявка |
+| PATCH | `/api/crm/leads/:id` | Обновление (`status`, `notes`, `name`, `phone`, `email`) |
+| DELETE | `/api/crm/leads/:id` | Удаление (только `MANAGE_SETTINGS`) |
+
 ### Admin (`routes/admin.ts`) — 52 соединения, только platrofmAdmin/platformOwner
 
 | Группа | Примеры путей |
@@ -1020,7 +1031,7 @@ const data = await storage.getSomething(user.tenantId);
 
 ---
 
-## 13. База данных — схема (49 таблиц)
+## 13. База данных — схема (50 таблиц)
 
 **Файл:** `shared/schema.ts` (125 connections — второй по связанности файл)
 
@@ -1076,6 +1087,7 @@ const data = await storage.getSomething(user.tenantId);
 | `csat_ratings` | Рейтинги 1-5 на разговор |
 | `conversions` | Трекинг покупок |
 | `lost_deals` | Потерянные сделки с кодами причин |
+| `leads` | **CRM**: все входящие заявки (Marquiz/Universal); статусы: `new`, `contacted`, `in_progress`, `converted`, `failed`, `closed`; поля: `name`, `phone`, `telegram_username`, `preferred_channel`, `quiz_name`, `failure_reason`, `conversation_id`, `metadata`, `notes` |
 | `feature_flags` | DB-персистированные feature flags |
 | `audit_events` | Детальный audit trail |
 | `readiness_reports` | Снимки проверки готовности тенанта |

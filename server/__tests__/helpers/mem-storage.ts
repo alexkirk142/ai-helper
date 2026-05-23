@@ -47,6 +47,7 @@ import {
   type PaymentMethod, type InsertPaymentMethod,
   type TenantAgentSettings, type InsertTenantAgentSettings,
   type TransmissionIdentityCache, type InsertTransmissionIdentityCache,
+  type Lead, type InsertLead,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import type { IStorage } from "../../storage";
@@ -1890,5 +1891,71 @@ export class MemStorage implements IStorage {
     _minSimilarity: number
   ): Promise<Array<{ id: string; ragDocumentId: string; chunkText: string; tenantId: string; similarity: number; chunkIndex: number; metadata: unknown }>> {
     return [];
+  }
+
+  // ─── CRM Leads ────────────────────────────────────────────────────────────
+
+  private crmLeads: Map<string, Lead> = new Map();
+
+  async getLeads(tenantId: string, filters: { status?: string; source?: string; search?: string; limit?: number; offset?: number } = {}): Promise<{ leads: Lead[]; total: number }> {
+    let all = Array.from(this.crmLeads.values()).filter(l => l.tenantId === tenantId);
+    if (filters.status) all = all.filter(l => l.status === filters.status);
+    if (filters.source) all = all.filter(l => l.source === filters.source);
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      all = all.filter(l => l.name?.toLowerCase().includes(q) || l.phone?.includes(q) || l.telegramUsername?.toLowerCase().includes(q));
+    }
+    all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const offset = filters.offset ?? 0;
+    const limit = filters.limit ?? 50;
+    return { leads: all.slice(offset, offset + limit), total: all.length };
+  }
+
+  async getLead(id: string, tenantId: string): Promise<Lead | null> {
+    const l = this.crmLeads.get(id);
+    return l?.tenantId === tenantId ? l : null;
+  }
+
+  async createLead(data: InsertLead, tenantId: string): Promise<Lead> {
+    const lead: Lead = {
+      id: `lead-${Date.now()}`,
+      tenantId,
+      status: data.status ?? "new",
+      source: data.source ?? "marquiz",
+      name: data.name ?? null,
+      phone: data.phone ?? null,
+      email: data.email ?? null,
+      telegramUsername: data.telegramUsername ?? null,
+      preferredChannel: data.preferredChannel ?? null,
+      quizName: data.quizName ?? null,
+      failureReason: data.failureReason ?? null,
+      conversationId: data.conversationId ?? null,
+      metadata: data.metadata ?? {},
+      notes: data.notes ?? null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.crmLeads.set(lead.id, lead);
+    return lead;
+  }
+
+  async updateLead(id: string, tenantId: string, data: Partial<InsertLead>): Promise<Lead | null> {
+    const existing = this.crmLeads.get(id);
+    if (!existing || existing.tenantId !== tenantId) return null;
+    const updated = { ...existing, ...data, updatedAt: new Date() };
+    this.crmLeads.set(id, updated);
+    return updated;
+  }
+
+  async deleteLead(id: string, tenantId: string): Promise<void> {
+    const l = this.crmLeads.get(id);
+    if (l?.tenantId === tenantId) this.crmLeads.delete(id);
+  }
+
+  async getCrmStats(tenantId: string): Promise<Record<string, number>> {
+    const all = Array.from(this.crmLeads.values()).filter(l => l.tenantId === tenantId);
+    const stats: Record<string, number> = { total: all.length, new: 0, contacted: 0, in_progress: 0, converted: 0, failed: 0, closed: 0 };
+    for (const l of all) stats[l.status] = (stats[l.status] ?? 0) + 1;
+    return stats;
   }
 }

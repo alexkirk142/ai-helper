@@ -93,7 +93,8 @@ client/
     │   ├── knowledge-base.tsx   # База знаний: CRUD документов
     │   ├── products.tsx         # Каталог товаров: CRUD
     │   ├── escalations.tsx      # Управление эскалациями
-    │   ├── failed-leads.tsx     # Неудачные заявки Marquiz (не смогли доставить)
+    │   ├── crm.tsx              # CRM — все заявки (Marquiz/Universal), статусы, фильтры, детали
+│   ├── failed-leads.tsx     # Устаревшая страница неудачных заявок (сохранена для compat)
     │   ├── settings.tsx         # Все настройки: 7 вкладок (~5384 строк!)
     │   ├── onboarding.tsx       # 6-шаговый wizard онбординга
     │   ├── analytics.tsx        # CSAT, конверсии, интенты, lost-deals (recharts)
@@ -247,7 +248,8 @@ function AdminGuard({ children }) {
 | `/knowledge-base` | KnowledgeBase | — |
 | `/products` | Products | — |
 | `/escalations` | Escalations | — |
-| `/failed-leads` | FailedLeads | — |
+| `/crm` | CrmPage | — | CRM страница всех заявок
+| `/failed-leads` | FailedLeads | — | (устаревшее, оставлено для compat)
 | `/settings` | Settings | — |
 | `/onboarding` | Onboarding | — |
 | `/analytics` | Analytics | — |
@@ -334,11 +336,20 @@ function AdminGuard({ children }) {
 - Разрешение эскалаций с комментарием
 - Фильтр по статусу
 
+### CrmPage (`pages/crm.tsx`)
+
+- Полноценная CRM для всех входящих заявок из Marquiz и Universal webhook
+- Вкладки по статусу: Все / Новые / Связались / В работе / Конвертированы / Неудачные / Закрытые
+- Поиск по имени, телефону, Telegram username
+- Карточки заявок с цветовой маркировкой по статусу (лево-бордюр)
+- Клик по карточке → диалог с деталями, сменой статуса, заметками оператора
+- Данные из `GET /api/crm/leads` + `GET /api/crm/stats`
+- `refetchInterval: 30000`
+
 ### FailedLeads (`pages/failed-leads.tsx`)
 
+- **Устаревшая страница** — оставлена для обратной совместимости
 - Заявки из Marquiz/Universal webhook, которые не удалось доставить ни в один мессенджер
-- `refetchInterval: 30000`
-- Отображает: имя клиента, телефон, причину неудачи, канал, время
 - Данные из `GET /api/failed-leads` (conversations.status = "failed_delivery")
 
 ### Settings (`pages/settings.tsx`)
@@ -481,7 +492,7 @@ useEffect(() => {
 | База знаний | `/knowledge-base` | BookOpen |
 | Товары | `/products` | Package |
 | Эскалации | `/escalations` | AlertTriangle |
-| Неудачные заявки | `/failed-leads` | AlertOctagon |
+| Заявки (CRM) | `/crm` | Users | Показывает счётчик новых заявок (синий Badge)
 | Аналитика | `/analytics` | BarChart3 |
 | Настройки | `/settings` | Settings2 |
 | Оплата | `/billing` | CreditCard |

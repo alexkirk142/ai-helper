@@ -27,6 +27,7 @@ const KnowledgeBase = lazy(() => import("@/pages/knowledge-base"));
 const Products = lazy(() => import("@/pages/products"));
 const Escalations = lazy(() => import("@/pages/escalations"));
 const FailedLeads = lazy(() => import("@/pages/failed-leads"));
+const CrmPage = lazy(() => import("@/pages/crm"));
 const Settings = lazy(() => import("@/pages/settings"));
 const CustomerProfile = lazy(() => import("@/pages/customer-profile"));
 const Onboarding = lazy(() => import("@/pages/onboarding"));
@@ -92,6 +93,7 @@ function Router() {
         <Route path="/knowledge-base" component={KnowledgeBase} />
         <Route path="/products" component={Products} />
         <Route path="/escalations" component={Escalations} />
+        <Route path="/crm" component={CrmPage} />
         <Route path="/failed-leads" component={FailedLeads} />
         <Route path="/settings" component={Settings} />
         <Route path="/onboarding" component={Onboarding} />

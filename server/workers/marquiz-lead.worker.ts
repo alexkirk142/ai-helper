@@ -287,6 +287,34 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   const hasPhone = data.phone && normalizePhone(data.phone).length >= 10;
   const preferred = data.preferredChannel; // "telegram" | "max" | undefined
 
+  // ── Create CRM lead record for this incoming request ─────────────────────
+  let crmLeadId: string | undefined;
+  try {
+    const crmLead = await storage.createLead(
+      {
+        tenantId,
+        status: "new",
+        source: (data as any).source === "universal" ? "universal" : "marquiz",
+        name: data.clientName || null,
+        phone: phone || null,
+        telegramUsername: data.telegramUsername || null,
+        preferredChannel: data.preferredChannel || null,
+        quizName: data.quizName || null,
+        metadata: commonMeta,
+      },
+      tenantId,
+    );
+    crmLeadId = crmLead.id;
+    console.log(`[MarquizWorker] CRM lead created: ${crmLeadId}`);
+  } catch (e: any) {
+    console.error(`[MarquizWorker] Failed to create CRM lead: ${e.message}`);
+  }
+
+  const markLeadContacted = async (conversationId?: string) => {
+    if (!crmLeadId) return;
+    await storage.updateLead(crmLeadId, tenantId, { status: "contacted", conversationId: conversationId ?? null }).catch(() => {});
+  };
+
   // ── Skip if existing customer (repeat lead protection) ────────────────────
   if ((tenant as any).skipAutoResponseForExisting && hasPhone) {
     const normalizedRaw = normalizePhone(data.phone);
@@ -300,6 +328,9 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
       console.log(
         `[MarquizWorker] Skipping auto-response — phone ${phone} already exists as customer ${existingCustomer.id} (skipAutoResponseForExisting=true)`,
       );
+      if (crmLeadId) {
+        await storage.updateLead(crmLeadId, tenantId, { status: "closed", notes: "Повторная заявка — клиент уже существует" }).catch(() => {});
+      }
       return;
     }
   }
@@ -732,13 +763,13 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
 
     if (data.telegramUsername) {
       const r = await sendViaTelegramByUsername();
-      if (r.success) return;
+      if (r.success) { await markLeadContacted(); return; }
       if (r.error === "TELEGRAM_LAST_SEEN_INACTIVE") telegramInactiveFallback = true;
       console.warn(`[MarquizWorker] Telegram username send failed (${r.error})`);
     }
     if (hasPhone) {
       const r = await sendViaTelegramByPhone();
-      if (r.success) return;
+      if (r.success) { await markLeadContacted(); return; }
       if (r.error === "TELEGRAM_LAST_SEEN_INACTIVE") telegramInactiveFallback = true;
       console.warn(`[MarquizWorker] Telegram phone send failed (${r.error})`);
     }
@@ -746,25 +777,25 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     if (telegramInactiveFallback && hasPhone) {
       console.warn(`[MarquizWorker] Telegram last-seen inactive — trying WhatsApp Personal first`);
       const r = await sendViaWhatsAppPersonal();
-      if (r.success) return;
+      if (r.success) { await markLeadContacted(); return; }
       console.warn(`[MarquizWorker] WhatsApp Personal (last-seen fallback) also failed (${r.error})`);
     }
     // Telegram unavailable — fall back to MAX Personal so the lead is not lost.
     if (hasPhone) {
       console.warn(`[MarquizWorker] Telegram failed — falling back to MAX Personal`);
       const r = await sendViaMAX();
-      if (r.success) return;
+      if (r.success) { await markLeadContacted(); return; }
       console.warn(`[MarquizWorker] MAX Personal fallback also failed (${r.error})`);
     }
     // MAX also failed — last attempt via WhatsApp Personal (if not already tried).
     if (hasPhone && !telegramInactiveFallback) {
       console.warn(`[MarquizWorker] MAX failed — falling back to WhatsApp Personal`);
       const r = await sendViaWhatsAppPersonal();
-      if (r.success) return;
+      if (r.success) { await markLeadContacted(); return; }
       console.warn(`[MarquizWorker] WhatsApp Personal fallback also failed (${r.error})`);
     }
     console.warn(`[MarquizWorker] Client chose Telegram but all channels failed — saving as failed lead`);
-    await saveFailedLead(data, tenantId, phone, commonMeta, "Все каналы недоступны — клиент не зарегистрирован ни в одном мессенджере", tenant);
+    await saveFailedLead(data, tenantId, phone, commonMeta, "Все каналы недоступны — клиент не зарегистрирован ни в одном мессенджере", tenant, crmLeadId);
     return;
   }
 
@@ -772,23 +803,23 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   if (preferred === "max") {
     {
       const r = await sendViaMAX();
-      if (r.success) return;
+      if (r.success) { await markLeadContacted(); return; }
       console.warn(`[MarquizWorker] MAX send failed (${r.error}) — falling back to Telegram`);
     }
     // MAX failed — try Telegram by phone.
     if (hasPhone) {
       const r = await sendViaTelegramByPhone();
-      if (r.success) return;
+      if (r.success) { await markLeadContacted(); return; }
       console.warn(`[MarquizWorker] Telegram phone fallback failed (${r.error}) — falling back to WhatsApp`);
     }
     // Telegram also failed — last attempt via WhatsApp Personal.
     if (hasPhone) {
       const r = await sendViaWhatsAppPersonal();
-      if (r.success) return;
+      if (r.success) { await markLeadContacted(); return; }
       console.warn(`[MarquizWorker] WhatsApp Personal fallback also failed (${r.error})`);
     }
     console.warn(`[MarquizWorker] Client chose MAX but all channels failed — saving as failed lead`);
-    await saveFailedLead(data, tenantId, phone, commonMeta, "Все каналы недоступны — клиент не зарегистрирован ни в одном мессенджере", tenant);
+    await saveFailedLead(data, tenantId, phone, commonMeta, "Все каналы недоступны — клиент не зарегистрирован ни в одном мессенджере", tenant, crmLeadId);
     return;
   }
 
@@ -796,23 +827,23 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   if (preferred === "whatsapp") {
     {
       const r = await sendViaWhatsAppPersonal();
-      if (r.success) return;
+      if (r.success) { await markLeadContacted(); return; }
       console.warn(`[MarquizWorker] WhatsApp send failed (${r.error}) — falling back to MAX`);
     }
     // WhatsApp failed — try MAX Personal.
     if (hasPhone) {
       const r = await sendViaMAX();
-      if (r.success) return;
+      if (r.success) { await markLeadContacted(); return; }
       console.warn(`[MarquizWorker] MAX fallback failed (${r.error}) — falling back to Telegram`);
     }
     // MAX also failed — last attempt via Telegram by phone.
     if (hasPhone) {
       const r = await sendViaTelegramByPhone();
-      if (r.success) return;
+      if (r.success) { await markLeadContacted(); return; }
       console.warn(`[MarquizWorker] Telegram phone fallback also failed (${r.error})`);
     }
     console.warn(`[MarquizWorker] Client chose WhatsApp but all channels failed — saving as failed lead`);
-    await saveFailedLead(data, tenantId, phone, commonMeta, "Все каналы недоступны — клиент не зарегистрирован ни в одном мессенджере", tenant);
+    await saveFailedLead(data, tenantId, phone, commonMeta, "Все каналы недоступны — клиент не зарегистрирован ни в одном мессенджере", tenant, crmLeadId);
     return;
   }
 
@@ -821,7 +852,7 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
   // otherwise fall back to legacy order: MAX → Telegram.
   if (!hasPhone && !data.telegramUsername) {
     console.warn(`[MarquizWorker] No contact info — saving as failed lead`);
-    await saveFailedLead(data, tenantId, phone, commonMeta, "Нет контактных данных — ни телефона, ни Telegram", tenant);
+    await saveFailedLead(data, tenantId, phone, commonMeta, "Нет контактных данных — ни телефона, ни Telegram", tenant, crmLeadId);
     return;
   }
 
@@ -838,20 +869,20 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
     if (ch === "whatsapp_personal") {
       whatsappAlreadyTried = true;
       const r = await sendViaWhatsAppPersonal();
-      if (r.success) return;
+      if (r.success) { await markLeadContacted(); return; }
       console.warn(`[MarquizWorker] WhatsApp Personal failed (${r.error}), trying next channel`);
     } else if (ch === "telegram") {
       let telegramInactive = false;
 
       if (data.telegramUsername) {
         const r = await sendViaTelegramByUsername();
-        if (r.success) return;
+        if (r.success) { await markLeadContacted(); return; }
         if (r.error === "TELEGRAM_LAST_SEEN_INACTIVE") telegramInactive = true;
         console.warn(`[MarquizWorker] Telegram username failed (${r.error}), trying phone`);
       }
       if (hasPhone) {
         const r = await sendViaTelegramByPhone();
-        if (r.success) return;
+        if (r.success) { await markLeadContacted(); return; }
         if (r.error === "TELEGRAM_LAST_SEEN_INACTIVE") telegramInactive = true;
         console.warn(`[MarquizWorker] Telegram phone failed (${r.error}), trying next channel`);
       }
@@ -861,20 +892,20 @@ async function processLead(job: Job<MarquizLeadJobData>, redis: IORedis): Promis
         console.warn(`[MarquizWorker] Telegram last-seen inactive — injecting WhatsApp Personal attempt`);
         whatsappAlreadyTried = true;
         const r = await sendViaWhatsAppPersonal();
-        if (r.success) return;
+        if (r.success) { await markLeadContacted(); return; }
         console.warn(`[MarquizWorker] WhatsApp Personal (last-seen fallback) failed (${r.error}), trying next channel`);
       }
     } else if (ch === "max") {
       if (hasPhone) {
         const r = await sendViaMAX();
-        if (r.success) return;
+        if (r.success) { await markLeadContacted(); return; }
         console.warn(`[MarquizWorker] MAX failed (${r.error}), trying next channel`);
       }
     }
   }
 
   console.warn(`[MarquizWorker] All channels failed — saving as failed lead`);
-  await saveFailedLead(data, tenantId, phone, commonMeta, "Все каналы недоступны — клиент не зарегистрирован ни в одном мессенджере", tenant);
+  await saveFailedLead(data, tenantId, phone, commonMeta, "Все каналы недоступны — клиент не зарегистрирован ни в одном мессенджере", tenant, crmLeadId);
 }
 
 // ---------------------------------------------------------------------------
@@ -893,6 +924,7 @@ async function saveFailedLead(
   commonMeta: Record<string, unknown>,
   failureReason: string,
   tenant?: Tenant,
+  crmLeadId?: string,
 ): Promise<void> {
   try {
     const externalId = `failed:${normalizePhone(data.phone || data.maxPhone || Date.now().toString())}`;
@@ -939,6 +971,15 @@ async function saveFailedLead(
     );
 
     console.log(`[MarquizWorker] Saved failed lead — conversationId=${conversation.id}, reason=${failureReason}`);
+
+    // Update CRM lead to "failed"
+    if (crmLeadId) {
+      await storage.updateLead(crmLeadId, tenantId, {
+        status: "failed",
+        failureReason,
+        conversationId: conversation.id,
+      }).catch(() => {});
+    }
 
     // Notify via escalation bot if configured
     try {
