@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import {
   AlertDialog,
@@ -34,7 +34,7 @@ import {
 import { SiTelegram, SiWhatsapp } from "react-icons/si";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
+import { cn, getCustomerAvatarUrl } from "@/lib/utils";
 import type { Customer } from "@shared/schema";
 import {
   useResponseTemplates,
@@ -185,6 +185,9 @@ export function CustomerCard({ customerId, compact = false, onInsertTemplate }: 
     return (
       <div className="flex items-center gap-3 rounded-lg border p-3" data-testid="customer-card-compact">
         <Avatar className="h-10 w-10">
+          {getCustomerAvatarUrl(customer) && (
+            <AvatarImage src={getCustomerAvatarUrl(customer)!} alt={customer.name || ""} />
+          )}
           <AvatarFallback className="text-xs">
             {customer.name?.slice(0, 2).toUpperCase() || "КЛ"}
           </AvatarFallback>
@@ -215,6 +218,9 @@ export function CustomerCard({ customerId, compact = false, onInsertTemplate }: 
           <div className="flex items-start justify-between gap-2">
             <div className="relative">
               <Avatar className="h-12 w-12">
+                {getCustomerAvatarUrl(customer) && (
+                  <AvatarImage src={getCustomerAvatarUrl(customer)!} alt={customer.name || ""} />
+                )}
                 <AvatarFallback>
                   {customer.name?.slice(0, 2).toUpperCase() || "КЛ"}
                 </AvatarFallback>

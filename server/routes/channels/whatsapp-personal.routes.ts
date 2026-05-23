@@ -388,5 +388,106 @@ router.get(
   }
 );
 
+// ── WhatsApp Personal profile picture proxy ───────────────────────────────────
+//
+// Baileys' profilePictureUrl() returns a short-lived signed CDN URL that requires
+// an active WA session — it cannot be used directly in <img>.
+//
+// Server-side in-memory cache avoids repeated Baileys calls when many
+// conversations are rendered at once (one entry ≈ 20–60 KB per contact).
+// "No photo" results are also cached to avoid redundant Baileys round-trips.
+//
+// Usage: GET /api/whatsapp-personal/avatar?jid=<encoded jid>
+
+interface WaAvatarEntry {
+  /** null = contact has no photo (cached 404) */
+  data: Buffer | null;
+  contentType: string;
+  expiresAt: number;
+}
+
+const WA_AVATAR_TTL_MS    = 60 * 60 * 1000;  // 1 h — refresh in sync with browser Cache-Control
+const WA_NO_PHOTO_TTL_MS  = 10 * 60 * 1000;  // 10 min — retry "no photo" sooner in case they add one
+const waAvatarCache = new Map<string, WaAvatarEntry>();
+
+// Periodic cleanup so stale entries don't linger in memory indefinitely
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of waAvatarCache) {
+    if (entry.expiresAt <= now) waAvatarCache.delete(key);
+  }
+}, 30 * 60 * 1000); // every 30 min
+
+router.get(
+  "/api/whatsapp-personal/avatar",
+  requireAuth,
+  requireTenant,
+  async (req: Request, res: Response) => {
+    const tenantId = req.tenantId!;
+    const jid = req.query.jid as string;
+
+    if (!jid) {
+      return res.status(400).json({ error: "jid is required" });
+    }
+
+    const cacheKey = `${tenantId}:${jid}`;
+    const now = Date.now();
+
+    // ── Cache hit ──────────────────────────────────────────────────────────────
+    const cached = waAvatarCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      if (cached.data === null) {
+        return res.status(404).json({ error: "No profile picture" });
+      }
+      res.setHeader("Content-Type", cached.contentType);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.setHeader("Content-Length", cached.data.length);
+      return res.send(cached.data);
+    }
+
+    // ── Cache miss: fetch from Baileys ─────────────────────────────────────────
+    try {
+      const { WhatsAppPersonalAdapter } = await import("../../services/whatsapp-personal-adapter");
+      const session = WhatsAppPersonalAdapter.getSession(tenantId);
+      if (!session?.socket) {
+        return res.status(503).json({ error: "WhatsApp not connected" });
+      }
+
+      let picUrl: string;
+      try {
+        picUrl = await (session.socket as any).profilePictureUrl(jid, "image");
+      } catch {
+        // Baileys throws when the contact has no photo or privacy blocks access
+        waAvatarCache.set(cacheKey, { data: null, contentType: "", expiresAt: now + WA_NO_PHOTO_TTL_MS });
+        return res.status(404).json({ error: "No profile picture" });
+      }
+
+      if (!picUrl) {
+        waAvatarCache.set(cacheKey, { data: null, contentType: "", expiresAt: now + WA_NO_PHOTO_TTL_MS });
+        return res.status(404).json({ error: "No profile picture" });
+      }
+
+      const response = await fetch(picUrl);
+      if (!response.ok) {
+        waAvatarCache.set(cacheKey, { data: null, contentType: "", expiresAt: now + WA_NO_PHOTO_TTL_MS });
+        return res.status(404).json({ error: "Could not fetch profile picture" });
+      }
+
+      const contentType = response.headers.get("content-type") || "image/jpeg";
+      const buffer = Buffer.from(await response.arrayBuffer());
+
+      waAvatarCache.set(cacheKey, { data: buffer, contentType, expiresAt: now + WA_AVATAR_TTL_MS });
+
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.setHeader("Content-Length", buffer.length);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("[WhatsAppPersonalAvatarProxy] Error:", error.message);
+      res.status(500).json({ error: "Failed to fetch profile picture" });
+    }
+  },
+);
+
 export default router;
 

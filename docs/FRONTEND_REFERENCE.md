@@ -116,8 +116,8 @@ client/
     ├── components/
     │   ├── app-sidebar.tsx      # Навигационная панель с бейджами unread/escalation
     │   ├── chat-interface.tsx   # Чат: сообщения, AI-подсказки, ввод текста
-    │   ├── conversation-list.tsx # Список диалогов с фильтрами
-    │   ├── customer-card.tsx    # Карточка клиента: теги, иконки канала
+    │   ├── conversation-list.tsx # Список диалогов с фильтрами; показывает аватар MAX-пользователя через AvatarImage
+    │   ├── customer-card.tsx    # Карточка клиента: теги, иконки канала; показывает аватар MAX-пользователя через AvatarImage
     │   ├── metrics-card.tsx     # Карточка метрики с трендом (dashboard)
     │   ├── csat-dialog.tsx      # Диалог оценки CSAT 1-5 звёзд
     │   ├── subscription-paywall.tsx  # SubscriptionPaywall, ChannelPaywallOverlay,
@@ -311,6 +311,7 @@ function AdminGuard({ children }) {
 - Заметки оператора (notes)
 - Долгосрочная память (memory)
 - История диалогов
+- Аватар MAX-пользователя (80×80) через `AvatarImage` + `getMaxAvatarUrl()`
 
 ### KnowledgeBase (`pages/knowledge-base.tsx`)
 
@@ -753,6 +754,12 @@ export const useTheme = () => useContext(ThemeProviderContext)
 - База: **neutral**
 - Через `components.json`
 - `cn()` из `lib/utils.ts` — merging `clsx` + `tailwind-merge`
+- `getCustomerAvatarUrl(customer)` из `lib/utils.ts` — возвращает проксированный URL аватара для `max_personal`, `whatsapp_personal`, `telegram_personal` или `null`:
+  - `max_personal` → `/api/channels/max-personal/:accountId/media/photo?url=...` (CDN URL из `customer.metadata.avatarUrl`)
+  - `whatsapp_personal` → `/api/whatsapp-personal/avatar?jid=...` (Baileys `profilePictureUrl`, on-demand, кэш 1 ч)
+  - `telegram_personal` → `/api/telegram-personal/avatar/:accountId/:userId` (gramjs `downloadProfilePhoto`, кэш 24 ч)
+  - `@lid` контакты WA пропускаются (ненадёжно). Применяется в `conversation-list`, `customer-card`, `customer-profile`.
+- `getMaxAvatarUrl` — deprecated-псевдоним для `getCustomerAvatarUrl`.
 
 > **НЕЛЬЗЯ** редактировать файлы в `client/src/components/ui/` вручную. Только через shadcn CLI.
 

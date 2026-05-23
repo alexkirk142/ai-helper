@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { SiTelegram, SiWhatsapp } from "react-icons/si";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { getCustomerAvatarUrl } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 import { ru } from "date-fns/locale";
@@ -270,6 +271,9 @@ export default function CustomerProfile() {
           <Card data-testid="customer-info-card">
             <CardHeader className="text-center">
               <Avatar className="mx-auto h-20 w-20">
+                {getCustomerAvatarUrl(customer) && (
+                  <AvatarImage src={getCustomerAvatarUrl(customer)!} alt={customer.name || ""} />
+                )}
                 <AvatarFallback className="text-2xl">
                   {customer.name?.slice(0, 2).toUpperCase() || "КЛ"}
                 </AvatarFallback>

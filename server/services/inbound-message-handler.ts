@@ -324,6 +324,18 @@ export async function handleIncomingMessage(
       customer = { ...customer, phone: inboundPhone };
       console.log(`[InboundHandler] Updated customer ${customer.id} phone from inbound message: "${inboundPhone}"`);
     }
+    // Persist MAX avatar URL to customer.metadata so the frontend can display it
+    const inboundAvatarUrl = (parsed.metadata?.avatarUrl as string) || "";
+    const inboundMaxAccountId = (parsed.metadata?.maxAccountId as string) || "";
+    if (inboundAvatarUrl && inboundMaxAccountId) {
+      const existingMeta = (customer.metadata as Record<string, unknown>) ?? {};
+      if (existingMeta.avatarUrl !== inboundAvatarUrl || existingMeta.maxAccountId !== inboundMaxAccountId) {
+        await storage.updateCustomer(customer.id, tenant.id, {
+          metadata: { ...existingMeta, avatarUrl: inboundAvatarUrl, maxAccountId: inboundMaxAccountId },
+        });
+        customer = { ...customer, metadata: { ...existingMeta, avatarUrl: inboundAvatarUrl, maxAccountId: inboundMaxAccountId } };
+      }
+    }
   }
 
   const allConversations = await storage.getConversationsByTenant(tenant.id);

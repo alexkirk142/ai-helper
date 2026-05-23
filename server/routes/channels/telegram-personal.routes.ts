@@ -692,6 +692,92 @@ router.post("/api/telegram-personal/start-conversation", requireAuth, requireAct
   }
 });
 
+// ── Telegram Personal profile picture proxy (MTProto) ────────────────────────
+//
+// gramjs downloads profile photos via MTProto — one round-trip per user.
+// Server-side in-memory cache avoids hammering MTProto when the conversation
+// list is rendered with many TG contacts simultaneously.
+// "No photo" results are cached for 1 h to skip redundant MTProto calls.
+//
+// Usage: GET /api/telegram-personal/avatar/:accountId/:userId
+
+interface TgAvatarEntry {
+  /** null = contact has no photo (cached 404) */
+  data: Buffer | null;
+  expiresAt: number;
+}
+
+const TG_AVATAR_TTL_MS    = 24 * 60 * 60 * 1000; // 24 h — TG photos rarely change
+const TG_NO_PHOTO_TTL_MS  =  1 * 60 * 60 * 1000; // 1 h  — retry "no photo" periodically
+const tgAvatarCache = new Map<string, TgAvatarEntry>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of tgAvatarCache) {
+    if (entry.expiresAt <= now) tgAvatarCache.delete(key);
+  }
+}, 60 * 60 * 1000); // cleanup every hour
+
+router.get(
+  "/api/telegram-personal/avatar/:accountId/:userId",
+  requireAuth,
+  requireTenant,
+  async (req: Request, res: Response) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { accountId, userId } = req.params;
+
+      const cacheKey = `${tenantId}:${accountId}:${userId}`;
+      const now = Date.now();
+
+      // ── Cache hit ────────────────────────────────────────────────────────────
+      const cached = tgAvatarCache.get(cacheKey);
+      if (cached && cached.expiresAt > now) {
+        if (cached.data === null) {
+          return res.status(404).json({ error: "No profile picture" });
+        }
+        res.setHeader("Content-Type", "image/jpeg");
+        res.setHeader("Cache-Control", "private, max-age=86400");
+        res.setHeader("Content-Length", cached.data.length);
+        return res.send(cached.data);
+      }
+
+      // ── Cache miss: fetch via MTProto ────────────────────────────────────────
+      const { telegramClientManager } = await import("../../services/telegram-client-manager");
+
+      let client = telegramClientManager.getClientForAccount(tenantId, accountId);
+      if (!client) {
+        const channels = await storage.getChannelsByTenant(tenantId);
+        const tgChannel = channels.find((c) => c.type === "telegram_personal" && c.isActive);
+        if (tgChannel) {
+          client = telegramClientManager.getClient(tenantId, tgChannel.id);
+        }
+      }
+
+      if (!client) {
+        return res.status(503).json({ error: "Telegram account not connected" });
+      }
+
+      // downloadProfilePhoto resolves the user entity internally and fetches the photo
+      const buffer = (await client.downloadProfilePhoto(userId as any)) as Buffer | undefined;
+      if (!buffer || buffer.length === 0) {
+        tgAvatarCache.set(cacheKey, { data: null, expiresAt: now + TG_NO_PHOTO_TTL_MS });
+        return res.status(404).json({ error: "No profile picture" });
+      }
+
+      tgAvatarCache.set(cacheKey, { data: buffer, expiresAt: now + TG_AVATAR_TTL_MS });
+
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      res.setHeader("Content-Length", buffer.length);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("[TelegramPersonalAvatarProxy] Error:", error.message);
+      res.status(500).json({ error: "Failed to download profile picture" });
+    }
+  },
+);
+
 // Telegram Personal media proxy (MTProto)
 router.get(
   "/api/telegram-personal/media/:accountId/:chatId/:msgId",

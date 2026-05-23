@@ -911,7 +911,9 @@ Channel → processIncomingMessageFull(tenantId, parsed: ParsedIncomingMessage)
 |-------|------------|
 | Telegram Personal | `telegram-client-manager.ts` (NewMessage + Raw `UpdateReadHistoryOutbox`) → `processIncomingMessageFull` / `handleIncomingReadReceipt` |
 | WhatsApp Personal | `whatsapp-personal-adapter.ts` (`messages.upsert` + `message-receipt.update`) → `processIncomingMessageFull` / `handleIncomingReadReceipt` |
-| MAX Personal | `routes/max-personal-webhook.ts` (`incomingMessageReceived` / `outgoingMessageStatus`) → `processIncomingMessageFull` / `handleIncomingReadReceipt` |
+| MAX Personal | `routes/max-personal-webhook.ts` (`incomingMessageReceived` / `outgoingMessageStatus`) → `processIncomingMessageFull` / `handleIncomingReadReceipt`. При `incomingMessageReceived` извлекает `senderData.avatar` и передаёт в `parsed.metadata` как `avatarUrl` + `maxAccountId`. `inbound-message-handler` сохраняет их в `customer.metadata`. Аватар проксируется через `GET /api/channels/max-personal/:accountId/media/photo?url=...`. |
+| WhatsApp Personal | Аватар клиента не сохраняется в БД — запрашивается on-demand через `GET /api/whatsapp-personal/avatar?jid=<jid>`. Бэкенд вызывает `socket.profilePictureUrl(jid)` (Baileys), скачивает и проксирует JPEG. Кэш 1 ч. |
+| Telegram Personal | Аватар клиента запрашивается on-demand через `GET /api/telegram-personal/avatar/:accountId/:userId`. Бэкенд вызывает `client.downloadProfilePhoto(userId)` (gramjs MTProto), стримит JPEG. Кэш 24 ч. `accountId` берётся из `customer.metadata.accountId` (сохраняется при обработке входящего). |
 | Telegram Bot | `routes/telegram-webhook.ts` — только парсинг+аудит, **не** вызывает AI |
 | WhatsApp Business | `routes/whatsapp-webhook.ts` — только парсинг+аудит, **не** вызывает AI |
 | MAX Bot | `routes/max-webhook.ts` — только парсинг+аудит, **не** вызывает AI |

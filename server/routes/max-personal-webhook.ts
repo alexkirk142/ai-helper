@@ -66,6 +66,7 @@ interface GreenApiSenderData {
   chatName?: string;
   senderName?: string;
   sender?: string;
+  avatar?: string;
 }
 
 interface GreenApiFileData {
@@ -439,6 +440,8 @@ router.post("/:tenantId/:accountId", async (req, res) => {
         senderName: sender.senderName || sender.chatName,
         chatId: normalizedChatId,
         accountId: account.accountId,
+        // Avatar from MAX webhook — saved to customer.metadata by inbound-message-handler
+        ...(sender.avatar ? { avatarUrl: sender.avatar, maxAccountId: account.accountId } : {}),
       },
       attachments: attachments.length > 0 ? attachments : undefined,
     };

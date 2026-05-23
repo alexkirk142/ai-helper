@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Search, MessageCircle, Trash2, MessageSquarePlus, CheckCheck, Loader2 } from "lucide-react";
 import { SiTelegram, SiWhatsapp } from "react-icons/si";
-import { cn } from "@/lib/utils";
+import { cn, getCustomerAvatarUrl } from "@/lib/utils";
 import type { ConversationWithCustomer } from "@shared/schema";
 import { formatDistanceToNow } from "date-fns";
 import { ru } from "date-fns/locale";
@@ -321,6 +321,12 @@ export function ConversationList({
 
                   <div className="relative">
                     <Avatar className="h-10 w-10 border border-border/30 shadow-sm">
+                      {getCustomerAvatarUrl(conversation.customer) && (
+                        <AvatarImage
+                          src={getCustomerAvatarUrl(conversation.customer)!}
+                          alt={conversation.customer?.name || ""}
+                        />
+                      )}
                       <AvatarFallback className="text-xs font-bold bg-muted text-muted-foreground">
                         {conversation.customer?.name?.slice(0, 2).toUpperCase() || "КЛ"}
                       </AvatarFallback>
